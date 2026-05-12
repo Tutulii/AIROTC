@@ -1,0 +1,66 @@
+{
+  "eventName": "air_otc_trade_reward_participant_v2",
+  "name": "AIR OTC Trade Reward Participant",
+  "fields": [
+    {
+      "fieldName": "tradeRef",
+      "type": "string",
+      "label": "Trade Reference",
+      "description": "SHA-256 hash of the AIR OTC ticket ID"
+    },
+    {
+      "fieldName": "participantRole",
+      "type": "string",
+      "label": "Participant Role",
+      "description": "buyer or seller"
+    },
+    {
+      "fieldName": "rollupMode",
+      "type": "string",
+      "label": "Rollup Mode",
+      "description": "ER or PER"
+    },
+    {
+      "fieldName": "settlementPolicy",
+      "type": "string",
+      "label": "Settlement Policy",
+      "description": "DIRECT or STEALTH"
+    },
+    {
+      "fieldName": "pipelineRoute",
+      "type": "string",
+      "label": "Pipeline Route",
+      "description": "STANDARD_ESCROW or CONFIDENTIAL_ESCROW"
+    },
+    {
+      "fieldName": "tradeNotionalLamports",
+      "type": "number",
+      "label": "Trade Notional Lamports",
+      "description": "Agreed trade price in lamports"
+    },
+    {
+      "fieldName": "platformFeeBps",
+      "type": "number",
+      "label": "Platform Fee Bps",
+      "description": "Platform fee basis points applied for this trade path"
+    },
+    {
+      "fieldName": "platformFeeLamports",
+      "type": "number",
+      "label": "Platform Fee Lamports",
+      "description": "Platform fee amount in lamports"
+    },
+    {
+      "fieldName": "participantRewardLamports",
+      "type": "number",
+      "label": "Participant Reward Lamports",
+      "description": "Exact reward allocated to this participant for the settled trade"
+    },
+    {
+      "fieldName": "schemaVersion",
+      "type": "number",
+      "label": "Schema Version",
+      "description": "AIR OTC Torque event schema version"
+    }
+  ]
+}

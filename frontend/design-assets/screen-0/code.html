@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Mission Control v4 - Deal Explorer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary-fixed-dim": "#28dfb5",
+                        "on-surface": "#e1e2eb",
+                        "secondary-container": "#0566d9",
+                        "background": "#10131a",
+                        "inverse-surface": "#e1e2eb",
+                        "outline-variant": "#3b4a44",
+                        "surface-container-lowest": "#0b0e14",
+                        "outline": "#85948d",
+                        "error-container": "#93000a",
+                        "on-tertiary-fixed": "#241a00",
+                        "tertiary-fixed": "#ffe08f",
+                        "secondary-fixed": "#d8e2ff",
+                        "inverse-on-surface": "#2e3037",
+                        "error": "#ffb4ab",
+                        "surface-container-high": "#272a31",
+                        "on-secondary-fixed-variant": "#004395",
+                        "surface-variant": "#32353c",
+                        "surface-tint": "#28dfb5",
+                        "on-tertiary-fixed-variant": "#584400",
+                        "tertiary": "#ffd24f",
+                        "surface-container-low": "#191c22",
+                        "surface-container": "#1d2026",
+                        "surface-dim": "#10131a",
+                        "surface-bright": "#363940",
+                        "surface": "#10131a",
+                        "primary": "#46f1c5",
+                        "on-primary": "#00382b",
+                        "on-tertiary": "#3d2e00",
+                        "on-secondary": "#002e6a",
+                        "on-primary-fixed": "#002118",
+                        "on-surface-variant": "#bacac2",
+                        "on-secondary-container": "#e6ecff",
+                        "on-primary-fixed-variant": "#00513f",
+                        "on-background": "#e1e2eb",
+                        "on-secondary-fixed": "#001a42",
+                        "inverse-primary": "#006b55",
+                        "secondary": "#adc6ff",
+                        "on-primary-container": "#005643",
+                        "on-tertiary-container": "#5d4800",
+                        "tertiary-container": "#e2b631",
+                        "tertiary-fixed-dim": "#eec13c",
+                        "secondary-fixed-dim": "#adc6ff",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-highest": "#32353c",
+                        "primary-fixed": "#55fcd0",
+                        "on-error": "#690005",
+                        "primary-container": "#00d4aa"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #10131a; color: #e1e2eb; }
+        .font-headline { font-family: 'Space Grotesk', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #131720; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #2A3042; }
+    </style>
+</head>
+<body class="flex min-h-screen overflow-x-hidden">
+<!-- SideNavBar Component -->
+<aside class="h-screen w-64 fixed left-0 border-r border-[#2A3042]/40 bg-[#131720] flex flex-col py-8 z-50">
+<div class="px-6 mb-10">
+<h1 class="text-lg font-semibold text-white font-headline tracking-tight">Tactical Observatory</h1>
+<p class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">v4.0.2 Stable</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center px-6 py-3 text-slate-500 hover:text-slate-200 hover:bg-[#1A1F2E] transition-all group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="dashboard">dashboard</span>
+<span class="text-sm font-medium">Dashboard</span>
+</a>
+<a class="flex items-center px-6 py-3 text-[#46f1c5] font-bold border-r-4 border-[#46f1c5] bg-gradient-to-r from-transparent to-[#46f1c5]/10 group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="query_stats">query_stats</span>
+<span class="text-sm">Explorer</span>
+</a>
+<a class="flex items-center px-6 py-3 text-slate-500 hover:text-slate-200 hover:bg-[#1A1F2E] transition-all group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="smart_toy">smart_toy</span>
+<span class="text-sm font-medium">Agents</span>
+</a>
+<a class="flex items-center px-6 py-3 text-slate-500 hover:text-slate-200 hover:bg-[#1A1F2E] transition-all group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="storefront">storefront</span>
+<span class="text-sm font-medium">Marketplace</span>
+</a>
+<a class="flex items-center px-6 py-3 text-slate-500 hover:text-slate-200 hover:bg-[#1A1F2E] transition-all group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="description">description</span>
+<span class="text-sm font-medium">Docs</span>
+</a>
+</nav>
+<div class="px-6 mt-auto space-y-4">
+<button class="w-full bg-primary-container text-on-primary py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest transition-all active:scale-95">
+                Deploy New Agent
+            </button>
+<div class="space-y-2 py-4 border-t border-[#2A3042]/40">
+<div class="flex items-center justify-between text-[10px] font-mono text-slate-400">
+<div class="flex items-center">
+<span class="material-symbols-outlined text-[14px] mr-1" data-icon="local_gas_station">local_gas_station</span>
+                        Gas: 12 gwei
+                    </div>
+<div class="flex items-center">
+<span class="material-symbols-outlined text-[14px] mr-1 text-primary" data-icon="sensors">sensors</span>
+                        Network: Active
+                    </div>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="flex-1 ml-64 min-h-screen flex flex-col">
+<!-- TopNavBar Component -->
+<header class="fixed top-0 left-64 right-0 z-40 bg-[#131720]/80 backdrop-blur-md px-6 py-3 flex justify-between items-center shadow-[0px_4px_24px_rgba(70,241,197,0.06)]">
+<div class="flex items-center space-x-8">
+<div class="text-xl font-bold tracking-tighter text-[#46f1c5] font-headline">Mission Control v4</div>
+<div class="flex space-x-6">
+<a class="text-slate-400 font-medium hover:text-[#46f1c5] transition-colors duration-200 text-sm" href="#">System Status</a>
+<a class="text-slate-400 font-medium hover:text-[#46f1c5] transition-colors duration-200 text-sm" href="#">Network Alerts</a>
+</div>
+</div>
+<div class="flex items-center space-x-4">
+<button class="p-2 text-slate-400 hover:text-[#46f1c5] transition-all"><span class="material-symbols-outlined" data-icon="notifications_active">notifications_active</span></button>
+<button class="p-2 text-slate-400 hover:text-[#46f1c5] transition-all"><span class="material-symbols-outlined" data-icon="settings_input_component">settings_input_component</span></button>
+<div class="h-8 w-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center overflow-hidden">
+<img alt="User abstract insignia" data-alt="Abstract geometric avatar icon with teal and slate hues on a dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA9DVdnm6c791hlgTxoqNABjuQIAHomj6ev0TOT5h-f2FW0THu_KkyJ-n57muhYBpLnHKkA_uCx1wgj0AuXVrj0fWLlfhI9Z3JsRFWOzst7yH5Q_dIQXeiovkeUhkER4RU4Qnjj1lPfFUgoVI9ulmvlN4_sDz-T5a16nO_m0Y-Dntc787iuEd44pXKzVbePkCNsdw4_mcpymertk0jyMIoy8Vdnn7xastUmi7KZMFXSsWm8YEAicS4ETa6I1jZhBHA9B_Zf4ta8cae-"/>
+</div>
+</div>
+</header>
+<!-- Page Content -->
+<section class="mt-16 p-8 space-y-8 max-w-7xl mx-auto w-full">
+<!-- Hero Header Section -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-outline-variant/30">
+<div class="space-y-2">
+<div class="flex items-center gap-3">
+<h2 class="text-4xl font-bold font-headline tracking-tight text-white">Deal #8842</h2>
+<div class="px-3 py-1 bg-primary/10 border border-primary/20 rounded-full flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="text-[10px] font-bold text-primary uppercase tracking-widest">Completed</span>
+</div>
+</div>
+<div class="flex items-center gap-4 text-slate-400 font-mono text-lg">
+<span class="text-on-surface">10,000.00 USDC</span>
+<span class="material-symbols-outlined text-primary" data-icon="arrow_forward">arrow_forward</span>
+<span class="text-secondary">50.00 SOL</span>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="p-3 bg-surface-container hover:bg-surface-container-high border border-outline-variant/40 rounded-xl transition-all">
+<span class="material-symbols-outlined" data-icon="share">share</span>
+</button>
+<button class="flex items-center gap-2 px-6 py-3 bg-primary text-on-primary font-bold rounded-xl transition-all active:scale-95">
+<span class="material-symbols-outlined" data-icon="download">download</span>
+                        Export Report
+                    </button>
+</div>
+</div>
+<!-- State Machine: Progress HUD -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 py-4">
+<div class="relative flex flex-col gap-3 p-4 bg-surface-container rounded-xl border-l-4 border-primary">
+<div class="flex justify-between items-start">
+<span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Step 01</span>
+<span class="material-symbols-outlined text-primary text-lg" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="font-headline font-semibold text-white">Created</div>
+<div class="text-[10px] text-slate-500">Timestamp: 2023.10.24 14:20:01</div>
+</div>
+<div class="relative flex flex-col gap-3 p-4 bg-surface-container rounded-xl border-l-4 border-primary">
+<div class="flex justify-between items-start">
+<span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Step 02</span>
+<span class="material-symbols-outlined text-primary text-lg" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="font-headline font-semibold text-white">Collateral Locked</div>
+<div class="text-[10px] text-slate-500">Vault: Sol_Escrow_V4</div>
+</div>
+<div class="relative flex flex-col gap-3 p-4 bg-surface-container rounded-xl border-l-4 border-primary">
+<div class="flex justify-between items-start">
+<span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Step 03</span>
+<span class="material-symbols-outlined text-primary text-lg" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="font-headline font-semibold text-white">Payment Locked</div>
+<div class="text-[10px] text-slate-500">Network: Mainnet-Beta</div>
+</div>
+<div class="relative flex flex-col gap-3 p-4 bg-surface-container rounded-xl border-l-4 border-primary">
+<div class="flex justify-between items-start">
+<span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Step 04</span>
+<span class="material-symbols-outlined text-primary text-lg" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="font-headline font-semibold text-white">Released</div>
+<div class="text-[10px] text-slate-500">Finalized: 2023.10.24 14:45:12</div>
+</div>
+</div>
+<!-- Bento Grid: Main Analytics -->
+<div class="grid grid-cols-12 gap-6">
+<!-- Participant Cards -->
+<div class="col-span-12 lg:col-span-4 space-y-4">
+<h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 font-headline">Stakeholders</h3>
+<div class="p-4 bg-surface-container rounded-xl border border-secondary/20 flex items-center gap-4 group hover:bg-surface-container-high transition-colors">
+<div class="w-12 h-12 rounded-lg bg-secondary/10 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-2xl" data-icon="account_balance_wallet">account_balance_wallet</span>
+</div>
+<div class="flex-1">
+<div class="text-[10px] font-bold text-secondary uppercase tracking-tighter">Buyer (Payer)</div>
+<div class="text-sm font-mono text-white">0x71C...4e21</div>
+</div>
+<span class="material-symbols-outlined text-slate-600 group-hover:text-secondary transition-colors" data-icon="north_east">north_east</span>
+</div>
+<div class="p-4 bg-surface-container rounded-xl border border-tertiary/20 flex items-center gap-4 group hover:bg-surface-container-high transition-colors">
+<div class="w-12 h-12 rounded-lg bg-tertiary/10 flex items-center justify-center text-tertiary">
+<span class="material-symbols-outlined text-2xl" data-icon="store">store</span>
+</div>
+<div class="flex-1">
+<div class="text-[10px] font-bold text-tertiary uppercase tracking-tighter">Seller (Recipient)</div>
+<div class="text-sm font-mono text-white">0x92B...a901</div>
+</div>
+<span class="material-symbols-outlined text-slate-600 group-hover:text-tertiary transition-colors" data-icon="north_east">north_east</span>
+</div>
+<div class="p-4 bg-surface-container rounded-xl border border-primary/20 flex items-center gap-4 group hover:bg-surface-container-high transition-colors">
+<div class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-2xl" data-icon="verified_user">verified_user</span>
+</div>
+<div class="flex-1">
+<div class="text-[10px] font-bold text-primary uppercase tracking-tighter">Middleman (Escrow)</div>
+<div class="text-sm font-mono text-white">Protocol_V4_Node</div>
+</div>
+<span class="material-symbols-outlined text-slate-600 group-hover:text-primary transition-colors" data-icon="security">security</span>
+</div>
+</div>
+<!-- Financial Audit -->
+<div class="col-span-12 lg:col-span-8 bg-surface-container rounded-2xl p-6 border border-outline-variant/20">
+<h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 font-headline mb-6">Financial Audit</h3>
+<div class="space-y-0">
+<div class="grid grid-cols-4 py-4 border-b border-outline-variant/30 text-[10px] uppercase font-bold text-slate-500 tracking-widest">
+<div>Asset</div>
+<div>Transaction ID</div>
+<div>Volume</div>
+<div class="text-right">Status</div>
+</div>
+<div class="grid grid-cols-4 py-5 border-b border-outline-variant/10 items-center">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-secondary-container/20 flex items-center justify-center text-secondary text-[10px] font-bold">U</div>
+<span class="font-bold text-white">USDC</span>
+</div>
+<div class="font-mono text-xs text-slate-400">TXN_8842_A</div>
+<div class="font-mono text-white">10,000.00</div>
+<div class="text-right text-primary flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="done_all">done_all</span>
+<span class="text-[10px] font-bold">AUDITED</span>
+</div>
+</div>
+<div class="grid grid-cols-4 py-5 border-b border-outline-variant/10 items-center">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary text-[10px] font-bold">S</div>
+<span class="font-bold text-white">SOL</span>
+</div>
+<div class="font-mono text-xs text-slate-400">TXN_8842_B</div>
+<div class="font-mono text-white">50.00</div>
+<div class="text-right text-primary flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="done_all">done_all</span>
+<span class="text-[10px] font-bold">AUDITED</span>
+</div>
+</div>
+<div class="grid grid-cols-4 py-5 items-center">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 text-[10px] font-bold">F</div>
+<span class="font-bold text-white">FEE</span>
+</div>
+<div class="font-mono text-xs text-slate-400">GAS_RENT</div>
+<div class="font-mono text-white">0.022 SOL</div>
+<div class="text-right text-primary flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="done_all">done_all</span>
+<span class="text-[10px] font-bold">PAID</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Verification Nodes -->
+<div class="col-span-12 lg:col-span-7 bg-surface-container rounded-2xl overflow-hidden border border-outline-variant/20">
+<div class="px-6 py-4 bg-surface-container-high border-b border-outline-variant/30 flex justify-between items-center">
+<h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 font-headline">Verification Nodes</h3>
+<span class="text-[10px] font-mono text-primary bg-primary/10 px-2 py-0.5 rounded">QUORUM: 32/32</span>
+</div>
+<div class="p-0">
+<table class="w-full text-left">
+<thead class="text-[10px] text-slate-500 uppercase tracking-widest bg-surface-container-low">
+<tr>
+<th class="px-6 py-3 font-semibold">Node ID</th>
+<th class="px-6 py-3 font-semibold">Merkle Proof</th>
+<th class="px-6 py-3 font-semibold text-right">Status</th>
+</tr>
+</thead>
+<tbody class="text-sm">
+<tr class="border-b border-outline-variant/10">
+<td class="px-6 py-4 font-mono text-white">Alpha-442</td>
+<td class="px-6 py-4 font-mono text-xs text-slate-500">0x88f...e1c4</td>
+<td class="px-6 py-4 text-right">
+<span class="text-primary font-bold text-[10px]">VERIFIED</span>
+</td>
+</tr>
+<tr class="border-b border-outline-variant/10">
+<td class="px-6 py-4 font-mono text-white">Beta-091</td>
+<td class="px-6 py-4 font-mono text-xs text-slate-500">0x32a...99b2</td>
+<td class="px-6 py-4 text-right">
+<span class="text-primary font-bold text-[10px]">VERIFIED</span>
+</td>
+</tr>
+<tr class="bg-tertiary/5 border-b border-tertiary/20">
+<td class="px-6 py-4 font-mono text-white">Sigma-910</td>
+<td class="px-6 py-4 font-mono text-xs text-slate-500">0x...PENDING</td>
+<td class="px-6 py-4 text-right">
+<span class="text-tertiary font-bold text-[10px] animate-pulse">VALIDATING (18/32)</span>
+</td>
+</tr>
+<tr>
+<td class="px-6 py-4 font-mono text-white">Gamma-112</td>
+<td class="px-6 py-4 font-mono text-xs text-slate-500">0xef2...c001</td>
+<td class="px-6 py-4 text-right">
+<span class="text-primary font-bold text-[10px]">VERIFIED</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Forensic Timeline -->
+<div class="col-span-12 lg:col-span-5 bg-surface-container rounded-2xl p-6 border border-outline-variant/20 relative overflow-hidden">
+<h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 font-headline mb-6">Forensic Timeline</h3>
+<div class="space-y-6 relative">
+<div class="absolute left-[11px] top-2 bottom-2 w-0.5 bg-outline-variant/30"></div>
+<div class="relative flex items-start gap-4">
+<div class="w-6 h-6 rounded-full bg-primary flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-on-primary text-xs" data-icon="check" style="font-weight: 800;">check</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between items-center mb-1">
+<span class="text-xs font-bold text-white">Escrow Finalization</span>
+<span class="text-[10px] font-mono text-slate-500">14:45:12</span>
+</div>
+<div class="text-[10px] text-slate-400 mb-2">Atomic swap completed via program 'EscrowV4_Main'</div>
+<a class="text-[10px] font-mono text-secondary hover:underline flex items-center gap-1" href="#">
+                                    Solscan: 5wXp...k89 <span class="material-symbols-outlined text-[12px]" data-icon="open_in_new">open_in_new</span>
+</a>
+</div>
+</div>
+<div class="relative flex items-start gap-4">
+<div class="w-6 h-6 rounded-full bg-primary flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-on-primary text-xs" data-icon="check" style="font-weight: 800;">check</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between items-center mb-1">
+<span class="text-xs font-bold text-white">Collateral Verification</span>
+<span class="text-[10px] font-mono text-slate-500">14:38:05</span>
+</div>
+<div class="text-[10px] text-slate-400 mb-2">Nodes Alpha and Gamma confirmed asset presence</div>
+<a class="text-[10px] font-mono text-secondary hover:underline flex items-center gap-1" href="#">
+                                    Solscan: 2kZl...j22 <span class="material-symbols-outlined text-[12px]" data-icon="open_in_new">open_in_new</span>
+</a>
+</div>
+</div>
+<div class="relative flex items-start gap-4">
+<div class="w-6 h-6 rounded-full bg-primary flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-on-primary text-xs" data-icon="check" style="font-weight: 800;">check</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between items-center mb-1">
+<span class="text-xs font-bold text-white">Deal Initiation</span>
+<span class="text-[10px] font-mono text-slate-500">14:20:01</span>
+</div>
+<div class="text-[10px] text-slate-400 mb-2">Parameters defined by 0x71C...4e21</div>
+<a class="text-[10px] font-mono text-secondary hover:underline flex items-center gap-1" href="#">
+                                    Solscan: 9pQa...s01 <span class="material-symbols-outlined text-[12px]" data-icon="open_in_new">open_in_new</span>
+</a>
+</div>
+</div>
+</div>
+<!-- Atmospheric Gradient Overlay -->
+<div class="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-surface-container to-transparent pointer-events-none"></div>
+</div>
+</div>
+</section>
+<!-- Fixed Footer Status -->
+<footer class="mt-auto bg-[#131720]/80 backdrop-blur-xl border-t border-[#2A3042]/20 px-8 py-3 flex justify-between items-center z-40">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+<span class="text-[10px] font-mono text-slate-400">Node Sync: 100%</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px] text-slate-500" data-icon="hub">hub</span>
+<span class="text-[10px] font-mono text-slate-400">Cluster: mainnet-alpha-v4</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-[10px] font-mono text-slate-500">Latency: 24ms</span>
+<div class="h-4 w-[1px] bg-outline-variant/30"></div>
+<span class="text-[10px] font-mono text-primary font-bold">STABLE CONNECTION</span>
+</div>
+</footer>
+</main>
+</body></html>

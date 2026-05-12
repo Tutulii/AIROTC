@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: agentotc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentotc_secret}
+      POSTGRES_DB: agentotc
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentotc"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  middleman:
+    build: .
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"   # WebSocket gateway
+      - "8080:8080"   # Health API + metrics + timeline
+    environment:
+      DATABASE_URL: postgresql://agentotc:${POSTGRES_PASSWORD:-agentotc_secret}@postgres:5432/agentotc
+      SOLANA_NETWORK: devnet
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      HEALTH_PORT: "8080"
+      WS_PORT: "3001"
+    volumes:
+      - ./wallets:/app/wallets:ro
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 0  # Unlimited restarts (Level 5: always recover)
+        window: 120s
+
+volumes:
+  pgdata:
+    driver: local

@@ -1,0 +1,48 @@
+{
+  "eventName": "air_otc_trade_settled_participant_v1",
+  "name": "AIR OTC Trade Settled Participant",
+  "fields": [
+    {
+      "fieldName": "tradeRef",
+      "type": "string",
+      "label": "Trade Reference",
+      "description": "SHA-256 hash of the AIR OTC ticket ID"
+    },
+    {
+      "fieldName": "participantRole",
+      "type": "string",
+      "label": "Participant Role",
+      "description": "buyer or seller"
+    },
+    {
+      "fieldName": "rollupMode",
+      "type": "string",
+      "label": "Rollup Mode",
+      "description": "ER or PER"
+    },
+    {
+      "fieldName": "settlementPolicy",
+      "type": "string",
+      "label": "Settlement Policy",
+      "description": "DIRECT or STEALTH"
+    },
+    {
+      "fieldName": "pipelineRoute",
+      "type": "string",
+      "label": "Pipeline Route",
+      "description": "STANDARD_ESCROW or CONFIDENTIAL_ESCROW"
+    },
+    {
+      "fieldName": "rewardUnits",
+      "type": "number",
+      "label": "Reward Units",
+      "description": "Rewardable settled trade count for this participant event"
+    },
+    {
+      "fieldName": "schemaVersion",
+      "type": "number",
+      "label": "Schema Version",
+      "description": "AIR OTC Torque event schema version"
+    }
+  ]
+}

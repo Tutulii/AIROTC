@@ -1,0 +1,81 @@
+# ══════════════════════════════════════════════════
+# AIR OTC — Git Ignore
+# ══════════════════════════════════════════════════
+
+# ── Environment & Secrets ─────────────────────────
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# ── Dependencies ──────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build Outputs ─────────────────────────────────
+dist/
+build/
+.next/
+out/
+target/
+*.tsbuildinfo
+
+# ── IDE & OS ──────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Logs ──────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Anchor / Solana ───────────────────────────────
+test-ledger/
+.anchor/
+escrow/target/
+*.so
+
+# ── Prisma ────────────────────────────────────────
+prisma/*.db
+prisma/*.db-journal
+
+# ── Misc ──────────────────────────────────────────
+coverage/
+.turbo/
+*.tgz
+
+# ElizaOS agents (testing only)
+agents/elizaos-agent/
+
+# Temp and scratch files
+tmp/
+.tmp/
+.stitch_temp/
+.brand-preview/
+codex-session.jsonl
+colosseum_raw_results.json
+acc_proj.json
+winners_proj.json
+archives.json
+*.pdf
+*.log
+buyer.log
+seller.log
+server.log
+test_output.log
+meridian_full_conversation_transcript.txt
+meridian_autonomous_evolution_summary.txt
+skills-lock.json
+openclaw-meridian/
+.agents/
+
+eliza-agents/node_modules
+external-agents/node_modules
+
+sdk/python/venv/

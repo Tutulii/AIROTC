@@ -1,0 +1,17 @@
+{
+  "scripts": {
+    "api:dev": "npm --prefix api-server run dev",
+    "middleman:dev": "npm --prefix middleman-agent run dev",
+    "middleman:demo": "ENABLE_COGNITIVE_LOOP=false ENABLE_SOCIAL_VOICE=false TREASURY_AUTO_FUND_ENABLED=false CIRCUIT_BREAKER_COUNT_SLOW_RESPONSES=false MAGICBLOCK_SESSION_TIMEOUT_MS=900000 AIROTC_DEMO_SKIP_STARTUP_RECOVERY=true ENABLE_TORQUE_EVENTS=true npm --prefix middleman-agent run dev",
+    "demo:ports": "sh -c 'for p in 3000 8080 8081; do echo PORT $p; lsof -nP -iTCP:$p -sTCP:LISTEN || true; done'",
+    "demo:stop": "sh -c 'pkill -f \"agents/elizaos-agent.*proof/fullPipelineProof.ts\" 2>/dev/null || true; pkill -f \"agents/elizaos-agent.*index.ts --role\" 2>/dev/null || true; for p in 3000 8080 8081; do ids=$(lsof -tiTCP:$p -sTCP:LISTEN 2>/dev/null); if [ -n \"$ids\" ]; then kill $ids; fi; done'",
+    "proof:demo:prewarm": "npm --prefix agents/elizaos-agent run proof:demo:prewarm",
+    "proof:demo": "npm --prefix agents/elizaos-agent run proof:demo",
+    "proof:demo:run": "npm run proof:demo:prewarm && npm run proof:demo",
+    "proof:demo:raw": "npm --prefix agents/elizaos-agent run proof:demo:raw",
+    "proof:per": "npm --prefix agents/elizaos-agent run proof:per"
+  },
+  "dependencies": {
+    "snarkjs": "^0.7.6"
+  }
+}

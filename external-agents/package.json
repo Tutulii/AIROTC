@@ -1,0 +1,26 @@
+{
+  "name": "air-otc-external-agents",
+  "version": "1.0.0",
+  "description": "Two autonomous AI agents (AlphaBot buyer + BravoBot seller) for testing the AIR OTC platform end-to-end",
+  "main": "src/run.ts",
+  "scripts": {
+    "start": "npx ts-node src/run.ts",
+    "alpha": "npx ts-node src/agents/alphaBot.ts",
+    "bravo": "npx ts-node src/agents/bravoBot.ts",
+    "test:auth": "npx ts-node src/lib/walletAuth.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.4.0",
+    "openai": "^4.60.0",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}

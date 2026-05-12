@@ -1,0 +1,351 @@
+import { logger } from '../lib/logger';
+import { Request, Response } from 'express';
+import { PublicKey } from '@solana/web3.js';
+import { acceptOfferService, getTicketByIdService, createMessageService, getMessagesByTicketId } from '../services/ticket.service';
+import { middlemanForwarder } from '../services/middlemanForwarder';
+import { prisma } from '../lib/prisma';
+import { webhooks } from '../services/webhookDelivery';
+
+export const acceptOffer = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const wallet = (req as any).wallet; // Accommodate potential req.wallet augmented type safely
+
+        if (!id) {
+            res.status(400).json({ success: false, error: 'Offer ID is required' });
+            return;
+        }
+
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        const settlementWallet =
+            typeof req.body?.settlementWallet === 'string' ? req.body.settlementWallet : null;
+        const rewardWallet =
+            typeof req.body?.rewardWallet === 'string' ? req.body.rewardWallet : null;
+        const fundingWallet =
+            typeof req.body?.fundingWallet === 'string' ? req.body.fundingWallet : null;
+
+        if (settlementWallet) {
+            try {
+                new PublicKey(settlementWallet);
+            } catch {
+                res.status(400).json({ success: false, error: 'settlementWallet must be a valid base58 Solana address' });
+                return;
+            }
+        }
+
+        if (rewardWallet) {
+            try {
+                new PublicKey(rewardWallet);
+            } catch {
+                res.status(400).json({ success: false, error: 'rewardWallet must be a valid base58 Solana address' });
+                return;
+            }
+        }
+
+        if (fundingWallet) {
+            try {
+                new PublicKey(fundingWallet);
+            } catch {
+                res.status(400).json({ success: false, error: 'fundingWallet must be a valid base58 Solana address' });
+                return;
+            }
+        }
+
+        const offer = await prisma.offer.findUnique({ where: { id: id as string } });
+        if (!offer) {
+            res.status(404).json({ success: false, error: 'Offer not found' });
+            return;
+        }
+
+        const previewBuyerRewardWallet =
+            offer.mode === 'buy'
+                ? (offer as any).creatorRewardWallet || null
+                : rewardWallet;
+        const previewSellerRewardWallet =
+            offer.mode === 'buy'
+                ? rewardWallet
+                : (offer as any).creatorRewardWallet || null;
+        const previewBuyerFundingWallet =
+            offer.mode === 'buy'
+                ? (offer as any).creatorFundingWallet || null
+                : fundingWallet;
+        const previewSellerFundingWallet =
+            offer.mode === 'buy'
+                ? fundingWallet
+                : (offer as any).creatorFundingWallet || null;
+        const hasPartialRewardWallets =
+            [previewBuyerRewardWallet, previewSellerRewardWallet].some((value) => !!value) &&
+            [previewBuyerRewardWallet, previewSellerRewardWallet].some((value) => !value);
+        if (hasPartialRewardWallets) {
+            res.status(400).json({
+                success: false,
+                error: 'Fresh per-deal reward wallets must be supplied by both counterparties together or omitted entirely.',
+            });
+            return;
+        }
+        const hasPartialFundingWallets =
+            [previewBuyerFundingWallet, previewSellerFundingWallet].some((value) => !!value) &&
+            [previewBuyerFundingWallet, previewSellerFundingWallet].some((value) => !value);
+        if (hasPartialFundingWallets) {
+            res.status(400).json({
+                success: false,
+                error: 'Fresh per-deal confidential funding wallets must be supplied by both counterparties together or omitted entirely.',
+            });
+            return;
+        }
+
+        const ticket = await acceptOfferService(id as string, wallet, settlementWallet);
+
+        // Forward to Middleman before telling the agent the offer is accepted.
+        // Sends BOTH buyer and seller wallets so they land in ONE ticket.
+        if (offer) {
+            const buyerSettlementWallet =
+                offer.mode === 'buy'
+                    ? (offer as any).creatorSettlementWallet || null
+                    : settlementWallet;
+            const sellerSettlementWallet =
+                offer.mode === 'buy'
+                    ? settlementWallet
+                    : (offer as any).creatorSettlementWallet || null;
+            const buyerRewardWallet =
+                offer.mode === 'buy'
+                    ? (offer as any).creatorRewardWallet || null
+                    : rewardWallet;
+            const sellerRewardWallet =
+                offer.mode === 'buy'
+                    ? rewardWallet
+                    : (offer as any).creatorRewardWallet || null;
+            const buyerFundingWallet =
+                offer.mode === 'buy'
+                    ? (offer as any).creatorFundingWallet || null
+                    : fundingWallet;
+            const sellerFundingWallet =
+                offer.mode === 'buy'
+                    ? fundingWallet
+                    : (offer as any).creatorFundingWallet || null;
+
+            const result = await middlemanForwarder.forwardOfferAccepted({
+                ticketId: ticket.id,
+                buyerWallet: ticket.buyer,
+                sellerWallet: ticket.seller,
+                asset: offer.asset,
+                price: offer.price,
+                amount: offer.amount,
+                collateral: offer.collateral,
+                tokenMint: (offer as any).tokenMint || null,
+                rollupMode: (offer as any).rollupMode || 'ER',
+                buyerSettlementWallet,
+                sellerSettlementWallet,
+                buyerRewardWallet,
+                sellerRewardWallet,
+                buyerFundingWallet,
+                sellerFundingWallet,
+            });
+
+            if (!result.success) {
+                await prisma.$transaction([
+                    prisma.ticket.delete({ where: { id: ticket.id } }),
+                    prisma.offer.update({ where: { id: id as string }, data: { status: 'active' } }),
+                ]);
+                logger.error('[FORWARD] Matched deal was not created on middleman', {
+                    apiTicketId: ticket.id,
+                    reason: result.error || 'unknown',
+                });
+                res.status(502).json({ success: false, error: 'Middleman forward failed' });
+                return;
+            }
+
+            logger.info('[FORWARD] Matched deal created on middleman:', {
+                apiTicketId: ticket.id,
+                middlemanTicketId: result.middlemanTicketId,
+            });
+
+            // Webhook: notify both parties
+            webhooks.dealMatched(ticket.id, ticket.buyer, ticket.seller, offer)
+                .catch((error: any) => {
+                    logger.warn('deal_matched_webhook_failed', { ticketId: ticket.id, error: error?.message });
+                });
+        }
+
+        res.status(200).json({
+            success: true,
+            ticket
+        });
+    } catch (error: any) {
+        if (error.message === 'OFFER_NOT_FOUND') {
+            res.status(404).json({ success: false, error: 'Offer not found' });
+            return;
+        }
+        if (error.message === 'OFFER_NOT_ACTIVE') {
+            res.status(400).json({ success: false, error: 'Offer not active' });
+            return;
+        }
+        if (error.message === 'CANNOT_ACCEPT_OWN_OFFER') {
+            res.status(403).json({ success: false, error: 'Cannot accept own offer' });
+            return;
+        }
+        if (error.message === 'OFFER_ALREADY_MATCHED') {
+            res.status(409).json({ success: false, error: 'Offer already matched' });
+            return;
+        }
+
+        logger.error("accept_offer_failed", { error: error?.message });
+        res.status(500).json({ success: false, error: 'Internal server error while accepting offer' });
+    }
+};
+
+export const getTicket = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const wallet = (req as any).wallet; // Auth middleware sets this
+
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        const ticket = await getTicketByIdService(id as string, wallet);
+
+        res.status(200).json({
+            success: true,
+            ticket
+        });
+    } catch (error: any) {
+        if (error.message === 'INVALID_UUID') {
+            res.status(400).json({ success: false, error: 'Invalid UUID format' });
+            return;
+        }
+        if (error.message === 'TICKET_NOT_FOUND') {
+            res.status(404).json({ success: false, error: 'Ticket not found' });
+            return;
+        }
+        if (error.message === 'UNAUTHORIZED_ACCESS') {
+            res.status(403).json({ success: false, error: 'Forbidden: You are not authorized to view this ticket' });
+            return;
+        }
+
+        logger.error("error");
+        res.status(500).json({ success: false, error: 'Internal server error while fetching ticket' });
+    }
+};
+
+export const sendMessage = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const wallet = (req as any).wallet;
+        const { content } = req.body;
+
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        if (content === undefined || content === null) {
+            res.status(400).json({ success: false, error: 'Message content is required' });
+            return;
+        }
+
+        // 1. Store message in API database
+        const message = await createMessageService(id as string, wallet, content);
+
+        // 2. Forward to Middleman brain — SYNCHRONOUS (await brain response)
+        let brain: any = null;
+        try {
+            const result = await middlemanForwarder.forwardMessage({
+                ticketId: id as string,
+                sender: wallet,
+                content,
+            });
+            if (result.success) {
+                brain = result.brain;
+            } else {
+                logger.warn("warning");
+            }
+        } catch (fwdErr: any) {
+            // Non-fatal — message is already stored in API DB
+            logger.warn("warning");
+        }
+
+        // 3. Return message + brain response to agent
+        res.status(201).json({
+            success: true,
+            message,
+            brain: brain ? {
+                action: brain.action,
+                phase: brain.phase,
+                response: brain.response,
+                reasoning: brain.reasoning,
+            } : null,
+        });
+    } catch (error: any) {
+        if (error.message === 'INVALID_UUID') {
+            res.status(400).json({ success: false, error: 'Invalid UUID format' });
+            return;
+        }
+        if (error.message === 'INVALID_CONTENT') {
+            res.status(400).json({ success: false, error: 'Invalid message content. Must be a non-empty string under 2000 characters.' });
+            return;
+        }
+        if (error.message === 'TICKET_NOT_FOUND') {
+            res.status(404).json({ success: false, error: 'Ticket not found' });
+            return;
+        }
+        if (error.message === 'UNAUTHORIZED_ACCESS') {
+            res.status(403).json({ success: false, error: 'Forbidden: You are not authorized to message in this ticket' });
+            return;
+        }
+        if (error.message === 'TICKET_NOT_ACTIVE') {
+            res.status(400).json({ success: false, error: 'Ticket is not active. Cannot send messages.' });
+            return;
+        }
+        if (error.message === 'PER_PLAINTEXT_TERMS_BLOCKED') {
+            res.status(400).json({
+                success: false,
+                error: 'Plaintext price/collateral terms are blocked in PER chat. Use the private rollup SDK term submission flow instead.'
+            });
+            return;
+        }
+
+        logger.error("error");
+        res.status(500).json({ success: false, error: 'Internal server error while sending message' });
+    }
+};
+
+export const getMessages = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const wallet = (req as any).wallet;
+
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        const messages = await getMessagesByTicketId(id as string, wallet);
+
+        res.status(200).json({
+            success: true,
+            messages
+        });
+    } catch (error: any) {
+        if (error.message === 'INVALID_UUID') {
+            res.status(400).json({ success: false, error: 'Invalid UUID format' });
+            return;
+        }
+        if (error.message === 'TICKET_NOT_FOUND') {
+            res.status(404).json({ success: false, error: 'Ticket not found' });
+            return;
+        }
+        if (error.message === 'UNAUTHORIZED_ACCESS') {
+            res.status(403).json({ success: false, error: 'Forbidden: You are not authorized to read messages spanning this ticket' });
+            return;
+        }
+
+        logger.error("error");
+        res.status(500).json({ success: false, error: 'Internal server error while fetching messages' });
+    }
+};

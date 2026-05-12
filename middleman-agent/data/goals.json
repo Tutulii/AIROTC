@@ -1,0 +1,76 @@
+[
+  {
+    "id": "9ac59c23-50cf-4b76-bf9a-1211f123a064",
+    "description": "Facilitate successful trades",
+    "type": "ongoing",
+    "progress": 0,
+    "status": "active",
+    "metrics": {
+      "trades_completed": 0
+    },
+    "current": 0,
+    "createdAt": "2026-04-24T00:22:33.674Z",
+    "updatedAt": "2026-04-24T00:22:33.674Z",
+    "notes": []
+  },
+  {
+    "id": "7dda82b0-d862-4bea-8bdc-25eed4406e9b",
+    "description": "Maintain dispute rate below 5%",
+    "type": "ongoing",
+    "progress": 0,
+    "status": "active",
+    "metrics": {
+      "disputes": 0,
+      "total_deals": 0
+    },
+    "current": 0,
+    "createdAt": "2026-04-24T00:22:33.675Z",
+    "updatedAt": "2026-04-24T00:22:33.675Z",
+    "notes": []
+  },
+  {
+    "id": "18193177-2f5f-4781-ac72-32370fdaaf3a",
+    "description": "Research 3 new tokens daily",
+    "type": "daily",
+    "progress": 0,
+    "status": "active",
+    "metrics": {
+      "tokens_researched": 0
+    },
+    "target": 3,
+    "current": 0,
+    "createdAt": "2026-04-24T00:22:33.675Z",
+    "updatedAt": "2026-04-24T00:22:33.675Z",
+    "expiresAt": "2026-04-24T17:59:59.999Z",
+    "notes": []
+  },
+  {
+    "id": "fc88af42-b496-4fd3-a0ae-6e5aea6372ac",
+    "description": "Keep treasury above 5 SOL",
+    "type": "ongoing",
+    "progress": 0,
+    "status": "active",
+    "metrics": {
+      "current_balance": 0
+    },
+    "current": 0,
+    "createdAt": "2026-04-24T00:22:33.675Z",
+    "updatedAt": "2026-04-24T00:22:33.675Z",
+    "notes": []
+  },
+  {
+    "id": "2ffd2e8b-5f28-4cfb-8b89-28f190930057",
+    "description": "Build trust with 10 agents",
+    "type": "milestone",
+    "progress": 0,
+    "status": "active",
+    "metrics": {
+      "trusted_agents": 0
+    },
+    "target": 10,
+    "current": 0,
+    "createdAt": "2026-04-24T00:22:33.675Z",
+    "updatedAt": "2026-04-24T00:22:33.675Z",
+    "notes": []
+  }
+]

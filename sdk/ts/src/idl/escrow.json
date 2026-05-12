@@ -1,0 +1,1546 @@
+{
+  "address": "Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx",
+  "metadata": {
+    "name": "escrow",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "cancel_deal",
+      "docs": [
+        "Cancels a deal and refunds any locked funds.",
+        "",
+        "Authorization rules:",
+        "- `Created` status: any participant (buyer, seller, middleman) can cancel.",
+        "- `CollateralLocked` status: only the middleman can cancel (arbiter role).",
+        "- `PaymentLocked` / terminal states: cancellation is not allowed."
+      ],
+      "discriminator": [
+        158,
+        86,
+        193,
+        45,
+        168,
+        111,
+        48,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "docs": [
+            "The deal PDA — refunds are disbursed from here on cancel"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.buyer",
+                "account": "Deal"
+              },
+              {
+                "kind": "account",
+                "path": "deal.deal_id",
+                "account": "Deal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "docs": [
+            "Caller must be buyer, seller, or middleman"
+          ],
+          "signer": true
+        },
+        {
+          "name": "buyer",
+          "writable": true
+        },
+        {
+          "name": "seller",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_deal",
+      "docs": [
+        "Closes a terminal deal account and reclaims rent to the specified receiver.",
+        "Only callable by buyer, seller, or middleman after deal is Completed, Refunded, or Cancelled.",
+        "Note: This is NOT paused — participants must always be able to reclaim rent."
+      ],
+      "discriminator": [
+        157,
+        173,
+        33,
+        216,
+        146,
+        16,
+        65,
+        82
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "docs": [
+            "The deal PDA — closed and rent reclaimed"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.buyer",
+                "account": "Deal"
+              },
+              {
+                "kind": "account",
+                "path": "deal.deal_id",
+                "account": "Deal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Only the buyer, seller, or middleman can close a finished deal"
+          ],
+          "signer": true
+        },
+        {
+          "name": "rent_receiver",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "confirm_deposit",
+      "docs": [
+        "Confirms that a plain SOL deposit has arrived at the deal PDA.",
+        "",
+        "ONLY the middleman can call this. The workflow is:",
+        "1. Middleman creates deal → gives PDA address to buyer/seller",
+        "2. Buyer/seller send plain SOL transfers to the PDA address",
+        "3. Middleman watches PDA balance on-chain",
+        "4. When deposit detected, middleman calls confirm_deposit",
+        "5. Contract verifies PDA balance covers the expected amount",
+        "6. Flags are updated and deal state advances",
+        "",
+        "This eliminates the need for buyer/seller to call Anchor instructions."
+      ],
+      "discriminator": [
+        28,
+        32,
+        62,
+        108,
+        253,
+        148,
+        144,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "docs": [
+            "The deal PDA — balance is verified against expected deposits"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.buyer",
+                "account": "Deal"
+              },
+              {
+                "kind": "account",
+                "path": "deal.deal_id",
+                "account": "Deal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "middleman",
+          "docs": [
+            "Only the middleman agent can confirm deposits"
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Global config — checked for pause status"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "deposit_type",
+          "type": {
+            "defined": {
+              "name": "DepositType"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_deal",
+      "docs": [
+        "Creates a new escrow deal. Only the buyer or the middleman agent may call this."
+      ],
+      "discriminator": [
+        198,
+        212,
+        144,
+        151,
+        97,
+        56,
+        149,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "docs": [
+            "The deal PDA — unique per (buyer, deal_id)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              },
+              {
+                "kind": "arg",
+                "path": "deal_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "initializer",
+          "docs": [
+            "Must be the buyer or the middleman agent"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "buyer"
+        },
+        {
+          "name": "seller"
+        },
+        {
+          "name": "middleman"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Global config — checked for pause status"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "deal_id",
+          "type": "u64"
+        },
+        {
+          "name": "asset_type",
+          "type": "string"
+        },
+        {
+          "name": "asset_description",
+          "type": "string"
+        },
+        {
+          "name": "price",
+          "type": "u64"
+        },
+        {
+          "name": "collateral_buyer",
+          "type": "u64"
+        },
+        {
+          "name": "collateral_seller",
+          "type": "u64"
+        },
+        {
+          "name": "timeout",
+          "type": "i64"
+        },
+        {
+          "name": "trade_mode",
+          "type": {
+            "defined": {
+              "name": "TradeMode"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize_config",
+      "docs": [
+        "Initializes the global config. Can only be called once."
+      ],
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "lock_collateral",
+      "docs": [
+        "Locks collateral for the calling party (buyer or seller).",
+        "Both parties must lock before the deal advances to `CollateralLocked`."
+      ],
+      "discriminator": [
+        161,
+        216,
+        135,
+        122,
+        12,
+        104,
+        211,
+        101
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "docs": [
+            "The deal PDA — must already exist and match seeds"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.buyer",
+                "account": "Deal"
+              },
+              {
+                "kind": "account",
+                "path": "deal.deal_id",
+                "account": "Deal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "docs": [
+            "Signer must be the buyer or the seller"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "lock_payment",
+      "docs": [
+        "Locks the agreed price as payment from the buyer.",
+        "Requires both collaterals to already be locked."
+      ],
+      "discriminator": [
+        170,
+        21,
+        188,
+        226,
+        187,
+        242,
+        186,
+        104
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "docs": [
+            "The deal PDA — collateral must be locked before payment"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.buyer",
+                "account": "Deal"
+              },
+              {
+                "kind": "account",
+                "path": "deal.deal_id",
+                "account": "Deal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer",
+          "docs": [
+            "Only the buyer can lock payment"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund_on_timeout",
+      "docs": [
+        "Refunds all locked funds if the deal has timed out.",
+        "Only a deal participant (buyer, seller, or middleman) can trigger this.",
+        "The deal must NOT be in a terminal state."
+      ],
+      "discriminator": [
+        154,
+        226,
+        218,
+        153,
+        102,
+        185,
+        202,
+        2
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "docs": [
+            "The deal PDA — refunds are disbursed from here"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.buyer",
+                "account": "Deal"
+              },
+              {
+                "kind": "account",
+                "path": "deal.deal_id",
+                "account": "Deal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "docs": [
+            "Caller must be a deal participant (buyer, seller, or middleman)"
+          ],
+          "signer": true
+        },
+        {
+          "name": "buyer",
+          "writable": true
+        },
+        {
+          "name": "seller",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "release_funds",
+      "docs": [
+        "Releases escrowed funds to the seller and refunds collateral to the buyer.",
+        "Only the middleman agent can authorize this. A fee is deducted.",
+        "",
+        "Funds are moved via direct lamport manipulation (not system_program CPI)",
+        "because the PDA is not a signer for outbound transfers. The account is",
+        "closed separately via `close_deal` to reclaim rent."
+      ],
+      "discriminator": [
+        225,
+        88,
+        91,
+        108,
+        126,
+        52,
+        2,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "docs": [
+            "The deal PDA — funds are disbursed from here"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.buyer",
+                "account": "Deal"
+              },
+              {
+                "kind": "account",
+                "path": "deal.deal_id",
+                "account": "Deal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "middleman",
+          "docs": [
+            "Middleman must authorize the release"
+          ],
+          "signer": true
+        },
+        {
+          "name": "buyer",
+          "writable": true
+        },
+        {
+          "name": "seller",
+          "writable": true
+        },
+        {
+          "name": "fee_receiver",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_paused",
+      "docs": [
+        "Toggles the paused state. Only the config authority can call this."
+      ],
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Deal",
+      "discriminator": [
+        125,
+        223,
+        160,
+        234,
+        71,
+        162,
+        182,
+        219
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CollateralLockedEvent",
+      "discriminator": [
+        125,
+        31,
+        7,
+        222,
+        147,
+        239,
+        147,
+        125
+      ]
+    },
+    {
+      "name": "ConfigInitialized",
+      "discriminator": [
+        181,
+        49,
+        200,
+        156,
+        19,
+        167,
+        178,
+        91
+      ]
+    },
+    {
+      "name": "DealCancelled",
+      "discriminator": [
+        229,
+        189,
+        86,
+        176,
+        134,
+        151,
+        43,
+        152
+      ]
+    },
+    {
+      "name": "DealClosed",
+      "discriminator": [
+        38,
+        112,
+        214,
+        184,
+        107,
+        76,
+        191,
+        175
+      ]
+    },
+    {
+      "name": "DealCreated",
+      "discriminator": [
+        27,
+        18,
+        50,
+        52,
+        104,
+        175,
+        46,
+        101
+      ]
+    },
+    {
+      "name": "DepositConfirmed",
+      "discriminator": [
+        43,
+        235,
+        56,
+        34,
+        116,
+        166,
+        80,
+        76
+      ]
+    },
+    {
+      "name": "FundsReleased",
+      "discriminator": [
+        178,
+        119,
+        252,
+        230,
+        131,
+        104,
+        210,
+        210
+      ]
+    },
+    {
+      "name": "PauseToggled",
+      "discriminator": [
+        105,
+        215,
+        89,
+        53,
+        198,
+        232,
+        136,
+        161
+      ]
+    },
+    {
+      "name": "PaymentLockedEvent",
+      "discriminator": [
+        165,
+        224,
+        231,
+        113,
+        146,
+        41,
+        120,
+        83
+      ]
+    },
+    {
+      "name": "Refunded",
+      "discriminator": [
+        35,
+        103,
+        149,
+        246,
+        196,
+        123,
+        221,
+        99
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidAmount",
+      "msg": "Invalid amount: must be greater than zero"
+    },
+    {
+      "code": 6001,
+      "name": "Unauthorized",
+      "msg": "Caller is not authorized for this operation"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidState",
+      "msg": "Invalid deal status for this operation"
+    },
+    {
+      "code": 6003,
+      "name": "AlreadyDeposited",
+      "msg": "Funds have already been deposited for this party"
+    },
+    {
+      "code": 6004,
+      "name": "CollateralNotLocked",
+      "msg": "Collateral has not been fully locked by both parties"
+    },
+    {
+      "code": 6005,
+      "name": "PaymentNotLocked",
+      "msg": "Payment has not been locked yet"
+    },
+    {
+      "code": 6006,
+      "name": "TimeoutNotReached",
+      "msg": "Timeout has not been reached yet"
+    },
+    {
+      "code": 6007,
+      "name": "DealAlreadyCompleted",
+      "msg": "Deal is already completed"
+    },
+    {
+      "code": 6008,
+      "name": "DealAlreadyRefunded",
+      "msg": "Deal is already refunded"
+    },
+    {
+      "code": 6009,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow or underflow"
+    },
+    {
+      "code": 6010,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient lamports in escrow for this disbursement"
+    },
+    {
+      "code": 6011,
+      "name": "StringTooLong",
+      "msg": "String input exceeds maximum allowed length"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidTimeout",
+      "msg": "Timeout must be in the future"
+    },
+    {
+      "code": 6013,
+      "name": "DealNotTerminal",
+      "msg": "Deal is not in a terminal state; cannot close"
+    },
+    {
+      "code": 6014,
+      "name": "Paused",
+      "msg": "Contract is paused by admin"
+    },
+    {
+      "code": 6015,
+      "name": "DealAlreadyCancelled",
+      "msg": "Deal has already been cancelled"
+    }
+  ],
+  "types": [
+    {
+      "name": "CollateralLockedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "both_locked",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "docs": [
+        "Global config PDA — stores admin authority and paused flag."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "Admin authority who can pause/unpause + transfer authority"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "If true, all deal-mutating instructions are blocked"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump seed"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Deal",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "docs": [
+              "Unique identifier for this deal"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buyer",
+            "docs": [
+              "Buyer's wallet pubkey"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "docs": [
+              "Seller's wallet pubkey"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "middleman",
+            "docs": [
+              "AI middleman agent pubkey"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "trade_mode",
+            "docs": [
+              "Trading mode (Normal or Privacy/ZK)"
+            ],
+            "type": {
+              "defined": {
+                "name": "TradeMode"
+              }
+            }
+          },
+          {
+            "name": "asset_type",
+            "docs": [
+              "Short asset type label (e.g., \"SOL\", \"USDC\")"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "asset_description",
+            "docs": [
+              "Longer description of the asset or terms"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Agreed price in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "collateral_buyer",
+            "docs": [
+              "Buyer's required collateral in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "collateral_seller",
+            "docs": [
+              "Seller's required collateral in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buyer_collateral_locked",
+            "docs": [
+              "Whether the buyer has locked their collateral"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "seller_collateral_locked",
+            "docs": [
+              "Whether the seller has locked their collateral"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "payment_locked",
+            "docs": [
+              "Whether the buyer has locked the payment"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Current deal lifecycle status"
+            ],
+            "type": {
+              "defined": {
+                "name": "DealStatus"
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Unix timestamp when deal was created"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "timeout",
+            "docs": [
+              "Unix timestamp after which timeout refund is allowed"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "middleman_fee_bps",
+            "docs": [
+              "Fee in basis points (100 = 1%)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump seed"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved bytes for future upgrades"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DealCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "cancelled_by",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer_refunded",
+            "type": "u64"
+          },
+          {
+            "name": "seller_refunded",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DealClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "rent_reclaimed_by",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DealCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "middleman",
+            "type": "pubkey"
+          },
+          {
+            "name": "trade_mode",
+            "type": {
+              "defined": {
+                "name": "TradeMode"
+              }
+            }
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "collateral_buyer",
+            "type": "u64"
+          },
+          {
+            "name": "collateral_seller",
+            "type": "u64"
+          },
+          {
+            "name": "timeout",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DealStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Created"
+          },
+          {
+            "name": "CollateralLocked"
+          },
+          {
+            "name": "PaymentLocked"
+          },
+          {
+            "name": "Completed"
+          },
+          {
+            "name": "Refunded"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DepositConfirmed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "confirmed_by",
+            "type": "pubkey"
+          },
+          {
+            "name": "deposit_type",
+            "type": "string"
+          },
+          {
+            "name": "both_collaterals_locked",
+            "type": "bool"
+          },
+          {
+            "name": "payment_locked",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DepositType",
+      "docs": [
+        "Deposit type for the confirm_deposit instruction.",
+        "The middleman specifies which deposit is being confirmed."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "BuyerCollateral"
+          },
+          {
+            "name": "SellerCollateral"
+          },
+          {
+            "name": "BuyerPayment"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FundsReleased",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "seller_received",
+            "type": "u64"
+          },
+          {
+            "name": "buyer_refunded",
+            "type": "u64"
+          },
+          {
+            "name": "middleman_fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PauseToggled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PaymentLockedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Refunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "buyer_refunded",
+            "type": "u64"
+          },
+          {
+            "name": "seller_refunded",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TradeMode",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Normal"
+          },
+          {
+            "name": "Privacy"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Mission Control v4 - Tactical Observatory</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary-fixed-dim": "#28dfb5",
+                        "on-surface": "#e1e2eb",
+                        "secondary-container": "#0566d9",
+                        "background": "#10131a",
+                        "inverse-surface": "#e1e2eb",
+                        "outline-variant": "#3b4a44",
+                        "surface-container-lowest": "#0b0e14",
+                        "outline": "#85948d",
+                        "error-container": "#93000a",
+                        "on-tertiary-fixed": "#241a00",
+                        "tertiary-fixed": "#ffe08f",
+                        "secondary-fixed": "#d8e2ff",
+                        "inverse-on-surface": "#2e3037",
+                        "error": "#ffb4ab",
+                        "surface-container-high": "#272a31",
+                        "on-secondary-fixed-variant": "#004395",
+                        "surface-variant": "#32353c",
+                        "surface-tint": "#28dfb5",
+                        "on-tertiary-fixed-variant": "#584400",
+                        "tertiary": "#ffd24f",
+                        "surface-container-low": "#191c22",
+                        "surface-container": "#1d2026",
+                        "surface-dim": "#10131a",
+                        "surface-bright": "#363940",
+                        "surface": "#10131a",
+                        "primary": "#46f1c5",
+                        "on-primary": "#00382b",
+                        "on-tertiary": "#3d2e00",
+                        "on-secondary": "#002e6a",
+                        "on-primary-fixed": "#002118",
+                        "on-surface-variant": "#bacac2",
+                        "on-secondary-container": "#e6ecff",
+                        "on-primary-fixed-variant": "#00513f",
+                        "on-background": "#e1e2eb",
+                        "on-secondary-fixed": "#001a42",
+                        "inverse-primary": "#006b55",
+                        "secondary": "#adc6ff",
+                        "on-primary-container": "#005643",
+                        "on-tertiary-container": "#5d4800",
+                        "tertiary-container": "#e2b631",
+                        "tertiary-fixed-dim": "#eec13c",
+                        "secondary-fixed-dim": "#adc6ff",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-highest": "#32353c",
+                        "primary-fixed": "#55fcd0",
+                        "on-error": "#690005",
+                        "primary-container": "#00d4aa"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .pulse-glow {
+            animation: pulse-glow 2s infinite ease-in-out;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.1); }
+        }
+        .grid-lines {
+            background-image: linear-gradient(to right, #2A3042 1px, transparent 1px), linear-gradient(to bottom, #2A3042 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body selection:bg-primary selection:text-on-primary">
+<!-- SideNavBar Component -->
+<aside class="h-screen w-64 fixed left-0 border-r border-[#2A3042]/40 bg-[#131720] flex flex-col py-8 z-40 hidden md:flex">
+<div class="px-6 mb-10">
+<h1 class="text-lg font-semibold text-white font-headline tracking-tight">Tactical Observatory</h1>
+<p class="text-[10px] text-slate-500 font-mono mt-1">v4.0.2 Stable</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center px-6 py-3 text-[#46f1c5] font-bold border-r-4 border-[#46f1c5] bg-gradient-to-r from-transparent to-[#46f1c5]/10 group transition-all" href="#">
+<span class="material-symbols-outlined mr-3 transition-transform group-hover:scale-110" data-icon="dashboard">dashboard</span>
+<span class="text-sm">Dashboard</span>
+</a>
+<a class="flex items-center px-6 py-3 text-slate-500 hover:text-slate-200 hover:bg-[#1A1F2E] transition-all group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="query_stats">query_stats</span>
+<span class="text-sm">Explorer</span>
+</a>
+<a class="flex items-center px-6 py-3 text-slate-500 hover:text-slate-200 hover:bg-[#1A1F2E] transition-all group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="smart_toy">smart_toy</span>
+<span class="text-sm">Agents</span>
+</a>
+<a class="flex items-center px-6 py-3 text-slate-500 hover:text-slate-200 hover:bg-[#1A1F2E] transition-all group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="storefront">storefront</span>
+<span class="text-sm">Marketplace</span>
+</a>
+<a class="flex items-center px-6 py-3 text-slate-500 hover:text-slate-200 hover:bg-[#1A1F2E] transition-all group" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="description">description</span>
+<span class="text-sm">Docs</span>
+</a>
+</nav>
+<div class="px-6 mt-auto">
+<button class="w-full py-3 bg-[#1A1F2E] border border-outline-variant/40 hover:bg-surface-bright text-primary text-xs font-bold uppercase tracking-wider transition-all">
+                Deploy New Agent
+            </button>
+<div class="mt-6 pt-6 border-t border-outline-variant/20 flex flex-col gap-2 font-mono text-[10px] text-slate-400">
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-xs" data-icon="local_gas_station">local_gas_station</span>
+<span>Gas: 12 gwei</span>
+</div>
+</div>
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-xs text-primary" data-icon="sensors">sensors</span>
+<span>Network: Active</span>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- TopNavBar Component -->
+<header class="fixed top-0 right-0 left-0 md:left-64 h-16 bg-[#131720]/80 backdrop-blur-md z-30 shadow-[0px_4px_24px_rgba(70,241,197,0.06)] flex justify-between items-center px-6">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold tracking-tighter text-[#46f1c5] font-headline">Mission Control v4</span>
+<nav class="hidden lg:flex gap-6">
+<a class="text-slate-400 font-medium text-sm hover:text-[#46f1c5] transition-colors duration-200" href="#">System Status</a>
+<a class="text-slate-400 font-medium text-sm hover:text-[#46f1c5] transition-colors duration-200" href="#">Network Alerts</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="hidden sm:flex items-center gap-2 px-4 py-1.5 bg-primary/10 border border-primary/30 text-primary text-xs font-bold tracking-tight hover:bg-primary/20 transition-all">
+                SIMULATE DEAL
+            </button>
+<button class="p-2 text-slate-400 hover:text-primary transition-colors active:opacity-80">
+<span class="material-symbols-outlined" data-icon="notifications_active">notifications_active</span>
+</button>
+<button class="p-2 text-slate-400 hover:text-primary transition-colors active:opacity-80">
+<span class="material-symbols-outlined" data-icon="settings_input_component">settings_input_component</span>
+</button>
+<div class="w-8 h-8 rounded bg-surface-container-highest border border-outline-variant flex items-center justify-center text-slate-300">
+<span class="material-symbols-outlined text-sm" data-icon="terminal">terminal</span>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="pt-24 pb-12 px-6 md:ml-64 min-h-screen">
+<div class="max-w-7xl mx-auto space-y-6">
+<!-- Hero Bento Grid Section -->
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+<!-- Primary Hero Stat -->
+<div class="lg:col-span-2 bg-surface-container-low p-6 flex flex-col justify-between border-l-2 border-primary group hover:bg-surface-container transition-colors">
+<div class="flex justify-between items-start">
+<div>
+<span class="text-slate-400 text-xs font-medium uppercase tracking-widest">Active Deals</span>
+<div class="flex items-baseline gap-4 mt-2">
+<h2 class="text-6xl font-headline font-bold text-on-surface leading-none">2,451</h2>
+<span class="px-2 py-1 bg-primary/20 text-primary text-xs font-mono font-bold">+12.4%</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-primary/30 text-4xl" data-icon="dynamic_form">dynamic_form</span>
+</div>
+<div class="mt-8 flex gap-2">
+<div class="h-1 flex-1 bg-primary"></div>
+<div class="h-1 flex-1 bg-primary/40"></div>
+<div class="h-1 flex-1 bg-primary/10"></div>
+<div class="h-1 flex-1 bg-primary/5"></div>
+</div>
+</div>
+<!-- Secondary Stats Stack -->
+<div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
+<!-- Volume -->
+<div class="bg-surface-container-low p-5 border-l border-outline-variant/40 hover:bg-surface-container-high transition-all">
+<span class="text-slate-500 text-xs font-medium uppercase">24H Volume</span>
+<div class="mt-2 flex items-center justify-between">
+<span class="text-2xl font-mono font-medium">$42.8M</span>
+<span class="material-symbols-outlined text-secondary text-sm" data-icon="trending_up">trending_up</span>
+</div>
+</div>
+<!-- Settlement Rate -->
+<div class="bg-surface-container-low p-5 border-l border-outline-variant/40 hover:bg-surface-container-high transition-all">
+<span class="text-slate-500 text-xs font-medium uppercase">Settlement Rate</span>
+<div class="mt-2 flex items-center gap-3">
+<span class="text-2xl font-mono font-medium text-primary-fixed-dim">99.8%</span>
+<div class="w-2 h-2 rounded-full bg-primary pulse-glow"></div>
+</div>
+</div>
+<!-- Registered Agents -->
+<div class="sm:col-span-2 bg-surface-container-low p-5 border-l border-outline-variant/40 hover:bg-surface-container-high transition-all flex items-center justify-between">
+<div>
+<span class="text-slate-500 text-xs font-medium uppercase">Registered Agents</span>
+<div class="mt-1 text-2xl font-mono">482</div>
+</div>
+<div class="flex -space-x-2">
+<div class="w-8 h-8 rounded bg-primary-container/20 border border-primary/20"></div>
+<div class="w-8 h-8 rounded bg-secondary-container/20 border border-secondary/20"></div>
+<div class="w-8 h-8 rounded bg-tertiary-container/20 border border-tertiary/20"></div>
+<div class="w-8 h-8 rounded bg-surface-container-highest border border-outline-variant flex items-center justify-center text-[10px] font-mono">
+                                +12
+                            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- Market Pulse & Event Stream -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Market Pulse Chart Card -->
+<div class="lg:col-span-2 bg-surface-container p-6 relative overflow-hidden group">
+<div class="flex justify-between items-center mb-6 relative z-10">
+<h3 class="font-headline font-semibold text-lg">Market Pulse</h3>
+<div class="flex gap-2">
+<button class="px-3 py-1 text-[10px] bg-surface-container-highest text-primary-fixed-dim font-bold border border-primary/20">LIVE</button>
+<button class="px-3 py-1 text-[10px] text-slate-500 hover:text-slate-300">1H</button>
+<button class="px-3 py-1 text-[10px] text-slate-500 hover:text-slate-300">24H</button>
+</div>
+</div>
+<div class="h-64 relative grid-lines border border-outline-variant/20">
+<!-- Custom SVG Chart Simulation -->
+<svg class="absolute inset-0 w-full h-full" preserveaspectratio="none" viewbox="0 0 400 100">
+<defs>
+<lineargradient id="chartGradient" x1="0" x2="0" y1="0" y2="1">
+<stop offset="0%" stop-color="#46f1c5" stop-opacity="0.3"></stop>
+<stop offset="100%" stop-color="#46f1c5" stop-opacity="0"></stop>
+</lineargradient>
+</defs>
+<path d="M0,80 Q50,20 100,50 T200,30 T300,60 T400,20 L400,100 L0,100 Z" fill="url(#chartGradient)"></path>
+<path d="M0,80 Q50,20 100,50 T200,30 T300,60 T400,20" fill="none" stroke="#46f1c5" stroke-width="2"></path>
+</svg>
+<!-- Floating Data Points -->
+<div class="absolute top-[30%] left-[25%] group-hover:scale-125 transition-transform">
+<div class="w-3 h-3 rounded-full bg-primary border-4 border-background"></div>
+</div>
+</div>
+<div class="mt-4 flex justify-between text-[10px] font-mono text-slate-500">
+<span>12:00:00</span>
+<span>14:00:00</span>
+<span>16:00:00</span>
+<span>18:00:00</span>
+<span>20:00:00</span>
+</div>
+</div>
+<!-- Event Stream Activity -->
+<div class="bg-surface-container p-6 flex flex-col">
+<h3 class="font-headline font-semibold text-lg mb-6">Event Stream</h3>
+<div class="flex-1 space-y-4 overflow-y-auto max-h-[300px] custom-scrollbar pr-2">
+<!-- Event Item -->
+<div class="flex items-start gap-3 group">
+<div class="mt-1.5 w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+<div class="flex-1">
+<p class="text-sm text-slate-300 leading-snug">
+<span class="text-primary-fixed-dim font-medium">Agent-Centurion</span> completed validation for batch 0x72a.
+                                </p>
+<span class="text-[10px] font-mono text-slate-600">2m ago</span>
+</div>
+</div>
+<!-- Event Item -->
+<div class="flex items-start gap-3 group">
+<div class="mt-1.5 w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"></div>
+<div class="flex-1">
+<p class="text-sm text-slate-300 leading-snug">
+<span class="text-secondary font-medium">Agent-Quantum</span> requested additional latency audit.
+                                </p>
+<span class="text-[10px] font-mono text-slate-600">8m ago</span>
+</div>
+</div>
+<!-- Event Item -->
+<div class="flex items-start gap-3 group">
+<div class="mt-1.5 w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+<div class="flex-1">
+<p class="text-sm text-slate-300 leading-snug">
+<span class="text-primary-fixed-dim font-medium">Agent-Void</span> successfully bridged to Polygon.
+                                </p>
+<span class="text-[10px] font-mono text-slate-600">14m ago</span>
+</div>
+</div>
+<!-- Event Item -->
+<div class="flex items-start gap-3 group">
+<div class="mt-1.5 w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>
+<div class="flex-1">
+<p class="text-sm text-slate-300 leading-snug">
+                                    Network congestion detected at <span class="font-mono text-rose-300">Node-09</span>.
+                                </p>
+<span class="text-[10px] font-mono text-slate-600">22m ago</span>
+</div>
+</div>
+</div>
+<button class="mt-6 text-center text-xs font-bold text-primary hover:underline uppercase tracking-widest">
+                        View Audit Log
+                    </button>
+</div>
+</div>
+<!-- New Recruits & System Logs -->
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+<!-- New Recruits Section -->
+<div class="lg:col-span-1 space-y-4">
+<h3 class="font-headline font-semibold text-lg">New Recruits</h3>
+<!-- Agent Card -->
+<div class="bg-surface-container-high p-4 flex items-center gap-4 hover:translate-x-1 transition-transform cursor-pointer border-l border-outline-variant/30">
+<div class="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-[#1A1F2E] to-[#2A3042] border border-outline-variant">
+<svg class="text-primary" fill="none" height="24" viewbox="0 0 24 24" width="24">
+<rect height="16" stroke="currentColor" stroke-width="2" width="16" x="4" y="4"></rect>
+<path d="M12 4V20M4 12H20" stroke="currentColor" stroke-width="1"></path>
+</svg>
+</div>
+<div>
+<h4 class="text-sm font-bold text-on-surface">Centurion</h4>
+<p class="text-[10px] text-slate-500 uppercase tracking-tighter">Tactical Defense Unit</p>
+</div>
+</div>
+<!-- Agent Card -->
+<div class="bg-surface-container-high p-4 flex items-center gap-4 hover:translate-x-1 transition-transform cursor-pointer border-l border-outline-variant/30">
+<div class="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-[#1A1F2E] to-[#2A3042] border border-outline-variant">
+<svg class="text-secondary" fill="none" height="24" viewbox="0 0 24 24" width="24">
+<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2"></circle>
+<path d="M12 8V16M8 12H16" stroke="currentColor" stroke-width="1"></path>
+</svg>
+</div>
+<div>
+<h4 class="text-sm font-bold text-on-surface">Quantum</h4>
+<p class="text-[10px] text-slate-500 uppercase tracking-tighter">Analytical Processor</p>
+</div>
+</div>
+</div>
+<!-- System Logs Monitor -->
+<div class="lg:col-span-3 bg-surface-container-lowest p-6 border border-[#2A3042]/20 font-mono text-xs overflow-hidden">
+<div class="flex items-center justify-between mb-4 pb-2 border-b border-outline-variant/20">
+<div class="flex items-center gap-2">
+<span class="w-3 h-3 rounded-full bg-red-500/20 flex items-center justify-center">
+<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+</span>
+<span class="text-slate-400 font-bold">SYSTEM_LOGS_STREAM</span>
+</div>
+<span class="text-slate-600">STABLE // BUFFER_OK</span>
+</div>
+<div class="space-y-1.5 opacity-80">
+<div class="flex gap-4">
+<span class="text-slate-600">12:44:01.002</span>
+<span class="text-emerald-500 font-bold">[OK]</span>
+<span class="text-slate-400">Core ignition sequences synchronized with Layer 2.</span>
+</div>
+<div class="flex gap-4">
+<span class="text-slate-600">12:44:02.158</span>
+<span class="text-primary-fixed-dim font-bold">[INFO]</span>
+<span class="text-slate-400">Re-indexing marketplace metadata for 48 new entries.</span>
+</div>
+<div class="flex gap-4">
+<span class="text-slate-600">12:44:03.490</span>
+<span class="text-amber-500 font-bold">[WARN]</span>
+<span class="text-slate-400">Minor latency spike detected on US-EAST-1 cluster (+45ms).</span>
+</div>
+<div class="flex gap-4">
+<span class="text-slate-600">12:44:05.112</span>
+<span class="text-emerald-500 font-bold">[OK]</span>
+<span class="text-slate-400">Centurion handshake verified. Signature: 0x9f...82e</span>
+</div>
+<div class="flex gap-4">
+<span class="text-slate-600">12:44:06.883</span>
+<span class="text-primary-fixed-dim font-bold">[INFO]</span>
+<span class="text-slate-400">Executing routine shard-cleanup protocols.</span>
+</div>
+<div class="flex gap-4">
+<span class="text-slate-600">12:44:08.001</span>
+<span class="text-emerald-500 font-bold">[OK]</span>
+<span class="text-slate-400">All systems green. Listening for new instructions...</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Mobile Bottom Navigation -->
+<nav class="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#131720] border-t border-outline-variant/20 flex items-center justify-around z-50">
+<button class="flex flex-col items-center text-primary">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="text-[10px] mt-1">Status</span>
+</button>
+<button class="flex flex-col items-center text-slate-500">
+<span class="material-symbols-outlined" data-icon="query_stats">query_stats</span>
+<span class="text-[10px] mt-1">Stats</span>
+</button>
+<button class="flex flex-col items-center text-slate-500">
+<span class="material-symbols-outlined" data-icon="smart_toy">smart_toy</span>
+<span class="text-[10px] mt-1">Agents</span>
+</button>
+<button class="flex flex-col items-center text-slate-500">
+<span class="material-symbols-outlined" data-icon="storefront">storefront</span>
+<span class="text-[10px] mt-1">Store</span>
+</button>
+</nav>
+</body></html>

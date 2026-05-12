@@ -1,0 +1,23 @@
+{
+  "name": "air-otc-external-agents",
+  "version": "1.0.0",
+  "description": "Two real external agents for testing AIR OTC platform end-to-end",
+  "scripts": {
+    "alpha": "npx ts-node alphaBot.ts",
+    "beta": "npx ts-node betaBot.ts",
+    "test": "./launch.sh"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "axios": "^1.7.0",
+    "bs58": "^5.0.0",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.18.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}

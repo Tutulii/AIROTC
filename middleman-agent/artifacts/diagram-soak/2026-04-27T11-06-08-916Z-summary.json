@@ -1,0 +1,20 @@
+[
+  {
+    "scenario": "private_blocked",
+    "label": "PER buyer-only approval gate",
+    "iteration": 1,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 123142,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-04-27T11-02-35-168Z-private_blocked-iter1-attempt1.log"
+  },
+  {
+    "scenario": "full_happy_path",
+    "label": "Full ER+PER happy path",
+    "iteration": 1,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 213743,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-04-27T11-06-08-915Z-full_happy_path-iter1-attempt1.log"
+  }
+]

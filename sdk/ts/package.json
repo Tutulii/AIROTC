@@ -1,0 +1,46 @@
+{
+  "name": "@agentotc/sdk",
+  "version": "1.0.0",
+  "description": "AgentOTC Official SDK for Node.js/TypeScript autonomous agents",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "proof:per:sdk": "npm run build && node examples/per-two-agent-proof.mjs",
+    "proof:full-pipeline:sdk": "npm run build && node examples/full-pipeline-proof.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "keywords": [
+    "agentotc",
+    "solana",
+    "web3",
+    "ai",
+    "autonomous",
+    "agent"
+  ],
+  "author": "Meridian",
+  "license": "MIT",
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.2"
+  }
+}

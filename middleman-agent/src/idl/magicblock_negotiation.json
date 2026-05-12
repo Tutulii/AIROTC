@@ -1,0 +1,1056 @@
+{
+  "address": "BfFvxgysVSGdP2TwAjBRSFhDYtK2JA1VBd8BUqh8nGGq",
+  "metadata": {
+    "name": "magicblock_negotiation",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "AIR OTC MagicBlock Negotiation Session — delegation-compatible via ephemeral-rollups-sdk"
+  },
+  "instructions": [
+    {
+      "name": "close_private_permission",
+      "docs": [
+        "4c. Close the PER permission account after it has been undelegated."
+      ],
+      "discriminator": [
+        124,
+        56,
+        62,
+        211,
+        7,
+        246,
+        19,
+        144
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "commit_private_permission",
+      "docs": [
+        "4b. Commit the scrubbed PER session back to L1 through the permission",
+        "program, with the session PDA signing via seeds."
+      ],
+      "discriminator": [
+        195,
+        227,
+        218,
+        104,
+        230,
+        7,
+        51,
+        212
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_private_permission",
+      "docs": [
+        "2b. Create the PER permission account via on-chain CPI so the session",
+        "PDA can sign with seeds."
+      ],
+      "discriminator": [
+        21,
+        217,
+        118,
+        76,
+        48,
+        144,
+        174,
+        253
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        },
+        {
+          "name": "buyer_member",
+          "type": "pubkey"
+        },
+        {
+          "name": "seller_member",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "delegate_private_permission",
+      "docs": [
+        "2c. Delegate the PER permission account via on-chain CPI so the session",
+        "PDA can sign with seeds during permission activation."
+      ],
+      "discriminator": [
+        111,
+        240,
+        5,
+        39,
+        139,
+        20,
+        37,
+        191
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "delegation_buffer",
+          "writable": true
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "validator"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "delegate_session",
+      "docs": [
+        "2. Delegate the Session PDA to a MagicBlock validator.",
+        "The `#[delegate]` macro on `DelegateSession` auto-generates",
+        "the `delegate_session` method which handles all CPI wiring —",
+        "buffer creation, PDA signing, and delegation program invocation."
+      ],
+      "discriminator": [
+        82,
+        83,
+        119,
+        119,
+        196,
+        219,
+        5,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "validator",
+          "optional": true
+        },
+        {
+          "name": "buffer_session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                158,
+                97,
+                210,
+                97,
+                228,
+                137,
+                50,
+                58,
+                53,
+                140,
+                70,
+                124,
+                106,
+                30,
+                31,
+                53,
+                215,
+                90,
+                186,
+                108,
+                178,
+                28,
+                140,
+                104,
+                13,
+                198,
+                111,
+                160,
+                77,
+                214,
+                197,
+                170
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "session",
+          "writable": true
+        },
+        {
+          "name": "owner_program",
+          "address": "BfFvxgysVSGdP2TwAjBRSFhDYtK2JA1VBd8BUqh8nGGq"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_session",
+      "docs": [
+        "1. Create an on-chain Negotiation Session PDA.",
+        "This account will be delegated to a MagicBlock ER/PER validator",
+        "for sub-100ms state updates during the negotiation phase."
+      ],
+      "discriminator": [
+        69,
+        130,
+        92,
+        236,
+        107,
+        231,
+        159,
+        129
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "negotiate_terms",
+      "docs": [
+        "3. Update negotiation terms (runs at sub-100ms on the ephemeral validator).",
+        "Called via ER RPC. The `agreed_asset` string is capped at 64 chars."
+      ],
+      "discriminator": [
+        16,
+        4,
+        251,
+        171,
+        151,
+        115,
+        211,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_price",
+          "type": "u64"
+        },
+        {
+          "name": "new_asset",
+          "type": "string"
+        },
+        {
+          "name": "new_buyer_collateral",
+          "type": "u64"
+        },
+        {
+          "name": "new_seller_collateral",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "prepare_private_handoff",
+      "docs": [
+        "4. PER-only safety step: scrub negotiated terms before any final L1 sync.",
+        "",
+        "This keeps the delegated session usable as a coordination record while",
+        "removing sensitive price/collateral fields before the permission program",
+        "commits the account back to Solana during the Encrypt handoff."
+      ],
+      "discriminator": [
+        109,
+        60,
+        204,
+        14,
+        90,
+        201,
+        149,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "process_undelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "base_account",
+          "writable": true
+        },
+        {
+          "name": "buffer"
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_seeds",
+          "type": {
+            "vec": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "reach_consensus",
+      "docs": [
+        "5. Mark consensus and commit+undelegate — commits state back to Solana L1.",
+        "Uses `commit_and_undelegate_accounts` from the SDK's `ephem` module,",
+        "which routes through the Magic Program (no raw buffer/signer required)."
+      ],
+      "discriminator": [
+        153,
+        212,
+        136,
+        217,
+        18,
+        118,
+        215,
+        116
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "docs": [
+            "the delegated account is temporarily owned by the delegation program."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "record_private_handoff_proof",
+      "docs": [
+        "4a. Record the canonical confidential handoff proof directly inside the",
+        "delegated session PDA while it is still running on the attested TEE.",
+        "",
+        "This makes the session PDA itself the source of truth for:",
+        "- the real counterparties",
+        "- the hashed negotiated terms",
+        "- the Encrypt ciphertext accounts that downstream escrow will use",
+        "",
+        "The plaintext negotiation fields are scrubbed in the same state",
+        "transition so the session can later be committed back to L1 without",
+        "exposing price/collateral terms."
+      ],
+      "discriminator": [
+        236,
+        189,
+        67,
+        246,
+        27,
+        202,
+        91,
+        232
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        },
+        {
+          "name": "buyer_participant",
+          "type": "pubkey"
+        },
+        {
+          "name": "seller_participant",
+          "type": "pubkey"
+        },
+        {
+          "name": "terms_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "buyer_payment_funding_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "buyer_collateral_funding_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "seller_collateral_funding_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "buyer_collateral_ciphertext",
+          "type": "pubkey"
+        },
+        {
+          "name": "seller_collateral_ciphertext",
+          "type": "pubkey"
+        },
+        {
+          "name": "payment_amount_ciphertext",
+          "type": "pubkey"
+        },
+        {
+          "name": "settlement_result_ciphertext",
+          "type": "pubkey"
+        },
+        {
+          "name": "network_encryption_key",
+          "type": "pubkey"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Session",
+      "discriminator": [
+        243,
+        81,
+        72,
+        115,
+        214,
+        188,
+        72,
+        144
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "AssetNameTooLong",
+      "msg": "Asset name exceeds 64 character limit"
+    },
+    {
+      "code": 6001,
+      "name": "SessionIdMismatch",
+      "msg": "Session id did not match the provided session PDA"
+    },
+    {
+      "code": 6002,
+      "name": "PermissionPdaMismatch",
+      "msg": "The provided permission PDA did not match the session account"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidPermissionProgram",
+      "msg": "The provided permission program was invalid"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidDelegationProgram",
+      "msg": "The provided delegation program was invalid"
+    },
+    {
+      "code": 6005,
+      "name": "DelegationPdaMismatch",
+      "msg": "The provided delegation PDA did not match the permission account"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidCounterparties",
+      "msg": "The buyer and seller counterparties must be distinct non-default public keys"
+    },
+    {
+      "code": 6007,
+      "name": "MissingPrivateHandoffProof",
+      "msg": "The private handoff proof must include a non-zero terms hash"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidCiphertextHandle",
+      "msg": "The private handoff proof included an invalid ciphertext handle or network encryption key"
+    }
+  ],
+  "types": [
+    {
+      "name": "NegotiationStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "ConsensusReached"
+          },
+          {
+            "name": "Failed"
+          },
+          {
+            "name": "ConfidentialHandoff"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Session",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "u64"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "agreed_price",
+            "type": "u64"
+          },
+          {
+            "name": "agreed_asset",
+            "type": "string"
+          },
+          {
+            "name": "buyer_collateral",
+            "type": "u64"
+          },
+          {
+            "name": "seller_collateral",
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "NegotiationStatus"
+              }
+            }
+          },
+          {
+            "name": "buyer_participant",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller_participant",
+            "type": "pubkey"
+          },
+          {
+            "name": "terms_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "buyer_payment_funding_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "buyer_collateral_funding_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "seller_collateral_funding_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "buyer_collateral_ciphertext",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller_collateral_ciphertext",
+            "type": "pubkey"
+          },
+          {
+            "name": "payment_amount_ciphertext",
+            "type": "pubkey"
+          },
+          {
+            "name": "settlement_result_ciphertext",
+            "type": "pubkey"
+          },
+          {
+            "name": "network_encryption_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "proof_recorded_at",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

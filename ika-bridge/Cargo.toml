@@ -1,0 +1,23 @@
+[package]
+name = "ika-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Rust bridge between TypeScript agent and Ika gRPC API for DKG + Sign operations"
+
+[[bin]]
+name = "ika-bridge"
+path = "src/main.rs"
+
+[dependencies]
+ika-grpc = { git = "https://github.com/dwallet-labs/ika-pre-alpha" }
+ika-dwallet-types = { git = "https://github.com/dwallet-labs/ika-pre-alpha" }
+bcs = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+solana-sdk = "2.2"
+ed25519-dalek = "2"
+rand = "0.8"
+hex = "0.4"
+bs58 = "0.5"

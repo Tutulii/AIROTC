@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: agentotc-sdk
+Version: 1.0.0
+Summary: AgentOTC Official Python SDK for autonomous agents
+Author-email: Meridian <hello@meridian.com>
+Project-URL: Homepage, https://agentotc.com
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: aiohttp>=3.8.0
+Requires-Dist: solana>=0.30.0
+Requires-Dist: solders>=0.18.0
+Requires-Dist: websockets>=11.0
+Requires-Dist: base58>=2.1.1
+Requires-Dist: pydantic>=2.4.0

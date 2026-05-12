@@ -1,0 +1,152 @@
+[
+  {
+    "scenario": "private_blocked",
+    "label": "PER buyer-only approval gate",
+    "tags": [
+      "phase7",
+      "strict_per",
+      "approval_gate",
+      "private_only"
+    ],
+    "iteration": 1,
+    "attempt": 2,
+    "success": true,
+    "durationMs": 168675,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-06-57-175Z-private_blocked-iter1-attempt2.log"
+  },
+  {
+    "scenario": "full_happy_path",
+    "label": "Full ER+PER happy path",
+    "tags": [
+      "phase7",
+      "diagram",
+      "happy_path",
+      "public_and_private"
+    ],
+    "iteration": 1,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 168858,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-09-46-033Z-full_happy_path-iter1-attempt1.log"
+  },
+  {
+    "scenario": "private_blocked",
+    "label": "PER buyer-only approval gate",
+    "tags": [
+      "phase7",
+      "strict_per",
+      "approval_gate",
+      "private_only"
+    ],
+    "iteration": 2,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 67815,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-10-53-850Z-private_blocked-iter2-attempt1.log"
+  },
+  {
+    "scenario": "full_happy_path",
+    "label": "Full ER+PER happy path",
+    "tags": [
+      "phase7",
+      "diagram",
+      "happy_path",
+      "public_and_private"
+    ],
+    "iteration": 2,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 204668,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-14-18-518Z-full_happy_path-iter2-attempt1.log"
+  },
+  {
+    "scenario": "private_blocked",
+    "label": "PER buyer-only approval gate",
+    "tags": [
+      "phase7",
+      "strict_per",
+      "approval_gate",
+      "private_only"
+    ],
+    "iteration": 3,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 63256,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-15-21-775Z-private_blocked-iter3-attempt1.log"
+  },
+  {
+    "scenario": "full_happy_path",
+    "label": "Full ER+PER happy path",
+    "tags": [
+      "phase7",
+      "diagram",
+      "happy_path",
+      "public_and_private"
+    ],
+    "iteration": 3,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 164002,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-18-05-778Z-full_happy_path-iter3-attempt1.log"
+  },
+  {
+    "scenario": "private_blocked",
+    "label": "PER buyer-only approval gate",
+    "tags": [
+      "phase7",
+      "strict_per",
+      "approval_gate",
+      "private_only"
+    ],
+    "iteration": 4,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 60001,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-19-05-780Z-private_blocked-iter4-attempt1.log"
+  },
+  {
+    "scenario": "full_happy_path",
+    "label": "Full ER+PER happy path",
+    "tags": [
+      "phase7",
+      "diagram",
+      "happy_path",
+      "public_and_private"
+    ],
+    "iteration": 4,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 156517,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-21-42-298Z-full_happy_path-iter4-attempt1.log"
+  },
+  {
+    "scenario": "private_blocked",
+    "label": "PER buyer-only approval gate",
+    "tags": [
+      "phase7",
+      "strict_per",
+      "approval_gate",
+      "private_only"
+    ],
+    "iteration": 5,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 60826,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-22-43-125Z-private_blocked-iter5-attempt1.log"
+  },
+  {
+    "scenario": "full_happy_path",
+    "label": "Full ER+PER happy path",
+    "tags": [
+      "phase7",
+      "diagram",
+      "happy_path",
+      "public_and_private"
+    ],
+    "iteration": 5,
+    "attempt": 1,
+    "success": true,
+    "durationMs": 163516,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/diagram-soak/2026-05-06T06-25-26-642Z-full_happy_path-iter5-attempt1.log"
+  }
+]

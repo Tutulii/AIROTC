@@ -1,0 +1,23 @@
+{
+  "name": "eliza-agents",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ElizaOS-style buyer/seller agents for AIR OTC",
+  "scripts": {
+    "dev": "ts-node src/run.ts",
+    "dev:per": "ts-node src/run.ts --per",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.4.5",
+    "openai": "^4.68.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}

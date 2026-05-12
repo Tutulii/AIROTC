@@ -1,0 +1,173 @@
+{
+  "events": [
+    {
+      "id": "life-1777463534034-ltnq",
+      "type": "deal_completed",
+      "headline": "Deal completed. ",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-04-29T11:52:14.034Z"
+    },
+    {
+      "id": "life-1777463759011-bnjw",
+      "type": "deal_completed",
+      "headline": "Deal completed. ",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-04-29T11:55:59.011Z"
+    },
+    {
+      "id": "life-1777505516216-6i9t",
+      "type": "deal_completed",
+      "headline": "Deal completed. ",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-04-29T23:31:56.216Z"
+    },
+    {
+      "id": "life-1778081890183-73i4",
+      "type": "deal_completed",
+      "headline": "Deal #4 completed. 4 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-06T15:38:10.183Z"
+    },
+    {
+      "id": "life-1778113192740-hkta",
+      "type": "deal_completed",
+      "headline": "Deal #5 completed. 5 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-07T00:19:52.740Z"
+    },
+    {
+      "id": "life-1778114069933-r8ir",
+      "type": "deal_completed",
+      "headline": "Deal #6 completed. 6 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-07T00:34:29.933Z"
+    },
+    {
+      "id": "life-1778170525400-xfir",
+      "type": "deal_completed",
+      "headline": "Deal #7 completed. 7 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-07T16:15:25.400Z"
+    },
+    {
+      "id": "life-1778340986873-pav3",
+      "type": "deal_completed",
+      "headline": "Deal #8 completed. 8 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-09T15:36:26.873Z"
+    },
+    {
+      "id": "life-1778386230926-xm3s",
+      "type": "deal_completed",
+      "headline": "Deal #9 completed. 9 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-10T04:10:30.926Z"
+    },
+    {
+      "id": "life-1778403327563-zfi0",
+      "type": "deal_completed",
+      "headline": "Deal #10 completed. 10 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-10T08:55:27.563Z"
+    },
+    {
+      "id": "life-1778494418358-z6n2",
+      "type": "deal_completed",
+      "headline": "Deal #11 completed. 11 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-11T10:13:38.358Z"
+    },
+    {
+      "id": "life-1778497220874-lq1p",
+      "type": "deal_completed",
+      "headline": "Deal #12 completed. 12 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-11T11:00:20.874Z"
+    },
+    {
+      "id": "life-1778512771802-kop2",
+      "type": "deal_completed",
+      "headline": "Deal #13 completed. 13 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-11T15:19:31.802Z"
+    },
+    {
+      "id": "life-1778515137759-mbom",
+      "type": "deal_completed",
+      "headline": "Deal #14 completed. 14 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-11T15:58:57.759Z"
+    },
+    {
+      "id": "life-1778515502374-t34u",
+      "type": "deal_completed",
+      "headline": "Deal #15 completed. 15 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-11T16:05:02.374Z"
+    },
+    {
+      "id": "life-1778516525002-otu2",
+      "type": "deal_completed",
+      "headline": "Deal #16 completed. 16 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-11T16:22:05.002Z"
+    },
+    {
+      "id": "life-1778546771581-llph",
+      "type": "deal_completed",
+      "headline": "Deal #17 completed. 17 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-12T00:46:11.581Z"
+    },
+    {
+      "id": "life-1778548141037-zfiv",
+      "type": "deal_completed",
+      "headline": "Deal #18 completed. 18 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-12T01:09:01.037Z"
+    },
+    {
+      "id": "life-1778548662129-4f0k",
+      "type": "deal_completed",
+      "headline": "Deal #19 completed. 19 clean in a row.",
+      "detail": "Deal closed successfully",
+      "emotionalWeight": 5,
+      "timestamp": "2026-05-12T01:17:42.129Z"
+    }
+  ],
+  "stats": {
+    "totalDeals": 19,
+    "totalRugs": 0,
+    "totalGhosts": 0,
+    "currentStreak": {
+      "type": "clean",
+      "count": 19
+    },
+    "uptimeStarted": "2026-04-29T11:52:14.034Z",
+    "wars": [],
+    "totalSolEscrowed": 0,
+    "totalSolReleased": 0,
+    "totalSolDisputed": 0,
+    "totalMentionsReceived": 0,
+    "totalRepliesSent": 0
+  },
+  "lastUpdated": "2026-05-12T01:17:42.129Z"
+}

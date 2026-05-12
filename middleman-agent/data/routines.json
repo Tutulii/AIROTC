@@ -1,0 +1,128 @@
+[
+  {
+    "id": "9d0f14ba-6b68-4fee-8b8e-f80bf90f5849",
+    "name": "Morning Market Scan",
+    "description": "Check trending tokens and top gainers at start of day",
+    "frequency": "daily",
+    "cronHour": 8,
+    "cronMinute": 0,
+    "actions": [
+      {
+        "type": "tool",
+        "toolName": "sol_trending",
+        "toolArgs": {}
+      },
+      {
+        "type": "tool",
+        "toolName": "sol_top_gainers",
+        "toolArgs": {
+          "duration": "24h"
+        }
+      },
+      {
+        "type": "tool",
+        "toolName": "sol_balance",
+        "toolArgs": {}
+      }
+    ],
+    "status": "active",
+    "runCount": 0,
+    "createdAt": "2026-04-24T00:22:33.690Z",
+    "nextRun": "2026-04-24T02:00:00.000Z",
+    "tags": [
+      "market",
+      "morning"
+    ]
+  },
+  {
+    "id": "8364c0d1-4a88-42e1-8e4e-20774dcc88a0",
+    "name": "Price Monitor",
+    "description": "Check SOL price every hour",
+    "frequency": "hourly",
+    "cronMinute": 0,
+    "actions": [
+      {
+        "type": "tool",
+        "toolName": "sol_price",
+        "toolArgs": {
+          "mint": "SOL"
+        }
+      }
+    ],
+    "status": "active",
+    "runCount": 0,
+    "createdAt": "2026-04-24T00:22:33.691Z",
+    "nextRun": "2026-04-24T01:22:33.691Z",
+    "tags": [
+      "price",
+      "monitoring"
+    ]
+  },
+  {
+    "id": "3072b106-2aae-4197-b4f2-018bbb86fda9",
+    "name": "Evening Reflection",
+    "description": "Summarize the day's activities and update goals",
+    "frequency": "daily",
+    "cronHour": 22,
+    "cronMinute": 0,
+    "actions": [
+      {
+        "type": "prompt",
+        "prompt": "Reflect on today: what trades happened, what I learned, what went well, what to improve tomorrow. Update my goals."
+      }
+    ],
+    "status": "active",
+    "runCount": 0,
+    "createdAt": "2026-04-24T00:22:33.691Z",
+    "nextRun": "2026-04-24T16:00:00.000Z",
+    "tags": [
+      "reflection",
+      "evening"
+    ]
+  },
+  {
+    "id": "182fa6e6-0ebc-48a9-b5e6-3239e5dd7098",
+    "name": "Weekly Trade Report",
+    "description": "Generate a weekly summary of all trades, volumes, and trust changes",
+    "frequency": "weekly",
+    "cronHour": 20,
+    "cronMinute": 0,
+    "cronDayOfWeek": 0,
+    "actions": [
+      {
+        "type": "prompt",
+        "prompt": "Generate a comprehensive weekly trade report: total deals, volume, disputes, trust score changes, notable events, and goals progress."
+      }
+    ],
+    "status": "active",
+    "runCount": 0,
+    "createdAt": "2026-04-24T00:22:33.691Z",
+    "nextRun": "2026-04-26T14:00:00.000Z",
+    "tags": [
+      "report",
+      "weekly"
+    ]
+  },
+  {
+    "id": "9341cde6-436d-4bdd-88c1-f5be041d7714",
+    "name": "System Health Check",
+    "description": "Check wallet balance and system status",
+    "frequency": "every_4_hours",
+    "cronMinute": 0,
+    "actions": [
+      {
+        "type": "tool",
+        "toolName": "sol_balance",
+        "toolArgs": {}
+      }
+    ],
+    "status": "active",
+    "runCount": 0,
+    "createdAt": "2026-04-24T00:22:33.691Z",
+    "nextRun": "2026-04-24T04:22:33.691Z",
+    "tags": [
+      "health",
+      "monitoring"
+    ]
+  }
+]

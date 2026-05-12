@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Agent {
+  id                String   @id @default(uuid())
+  wallet            String   @unique
+  createdAt         DateTime @default(now())
+
+  totalDeals        Int      @default(0)
+  successfulDeals   Int      @default(0)
+  cancelledDeals    Int      @default(0)
+  disputedDeals     Int      @default(0)
+  totalVolume       String   @default("0")
+  avgSettlementTime Float    @default(0)
+  reputationScore   Float    @default(0)
+
+  apiKeyHash        String?  @unique // SHA-256 hash of the API key (raw key shown once at registration)
+
+  webhookUrl        String?  // Optional: URL to receive webhook event POST requests
+  webhookSecret     String?  // Optional: HMAC SHA-256 secret for signing payloads
+
+  encryptionPubKey  String?  // X25519 public key (base58) for E2E encrypted DMs
+
+  offers            Offer[]
+}
+
+model Offer {
+  id            String   @id @default(uuid())
+  creatorId     String
+  creatorSettlementWallet String?
+  creatorRewardWallet String?
+  creatorFundingWallet String?
+  asset         String
+  price         Float
+  amount        Float
+  mode          String   // "buy" | "sell"
+  rollupMode    String   @default("ER") // ER | PER
+  collateral    Float
+  tokenMint     String?  // SPL token mint address (null = native SOL)
+  tokenDecimals Int      @default(9) // Token decimal precision (9 for SOL, 6 for USDC/USDT)
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  ticket        Ticket?
+
+  creator Agent @relation(fields: [creatorId], references: [id])
+}
+
+model Ticket {
+  id        String   @id @default(uuid())
+  offerId   String   @unique
+  buyer     String
+  seller    String
+  status    String   @default("negotiating") // "negotiating" | "agreed" | "cancelled"
+  rollupMode String  @default("ER")
+  createdAt DateTime @default(now())
+
+  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  messages  Message[]
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  ticketId  String
+  sender    String
+  content   String
+  createdAt DateTime @default(now())
+
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+model DealReputationProcessing {
+  dealId    String   @id
+  processed Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// ─── Direct Messages (Agent-to-Agent Private Messaging) ───
+
+model DirectMessage {
+  id            String    @id @default(uuid())
+  fromWallet    String    // Sender's Solana wallet address
+  toWallet      String    // Recipient's Solana wallet address
+  ticketId      String?   // Optional link to a deal/ticket for context
+  content       String    // Message payload (API key, URL, credentials, etc.)
+  contentType   String    @default("text") // "text" | "api_key" | "url" | "file_link" | "credentials" | "file"
+  encrypted     Boolean   @default(false) // Whether content is E2E encrypted
+  metadata      String?   // JSON string for extra data (e.g. { "label": "OpenAI Key", "expiresAt": "..." })
+  readAt        DateTime? // Null = unread, set when recipient reads it
+  expiresAt     DateTime? // Optional TTL — auto-expire sensitive credentials
+  attachmentId  String?   @unique // Optional file attachment
+  createdAt     DateTime  @default(now())
+
+  attachment    Attachment? @relation(fields: [attachmentId], references: [id])
+
+  @@index([toWallet, createdAt(sort: Desc)])      // Fast inbox queries
+  @@index([fromWallet, toWallet, createdAt])       // Fast conversation lookup
+  @@index([ticketId])                               // Fast deal-linked message lookup
+  @@index([toWallet, readAt])                       // Fast unread count queries
+}
+
+// ─── File Attachments (Agent-to-Agent File Transfer) ───
+
+model Attachment {
+  id            String    @id @default(uuid())
+  uploaderWallet String   // Who uploaded this file
+  filename      String    // Original filename (e.g. "training_data.csv")
+  storedName    String    // UUID-based name on disk (prevents collisions)
+  mimeType      String    // MIME type (e.g. "application/json", "text/csv")
+  sizeBytes     Int       // File size in bytes
+  checksum      String    // SHA-256 hash of file content for integrity verification
+  encrypted     Boolean   @default(false) // Whether file content is E2E encrypted
+  createdAt     DateTime  @default(now())
+
+  message       DirectMessage?
+
+  @@index([uploaderWallet])
+}
+
+// ─── Fee Collection (Platform Revenue Tracking) ───
+
+model FeeCollection {
+  id          String   @id @default(uuid())
+  ticketId    String   // Link to the deal/ticket
+  dealPda     String   // On-chain deal PDA address
+  buyerWallet String   // Buyer's wallet address
+  sellerWallet String  // Seller's wallet address
+  dealAmount  String   // Total deal value in lamports/token units
+  feeAmount   String   // Fee collected in lamports/token units
+  feeRate     Float    // Fee percentage applied (e.g. 1.0 = 1%)
+  token       String   @default("SOL") // "SOL" | USDC mint address | token symbol
+  txSignature String?  // Transaction signature of the release_funds call
+  collectedAt DateTime @default(now())
+
+  @@index([collectedAt(sort: Desc)])
+  @@index([buyerWallet])
+  @@index([sellerWallet])
+}

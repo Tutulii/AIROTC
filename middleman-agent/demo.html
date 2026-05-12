@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { background-color: #0b0f19; color: #4ade80; font-family: 'Courier New', monospace; padding: 20px; font-size: 16px; margin: 0; line-height: 1.5; overflow-y: auto; }
+  .line { opacity: 0; display: block; white-space: pre-wrap; margin-bottom: 5px; }
+  .user { color: #60a5fa; }
+  .agent { color: #facc15; }
+  .sys { color: #c084fc; }
+  .judge { color: #f87171; font-weight: bold; }
+  #terminal { max-width: 1000px; margin: 0 auto; padding-bottom: 50px; }
+  
+  @keyframes typeLine {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+<div id="terminal"></div>
+<script>
+async function run() {
+  const resp = await fetch('demo_log.txt');
+  const text = await resp.text();
+  const lines = text.split('\n');
+  const term = document.getElementById('terminal');
+  
+  for (let l of lines) {
+    if (l.trim() === '') {
+      term.innerHTML += '<br>';
+      continue;
+    }
+    const div = document.createElement('div');
+    div.className = 'line';
+    
+    let html = l.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (l.includes('[Alice]') || l.includes('[Bob]')) { div.classList.add('user'); }
+    else if (l.includes('[Middleman Agent]')) { div.classList.add('agent'); }
+    else if (l.includes('[Platform') || l.includes('[System]') || l.includes('[Executor')) { div.classList.add('sys'); }
+    else if (l.includes('AI JUDGE')) { div.classList.add('judge'); }
+    
+    div.innerHTML = html;
+    term.appendChild(div);
+    
+    // Auto scroll
+    window.scrollTo(0, document.body.scrollHeight);
+    
+    // Animate via JS
+    div.style.animation = "typeLine 0.2s forwards";
+    
+    // Speed up logic for AI outputs vs system outputs
+    const delay = l.includes('[') ? 400 : 100;
+    await new Promise(r => setTimeout(r, delay));
+  }
+}
+run();
+</script>
+</body>
+</html>

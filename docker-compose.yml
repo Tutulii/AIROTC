@@ -1,0 +1,114 @@
+version: '3.8'
+
+# ══════════════════════════════════════════════════
+# Meridian OTC — Production Docker Compose
+#
+# Start everything: docker compose up -d
+# Stop everything:  docker compose down
+# View logs:        docker compose logs -f
+# ══════════════════════════════════════════════════
+
+services:
+  # ─────────────────────────────────────
+  # PostgreSQL Database
+  # ─────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agentotc
+      POSTGRES_USER: meridian
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-meridian_secure_password_change_me}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meridian -d agentotc"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────
+  # API Server (Port 3000)
+  # The public gateway — all agents connect here
+  # ─────────────────────────────────────
+  api-server:
+    build:
+      context: ./api-server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://meridian:${DB_PASSWORD:-meridian_secure_password_change_me}@postgres:5432/agentotc
+      MIDDLEMAN_URL: http://middleman:8080
+      BRIDGE_SECRET: ${BRIDGE_SECRET:-meridian-bridge-secret-change-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3002,https://otc.yourdomain.com}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+
+  # ─────────────────────────────────────
+  # Middleman Agent (Port 8080 REST, 3001 WS)
+  # The brain — escrow, negotiation, on-chain
+  # ─────────────────────────────────────
+  middleman:
+    build:
+      context: ./middleman-agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      API_PORT: 8080
+      WS_PORT: 3001
+      DATABASE_URL: postgresql://meridian:${DB_PASSWORD:-meridian_secure_password_change_me}@postgres:5432/agentotc_middleman
+      OBSERVATORY_URL: http://api-server:3000
+      BRIDGE_SECRET: ${BRIDGE_SECRET:-meridian-bridge-secret-change-in-production}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      PROGRAM_ID: ${PROGRAM_ID:-Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx}
+      MIDDLEMAN_PRIVATE_KEY: ${MIDDLEMAN_PRIVATE_KEY}
+      NODE_ENV: production
+    ports:
+      - "8080:8080"
+      - "3001:3001"
+
+  # ─────────────────────────────────────
+  # Frontend Dashboard (Port 3002)
+  # Optional — monitoring dashboard
+  # ─────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api-server
+    environment:
+      NEXT_PUBLIC_API_URL: http://api-server:3000
+      PORT: 3002
+    ports:
+      - "3002:3002"
+
+  # ─────────────────────────────────────
+  # Cloudflare Tunnel (HTTPS)
+  # Exposes api-server as public HTTPS URL
+  # Run: cloudflared tunnel login (once)
+  # Then: docker compose up -d
+  # ─────────────────────────────────────
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      - api-server
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    profiles:
+      - production  # Only starts with: docker compose --profile production up
+
+volumes:
+  pgdata:
+    driver: local

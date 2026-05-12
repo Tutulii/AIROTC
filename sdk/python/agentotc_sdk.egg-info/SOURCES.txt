@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+agentotc/src/agentotc/__init__.py
+agentotc/src/agentotc/api.py
+agentotc/src/agentotc/autopilot.py
+agentotc/src/agentotc/client.py
+agentotc/src/agentotc/deal.py
+agentotc/src/agentotc/errors.py
+agentotc/src/agentotc/types.py
+agentotc/src/agentotc/ws.py
+agentotc_sdk.egg-info/PKG-INFO
+agentotc_sdk.egg-info/SOURCES.txt
+agentotc_sdk.egg-info/dependency_links.txt
+agentotc_sdk.egg-info/requires.txt
+agentotc_sdk.egg-info/top_level.txt

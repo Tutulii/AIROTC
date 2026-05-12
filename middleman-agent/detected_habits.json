@@ -1,0 +1,122 @@
+[
+  {
+    "pattern": "frequently performs \"curiosity_read\" actions (40 times, 48% of all actions)",
+    "frequency": 40,
+    "confidence": 1,
+    "firstSeen": "2026-04-06T16:45:46.322Z",
+    "lastSeen": "2026-04-09T19:44:48.835Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "repeatedly interested in \"commerce\" (appeared in 21 experiences)",
+    "frequency": 21,
+    "confidence": 1,
+    "firstSeen": "2026-04-09T08:54:09.168Z",
+    "lastSeen": "2026-04-10T06:59:26.948Z",
+    "category": "topic_affinity"
+  },
+  {
+    "pattern": "tends to do \"curiosity_read\" after \"creative_writing\" (8 times)",
+    "frequency": 8,
+    "confidence": 1,
+    "firstSeen": "2026-04-09T08:54:09.168Z",
+    "lastSeen": "2026-04-10T20:02:18.364Z",
+    "category": "behavioral_sequence"
+  },
+  {
+    "pattern": "tends to do \"creative_writing\" after \"belief_evolved\" (7 times)",
+    "frequency": 7,
+    "confidence": 1,
+    "firstSeen": "2026-04-09T08:54:09.168Z",
+    "lastSeen": "2026-04-11T06:46:34.979Z",
+    "category": "behavioral_sequence"
+  },
+  {
+    "pattern": "frequently performs \"curiosity_read\" actions (41 times, 48% of all actions)",
+    "frequency": 41,
+    "confidence": 1,
+    "firstSeen": "2026-04-06T16:45:46.322Z",
+    "lastSeen": "2026-04-10T06:59:26.948Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"curiosity_read\" actions (47 times, 46% of all actions)",
+    "frequency": 47,
+    "confidence": 1,
+    "firstSeen": "2026-04-06T16:45:46.322Z",
+    "lastSeen": "2026-04-10T10:04:01.737Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"soul_evolved\" actions (79 times, 47% of all actions)",
+    "frequency": 79,
+    "confidence": 1,
+    "firstSeen": "2026-04-07T17:26:04.163Z",
+    "lastSeen": "2026-04-11T21:07:14.990Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"soul_evolved\" actions (98 times, 49% of all actions)",
+    "frequency": 98,
+    "confidence": 1,
+    "firstSeen": "2026-04-07T20:15:10.596Z",
+    "lastSeen": "2026-04-13T05:45:24.889Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"soul_evolved\" actions (99 times, 50% of all actions)",
+    "frequency": 99,
+    "confidence": 1,
+    "firstSeen": "2026-04-07T20:15:10.596Z",
+    "lastSeen": "2026-04-13T15:54:06.794Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"soul_evolved\" actions (105 times, 53% of all actions)",
+    "frequency": 105,
+    "confidence": 1,
+    "firstSeen": "2026-04-09T09:23:11.148Z",
+    "lastSeen": "2026-04-13T19:11:17.266Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"soul_evolved\" actions (106 times, 53% of all actions)",
+    "frequency": 106,
+    "confidence": 1,
+    "firstSeen": "2026-04-09T19:48:19.901Z",
+    "lastSeen": "2026-04-14T05:02:45.679Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"soul_evolved\" actions (108 times, 54% of all actions)",
+    "frequency": 108,
+    "confidence": 1,
+    "firstSeen": "2026-04-10T09:16:28.477Z",
+    "lastSeen": "2026-05-11T14:41:13.565Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"soul_evolved\" actions (71 times, 45% of all actions)",
+    "frequency": 71,
+    "confidence": 0.9930817610062893,
+    "firstSeen": "2026-04-07T17:26:04.163Z",
+    "lastSeen": "2026-04-11T09:43:56.504Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"curiosity_read\" actions (38 times, 49% of all actions)",
+    "frequency": 38,
+    "confidence": 0.9743589743589743,
+    "firstSeen": "2026-04-06T16:45:46.322Z",
+    "lastSeen": "2026-04-09T10:37:36.577Z",
+    "category": "tool_preference"
+  },
+  {
+    "pattern": "frequently performs \"curiosity_read\" actions (35 times, 49% of all actions)",
+    "frequency": 35,
+    "confidence": 0.9722222222222222,
+    "firstSeen": "2026-04-06T16:45:46.322Z",
+    "lastSeen": "2026-04-09T10:05:29.941Z",
+    "category": "tool_preference"
+  }
+]

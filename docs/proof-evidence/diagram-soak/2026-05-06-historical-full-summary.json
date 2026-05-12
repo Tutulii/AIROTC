@@ -1,0 +1,30 @@
+{
+  "kind": "air_otc_diagram_soak_summary",
+  "command": "npm run test:diagram:soak",
+  "recordedAt": "2026-05-06T06:25:26.643Z",
+  "totalRuns": 10,
+  "passed": 10,
+  "failed": 0,
+  "perBuyerOnlyApprovalGate": {
+    "passed": 5,
+    "total": 5
+  },
+  "fullErPerHappyPath": {
+    "passed": 5,
+    "total": 5
+  },
+  "iterations": [
+    { "scenario": "private_blocked", "iteration": 1, "success": true },
+    { "scenario": "full_happy_path", "iteration": 1, "success": true },
+    { "scenario": "private_blocked", "iteration": 2, "success": true },
+    { "scenario": "full_happy_path", "iteration": 2, "success": true },
+    { "scenario": "private_blocked", "iteration": 3, "success": true },
+    { "scenario": "full_happy_path", "iteration": 3, "success": true },
+    { "scenario": "private_blocked", "iteration": 4, "success": true },
+    { "scenario": "full_happy_path", "iteration": 4, "success": true },
+    { "scenario": "private_blocked", "iteration": 5, "success": true },
+    { "scenario": "full_happy_path", "iteration": 5, "success": true }
+  ],
+  "note": "Historical full default soak evidence after the shielded-credit redeploy. Use alongside the fresh 2026-05-10 smoke summary."
+}
+

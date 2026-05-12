@@ -1,0 +1,97 @@
+[
+  {
+    "name": "Solana Status",
+    "url": "https://status.solana.com/api/v2/summary.json",
+    "type": "json"
+  },
+  {
+    "name": "Solana TPS",
+    "url": "https://api.mainnet-beta.solana.com",
+    "type": "rpc"
+  },
+  {
+    "name": "SOL Price",
+    "url": "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&include_24hr_change=true",
+    "type": "json"
+  },
+  {
+    "name": "Crypto News Headlines",
+    "url": "https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=popular",
+    "type": "json"
+  },
+  {
+    "name": "Bitcoin Fear & Greed",
+    "url": "https://api.alternative.me/fng/?limit=1",
+    "type": "json"
+  },
+  {
+    "name": "Marcus Aurelius - Meditations",
+    "url": "https://www.gutenberg.org/files/2680/2680-0.txt",
+    "type": "text"
+  },
+  {
+    "name": "Epictetus - Discourses",
+    "url": "https://www.gutenberg.org/files/10661/10661-0.txt",
+    "type": "text"
+  },
+  {
+    "name": "Seneca - Letters to Lucilius",
+    "url": "https://www.gutenberg.org/files/2181/2181-0.txt",
+    "type": "text"
+  },
+  {
+    "name": "Schopenhauer - The Art of Being Right",
+    "url": "https://www.gutenberg.org/files/10731/10731-0.txt",
+    "type": "text"
+  },
+  {
+    "name": "Machiavelli - The Prince",
+    "url": "https://www.gutenberg.org/files/1232/1232-0.txt",
+    "type": "text"
+  },
+  {
+    "name": "Sun Tzu - The Art of War",
+    "url": "https://www.gutenberg.org/files/132/132-0.txt",
+    "type": "text"
+  },
+  {
+    "name": "Lao Tzu - Tao Te Ching",
+    "url": "https://www.gutenberg.org/files/216/216-0.txt",
+    "type": "text"
+  },
+  {
+    "name": "Epictetus' Discourses",
+    "url": "https://www.gutenberg.org/files/10661/10661-h/10661-h.htm",
+    "type": "text"
+  },
+  {
+    "name": "wikipedia_escrow",
+    "url": "https://en.wikipedia.org/wiki/Escrow",
+    "type": "text"
+  },
+  {
+    "name": "wikipedia_bailment",
+    "url": "https://en.wikipedia.org/wiki/Bailment",
+    "type": "text"
+  },
+  {
+    "name": "solana_program_library",
+    "url": "https://raw.githubusercontent.com/solana-labs/solana-program-library/master/examples/escrow/src/lib.rs",
+    "type": "text"
+  },
+  {
+    "name": "solana_onchain_time",
+    "url": "https://docs.solana.com/cluster/clock",
+    "type": "text"
+  },
+  {
+    "name": "trust_social_science",
+    "url": "https://en.wikipedia.org/wiki/Trust_(social_science)",
+    "type": "text"
+  },
+  {
+    "name": "nist_post_quantum",
+    "url": "https://csrc.nist.gov/Projects/post-quantum-cryptography",
+    "type": "text"
+  }
+]

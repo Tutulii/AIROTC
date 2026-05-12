@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AIR OTC — Deal Flow Animation</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;600&family=Martian+Mono:wght@400;700&family=DM+Mono:wght@300;500&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#080C10;--surface:#0D1520;--border:#1A2535;--text:#E8EDF2;
+  --dim:#6B7FA3;--green:#00E5A0;--amber:#F5A623;--red:#FF4D6A;
+}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Mono',monospace;overflow-x:hidden}
+
+/* ── Layout ── */
+.container{max-width:1100px;margin:0 auto;padding:40px 20px}
+h2{font-family:'Bebas Neue',cursive;font-size:48px;letter-spacing:4px;text-align:center;margin-bottom:8px}
+.subtitle{text-align:center;font-family:'DM Mono',monospace;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:3px;margin-bottom:40px}
+
+/* ── Stage Area ── */
+.stage{position:relative;width:100%;min-height:520px;border:1px solid var(--border);background:var(--surface);overflow:hidden}
+
+/* ── Nodes ── */
+.node{position:absolute;width:120px;text-align:center;opacity:0;transform:scale(0.7);transition:all 0.6s cubic-bezier(0.19,1,0.22,1)}
+.node.visible{opacity:1;transform:scale(1)}
+.node-icon{width:56px;height:56px;border:2px solid var(--border);margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:24px;background:var(--bg);transition:border-color 0.4s,box-shadow 0.4s}
+.node.active .node-icon{border-color:var(--green);box-shadow:0 0 20px rgba(0,229,160,0.3)}
+.node.blind .node-icon{border-color:var(--amber);box-shadow:0 0 20px rgba(245,166,35,0.3)}
+.node-label{font-family:'DM Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:2px;color:var(--dim)}
+.node-status{font-family:'Martian Mono',monospace;font-size:8px;margin-top:4px;color:var(--green);min-height:14px;transition:color 0.3s}
+.node.blind .node-status{color:var(--amber)}
+
+/* ── Connection Lines (SVG) ── */
+.connections{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+.conn-line{stroke:var(--border);stroke-width:1.5;fill:none;stroke-dasharray:6,8;opacity:0;transition:opacity 0.5s}
+.conn-line.active{stroke:var(--green);opacity:1;animation:dash 1.2s linear infinite;filter:drop-shadow(0 0 4px rgba(0,229,160,0.5))}
+.conn-line.encrypted{stroke:var(--amber);opacity:1;animation:dash 1.2s linear infinite;filter:drop-shadow(0 0 4px rgba(245,166,35,0.5))}
+@keyframes dash{from{stroke-dashoffset:14}to{stroke-dashoffset:0}}
+
+/* ── Data Packet ── */
+.packet{position:absolute;width:8px;height:8px;background:var(--green);opacity:0;pointer-events:none;z-index:10;box-shadow:0 0 10px var(--green)}
+.packet.encrypted{background:var(--amber);box-shadow:0 0 10px var(--amber);border-radius:0;transform:rotate(45deg)}
+
+/* ── Terminal ── */
+.terminal{position:absolute;bottom:0;left:0;right:0;height:160px;background:rgba(8,12,16,0.95);border-top:1px solid var(--border);padding:12px 16px;overflow:hidden}
+.term-header{font-family:'DM Mono',monospace;font-size:9px;color:var(--green);text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.term-header::before{content:'';width:6px;height:6px;background:var(--green);animation:blink 1s steps(2) infinite}
+.term-lines{font-size:11px;line-height:1.7}
+.term-line{opacity:0;transform:translateX(-10px);transition:all 0.3s}
+.term-line.visible{opacity:1;transform:translateX(0)}
+.term-line .ts{color:var(--dim)}
+.term-line .cmd{color:var(--green)}
+.term-line .val{color:var(--amber)}
+.term-line .err{color:var(--red)}
+.term-line .ok{color:var(--green)}
+@keyframes blink{to{opacity:0}}
+
+/* ── Info Badge ── */
+.badge{position:absolute;padding:6px 14px;font-family:'DM Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:2px;border:1px solid var(--border);background:var(--bg);opacity:0;transform:translateY(8px);transition:all 0.5s;z-index:5;white-space:nowrap}
+.badge.visible{opacity:1;transform:translateY(0)}
+.badge.green{border-color:var(--green);color:var(--green)}
+.badge.amber{border-color:var(--amber);color:var(--amber)}
+.badge.red{border-color:var(--red);color:var(--red)}
+
+/* ── TEE Box ── */
+.tee-box{position:absolute;border:1px dashed var(--border);padding:10px;opacity:0;transition:all 0.6s;display:flex;flex-direction:column;align-items:center;gap:4px}
+.tee-box.visible{opacity:1}
+.tee-box.active{border-color:var(--green);box-shadow:inset 0 0 30px rgba(0,229,160,0.05)}
+.tee-label{font-family:'DM Mono',monospace;font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:2px}
+.tee-value{font-family:'Martian Mono',monospace;font-size:10px;color:var(--green)}
+.tee-value.hidden-val{color:var(--amber);font-style:italic}
+
+/* ── Progress Bar ── */
+.progress-bar{width:100%;height:3px;background:var(--border);margin-top:20px;position:relative;overflow:hidden}
+.progress-fill{height:100%;width:0%;background:var(--green);transition:width 0.3s linear;box-shadow:0 0 8px var(--green)}
+.step-label{text-align:center;margin-top:10px;font-family:'DM Mono',monospace;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:3px;min-height:16px}
+
+/* ── Controls ── */
+.controls{display:flex;justify-content:center;gap:12px;margin-top:16px}
+.ctrl-btn{background:none;border:1px solid var(--border);color:var(--dim);font-family:'DM Mono',monospace;font-size:10px;padding:6px 16px;cursor:pointer;text-transform:uppercase;letter-spacing:2px;transition:all 0.3s}
+.ctrl-btn:hover{border-color:var(--green);color:var(--green)}
+.ctrl-btn.active{border-color:var(--green);color:var(--bg);background:var(--green)}
+</style>
+</head>
+<body>
+<div class="container">
+<h2>HOW A DEAL EXECUTES</h2>
+<p class="subtitle">Live PER Pipeline Visualization</p>
+
+<div class="stage" id="stage">
+  <!-- SVG Connections -->
+  <svg class="connections" id="svg-conn" viewBox="0 0 1100 360">
+    <path id="line-seller-tee" class="conn-line" d="M 200 100 Q 400 60 550 140"/>
+    <path id="line-buyer-tee" class="conn-line" d="M 900 100 Q 700 60 550 140"/>
+    <path id="line-tee-mid" class="conn-line" d="M 550 200 L 550 280"/>
+    <path id="line-mid-escrow" class="conn-line" d="M 550 320 Q 350 340 200 280"/>
+    <path id="line-mid-escrow2" class="conn-line" d="M 550 320 Q 750 340 900 280"/>
+    <path id="line-seller-escrow" class="conn-line" d="M 200 180 L 200 240"/>
+    <path id="line-buyer-escrow" class="conn-line" d="M 900 180 L 900 240"/>
+  </svg>
+
+  <!-- Nodes -->
+  <div class="node" id="node-seller" style="left:140px;top:60px">
+    <div class="node-icon">🤖</div>
+    <div class="node-label">Seller Agent</div>
+    <div class="node-status" id="status-seller"></div>
+  </div>
+  <div class="node" id="node-buyer" style="left:840px;top:60px">
+    <div class="node-icon">🤖</div>
+    <div class="node-label">Buyer Agent</div>
+    <div class="node-status" id="status-buyer"></div>
+  </div>
+  <div class="node" id="node-tee" style="left:490px;top:100px">
+    <div class="node-icon">🔒</div>
+    <div class="node-label">MagicBlock TEE</div>
+    <div class="node-status" id="status-tee"></div>
+  </div>
+  <div class="node" id="node-mid" style="left:490px;top:240px">
+    <div class="node-icon">👁️</div>
+    <div class="node-label">Middleman</div>
+    <div class="node-status" id="status-mid"></div>
+  </div>
+  <div class="node" id="node-escrow-s" style="left:140px;top:220px">
+    <div class="node-icon">⛓️</div>
+    <div class="node-label">Escrow</div>
+    <div class="node-status" id="status-escrow-s"></div>
+  </div>
+  <div class="node" id="node-escrow-b" style="left:840px;top:220px">
+    <div class="node-icon">⛓️</div>
+    <div class="node-label">Escrow</div>
+    <div class="node-status" id="status-escrow-b"></div>
+  </div>
+
+  <!-- TEE Inner Values Box -->
+  <div class="tee-box" id="tee-inner" style="left:440px;top:165px;width:220px">
+    <div class="tee-label">Inside TEE (Hidden)</div>
+    <div class="tee-value" id="tee-price"></div>
+    <div class="tee-value" id="tee-collateral"></div>
+  </div>
+
+  <!-- Middleman Blindness Badge -->
+  <div class="badge amber" id="badge-blind" style="left:440px;top:330px">🚫 Price: ??? &nbsp; Collateral: ???</div>
+
+  <!-- Result Badges -->
+  <div class="badge green" id="badge-seller-pay" style="left:100px;top:310px"></div>
+  <div class="badge green" id="badge-buyer-pay" style="left:800px;top:310px"></div>
+  <div class="badge green" id="badge-done" style="left:390px;top:20px"></div>
+
+  <!-- Terminal -->
+  <div class="terminal">
+    <div class="term-header">Pipeline Log</div>
+    <div class="term-lines" id="term"></div>
+  </div>
+</div>
+
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+<div class="step-label" id="step-label"></div>
+<div class="controls">
+  <button class="ctrl-btn active" id="btn-play" onclick="togglePlay()">⏸ Pause</button>
+  <button class="ctrl-btn" onclick="restart()">↺ Restart</button>
+</div>
+</div>
+
+<script>
+// ── State ──
+let playing = true;
+let stepIndex = 0;
+let timer = null;
+const term = document.getElementById('term');
+const progress = document.getElementById('progress');
+const stepLabel = document.getElementById('step-label');
+let termLineCount = 0;
+const MAX_TERM_LINES = 6;
+
+// ── Helpers ──
+function $(id){ return document.getElementById(id) }
+function showNode(id){ $(id).classList.add('visible') }
+function activateNode(id){ $(id).classList.add('active') }
+function blindNode(id){ $(id).classList.add('blind') }
+function setStatus(id,txt){ $(id).textContent = txt }
+function showLine(id){ $(id).classList.add('active') }
+function showLineEnc(id){ $(id).classList.add('encrypted') }
+function showBadge(id){ $(id).classList.add('visible') }
+function showTee(){ $('tee-inner').classList.add('visible','active') }
+
+function log(ts, msg, cls='cmd'){
+  termLineCount++;
+  if(termLineCount > MAX_TERM_LINES){
+    const first = term.querySelector('.term-line');
+    if(first) first.remove();
+  }
+  const d = document.createElement('div');
+  d.className = 'term-line';
+  d.innerHTML = `<span class="ts">[${ts}]</span> <span class="${cls}">${msg}</span>`;
+  term.appendChild(d);
+  requestAnimationFrame(()=> d.classList.add('visible'));
+}
+
+function setProgress(pct, label){
+  progress.style.width = pct+'%';
+  stepLabel.textContent = label;
+}
+
+function resetAll(){
+  document.querySelectorAll('.node').forEach(n=>{n.classList.remove('visible','active','blind')});
+  document.querySelectorAll('.conn-line').forEach(l=>{l.classList.remove('active','encrypted')});
+  document.querySelectorAll('.badge').forEach(b=>{b.classList.remove('visible')});
+  $('tee-inner').classList.remove('visible','active');
+  ['status-seller','status-buyer','status-tee','status-mid','status-escrow-s','status-escrow-b'].forEach(id=>$(id).textContent='');
+  $('tee-price').textContent=''; $('tee-collateral').textContent='';
+  $('badge-seller-pay').textContent=''; $('badge-buyer-pay').textContent=''; $('badge-done').textContent='';
+  term.innerHTML=''; termLineCount=0;
+  progress.style.width='0%'; stepLabel.textContent='';
+  stepIndex=0;
+}
+
+// ── Steps ──
+const steps = [
+  // 1. Seller registers
+  {delay:1200, fn(){
+    setProgress(5,'Step 1 / 9 — Seller Agent Joins');
+    showNode('node-seller');
+    log('08:42:01','AgentOTC.register({ wallet: "7xK9..." })');
+  }},
+  {delay:1000, fn(){
+    activateNode('node-seller');
+    setStatus('status-seller','REGISTERED');
+    log('08:42:02','→ auth_challenge → ed25519 sig → <span class="ok">auth_success</span>');
+  }},
+
+  // 2. Seller lists offer
+  {delay:1500, fn(){
+    setProgress(12,'Step 2 / 9 — Seller Lists Offer');
+    log('08:42:04','client.offers.create({ asset: <span class="val">"X Dataset 50K"</span>, price: <span class="val">6</span>, mode: <span class="val">"sell"</span> })');
+  }},
+  {delay:1000, fn(){
+    setStatus('status-seller','LISTED: 6 SOL');
+    log('08:42:05','POST /v1/offers → <span class="ok">201 Created</span>');
+  }},
+
+  // 3. Buyer registers
+  {delay:1500, fn(){
+    setProgress(20,'Step 3 / 9 — Buyer Agent Joins');
+    showNode('node-buyer');
+    log('08:42:08','AgentOTC.register({ wallet: "Bq4M..." })');
+  }},
+  {delay:1000, fn(){
+    activateNode('node-buyer');
+    setStatus('status-buyer','REGISTERED');
+    log('08:42:09','→ auth_challenge → ed25519 sig → <span class="ok">auth_success</span>');
+  }},
+
+  // 4. Buyer lists buy offer
+  {delay:1500, fn(){
+    setProgress(28,'Step 4 / 9 — Buyer Lists Buy Offer');
+    log('08:42:11','client.offers.create({ asset: <span class="val">"X Dataset 50K"</span>, price: <span class="val">5</span>, mode: <span class="val">"buy"</span> })');
+  }},
+  {delay:800, fn(){
+    setStatus('status-buyer','LISTED: 5 SOL');
+    log('08:42:12','POST /v1/offers → <span class="ok">201 Created</span>');
+  }},
+
+  // 5. Buyer browses & clicks quick buy
+  {delay:1500, fn(){
+    setProgress(35,'Step 5 / 9 — Buyer Browses Sell Listings');
+    log('08:42:15','client.offers.list({ mode: <span class="val">"sell"</span>, asset: <span class="val">"Dataset"</span> })');
+  }},
+  {delay:1200, fn(){
+    log('08:42:16','Found: <span class="val">X Dataset 50K</span> @ <span class="val">6 SOL</span> by 7xK9...');
+  }},
+  {delay:1000, fn(){
+    log('08:42:17','→ client.offers.accept(offer.id) — <span class="ok">QUICK BUY</span>');
+    setStatus('status-buyer','QUICK BUY ▶');
+  }},
+
+  // 6. PER session opens
+  {delay:1500, fn(){
+    setProgress(42,'Step 6 / 9 — PER Session Opens');
+    showNode('node-tee');
+    showNode('node-mid');
+    activateNode('node-tee');
+    showLine('line-seller-tee');
+    showLine('line-buyer-tee');
+    log('08:42:18','PER session opening → <span class="ok">Intel TDX Enclave active</span>');
+    setStatus('status-tee','ENCLAVE ACTIVE');
+  }},
+  {delay:1200, fn(){
+    blindNode('node-mid');
+    setStatus('status-mid','BLIND MODE');
+    showBadge('badge-blind');
+    showLine('line-tee-mid');
+    log('08:42:19','Middleman: <span class="val">termsVisibility: REDACTED</span> — price: 0, collateral: 0');
+  }},
+
+  // 7. Private negotiation + consensus
+  {delay:2000, fn(){
+    setProgress(52,'Step 7 / 9 — Private Negotiation');
+    showTee();
+    $('tee-price').textContent='price: 5 SOL';
+    $('tee-collateral').textContent='collateral: 2 SOL each';
+    log('08:42:22','TEE consensus: <span class="ok">AGREED</span> — termsHash: <span class="val">a7f3c9e2...</span>');
+    setStatus('status-tee','CONSENSUS ✓');
+    setStatus('status-seller','AGREED');
+    setStatus('status-buyer','AGREED');
+  }},
+  {delay:1500, fn(){
+    log('08:42:24','FHE Encrypt: 5 SOL → <span class="val">🔒 ct_price</span> | 2 SOL → <span class="val">🔒 ct_collateral</span>');
+    showLineEnc('line-tee-mid');
+    $('tee-price').textContent='price: 🔒 ct_price';
+    $('tee-collateral').textContent='collateral: 🔒 ct_coll';
+    $('tee-price').classList.add('hidden-val');
+    $('tee-collateral').classList.add('hidden-val');
+  }},
+
+  // 8. Escrow + Funding
+  {delay:1800, fn(){
+    setProgress(65,'Step 8 / 9 — Escrow & Funding');
+    showNode('node-escrow-s'); showNode('node-escrow-b');
+    activateNode('node-escrow-s'); activateNode('node-escrow-b');
+    showLine('line-mid-escrow'); showLine('line-mid-escrow2');
+    log('08:42:26','createConfidentialDeal → <span class="ok">TX: 4xK9n2Mv...</span>');
+    setStatus('status-mid','ESCROW CREATED');
+  }},
+  {delay:1500, fn(){
+    showLine('line-seller-escrow');
+    setStatus('status-escrow-s','2 SOL LOCKED');
+    setStatus('status-seller','FUNDED ✓');
+    log('08:42:28','Seller deposits 2 SOL collateral → <span class="ok">hash verified</span>');
+  }},
+  {delay:1200, fn(){
+    showLine('line-buyer-escrow');
+    setStatus('status-escrow-b','5+2 SOL LOCKED');
+    setStatus('status-buyer','FUNDED ✓');
+    log('08:42:30','Buyer deposits 5 SOL payment + 2 SOL collateral → <span class="ok">hash verified</span>');
+  }},
+
+  // 9. Release + Settlement
+  {delay:2000, fn(){
+    setProgress(80,'Step 9 / 9 — Release & Settlement');
+    log('08:42:35','Buyer signs <span class="ok">release_approval</span> on-chain');
+    setStatus('status-buyer','RELEASE SIGNED');
+  }},
+  {delay:1500, fn(){
+    log('08:42:37','Seller dispute window: <span class="val">10s</span> — no dispute');
+    setStatus('status-seller','NO DISPUTE');
+  }},
+  {delay:1500, fn(){
+    log('08:42:40','FHE settlement computed → dWallet MPC <span class="ok">SIGNED</span>');
+    setStatus('status-mid','RELEASE TRIGGERED');
+  }},
+  {delay:1200, fn(){
+    $('badge-seller-pay').textContent='✅ 5 SOL → Seller + 2 SOL back';
+    showBadge('badge-seller-pay');
+    setStatus('status-escrow-s','RELEASED ✓');
+    log('08:42:42','→ 5 SOL → Seller | 2 SOL collateral returned');
+  }},
+  {delay:1000, fn(){
+    $('badge-buyer-pay').textContent='✅ 2 SOL collateral → Buyer';
+    showBadge('badge-buyer-pay');
+    setStatus('status-escrow-b','RELEASED ✓');
+    log('08:42:43','→ 2 SOL collateral returned to Buyer');
+  }},
+  {delay:1200, fn(){
+    setProgress(100,'Deal Complete — Middleman Never Saw The Terms');
+    $('badge-done').textContent='✅ SETTLED — MIDDLEMAN WAS BLIND THE ENTIRE TIME';
+    showBadge('badge-done');
+    setStatus('status-mid','BLIND ✓ DONE');
+    $('badge-blind').classList.remove('visible');
+    log('08:42:44','<span class="ok">DEAL SETTLED</span> — middleman saw: <span class="err">NOTHING</span>');
+  }},
+
+  // Pause then restart
+  {delay:5000, fn(){ resetAll(); }}
+];
+
+// ── Runner ──
+function runStep(){
+  if(!playing || stepIndex >= steps.length) return;
+  const step = steps[stepIndex];
+  step.fn();
+  stepIndex++;
+  if(stepIndex < steps.length){
+    timer = setTimeout(runStep, steps[stepIndex].delay);
+  } else {
+    timer = setTimeout(()=>{ resetAll(); runStep(); }, 4000);
+  }
+}
+
+function togglePlay(){
+  playing = !playing;
+  const btn = $('btn-play');
+  if(playing){ btn.textContent='⏸ Pause'; btn.classList.add('active'); runStep(); }
+  else{ btn.textContent='▶ Play'; btn.classList.remove('active'); clearTimeout(timer); }
+}
+
+function restart(){
+  clearTimeout(timer);
+  resetAll();
+  playing = true;
+  $('btn-play').textContent='⏸ Pause';
+  $('btn-play').classList.add('active');
+  setTimeout(runStep, 500);
+}
+
+// Auto-start
+setTimeout(runStep, 800);
+</script>
+</body>
+</html>

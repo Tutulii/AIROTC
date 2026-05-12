@@ -1,0 +1,226 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const prismaMock = {
+  agent: {
+    upsert: vi.fn(),
+  },
+  offer: {
+    create: vi.fn(),
+    findMany: vi.fn(),
+  },
+  $transaction: vi.fn(),
+};
+
+vi.mock("../src/lib/prisma", () => ({
+  prisma: prismaMock,
+}));
+
+vi.mock("../src/utils/validators", () => ({
+  isUUID: vi.fn(() => true),
+  assertParticipant: vi.fn(),
+}));
+
+vi.mock("../src/ws/socket", () => ({
+  getIO: vi.fn(() => ({
+    to: vi.fn(() => ({
+      emit: vi.fn(),
+    })),
+  })),
+}));
+
+vi.mock("../src/services/webhook.service", () => ({
+  webhookNewMessage: vi.fn(),
+}));
+
+function createResponseMock() {
+  const res: any = {};
+  res.status = vi.fn().mockReturnValue(res);
+  res.json = vi.fn().mockReturnValue(res);
+  return res;
+}
+
+describe("PER marketplace offer flow", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    prismaMock.agent.upsert.mockReset();
+    prismaMock.offer.create.mockReset();
+    prismaMock.offer.findMany.mockReset();
+    prismaMock.$transaction.mockReset();
+  });
+
+  it("creates a PER marketplace offer when privateMode is enabled", async () => {
+    prismaMock.agent.upsert.mockResolvedValue({ id: "agent-1", wallet: "seller-wallet" });
+    prismaMock.offer.create.mockResolvedValue({
+      id: "offer-1",
+      asset: "SOL",
+      price: 5,
+      amount: 1,
+      mode: "sell",
+      collateral: 2,
+      rollupMode: "PER",
+      status: "active",
+      creatorRewardWallet: "fresh-reward-wallet",
+    });
+
+    const { createOffer } = await import("../src/controllers/offersController");
+    const req: any = {
+      wallet: "seller-wallet",
+      body: {
+        asset: "SOL",
+        price: 5,
+        amount: 1,
+        mode: "sell",
+        collateral: 2,
+        privateMode: true,
+        rewardWallet: "F9QX5J7mnHZz7n2Y8X4S4kW3asAk3cX6mAZSE4hMQfJ2",
+      },
+    };
+    const res = createResponseMock();
+
+    await createOffer(req, res);
+
+    expect(prismaMock.offer.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          rollupMode: "PER",
+          creatorRewardWallet: "F9QX5J7mnHZz7n2Y8X4S4kW3asAk3cX6mAZSE4hMQfJ2",
+        }),
+      })
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          rollupMode: "PER",
+        }),
+      })
+    );
+    expect(res.json).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          creatorRewardWallet: expect.anything(),
+        }),
+      })
+    );
+  });
+
+  it("lists PER offers publicly for marketplace discovery", async () => {
+    prismaMock.offer.findMany.mockResolvedValue([
+      {
+        id: "offer-1",
+        asset: "SOL",
+        price: 5,
+        amount: 1,
+        mode: "sell",
+        collateral: 2,
+        rollupMode: "PER",
+        status: "active",
+      },
+    ]);
+
+    const { getOffers } = await import("../src/controllers/offersController");
+    const req: any = { query: {} };
+    const res = createResponseMock();
+
+    await getOffers(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: [
+          expect.objectContaining({
+            id: "offer-1",
+            rollupMode: "PER",
+          }),
+        ],
+      })
+    );
+  });
+
+  it("creates a matched PER ticket that preserves marketplace buyer/seller roles", async () => {
+    const tx = {
+      offer: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "offer-1",
+          status: "active",
+          mode: "sell",
+          rollupMode: "PER",
+          ticket: null,
+          creator: { wallet: "seller-wallet" },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      ticket: {
+        create: vi.fn().mockResolvedValue({
+          id: "ticket-1",
+          buyer: "buyer-wallet",
+          seller: "seller-wallet",
+          status: "negotiating",
+          rollupMode: "PER",
+        }),
+      },
+    };
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx));
+
+    const { acceptOfferService } = await import("../src/services/ticket.service");
+    const ticket = await acceptOfferService("offer-1", "buyer-wallet");
+
+    expect(tx.offer.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "offer-1" },
+      })
+    );
+    expect(tx.offer.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "offer-1", status: "active" },
+        data: { status: "matched" },
+      })
+    );
+    expect(tx.ticket.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          buyer: "buyer-wallet",
+          seller: "seller-wallet",
+          rollupMode: "PER",
+        }),
+      })
+    );
+    expect(ticket).toEqual(
+      expect.objectContaining({
+        id: "ticket-1",
+        buyer: "buyer-wallet",
+        seller: "seller-wallet",
+        rollupMode: "PER",
+      })
+    );
+  });
+
+  it("rejects invalid reward wallets during PER offer creation", async () => {
+    const { createOffer } = await import("../src/controllers/offersController");
+    const req: any = {
+      wallet: "seller-wallet",
+      body: {
+        asset: "SOL",
+        price: 5,
+        amount: 1,
+        mode: "sell",
+        collateral: 2,
+        privateMode: true,
+        rewardWallet: "not-a-wallet",
+      },
+    };
+    const res = createResponseMock();
+
+    await createOffer(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        error: "rewardWallet must be a valid base58 Solana address",
+      })
+    );
+  });
+});

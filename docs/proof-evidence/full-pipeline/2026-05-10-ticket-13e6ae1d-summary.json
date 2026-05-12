@@ -1,0 +1,50 @@
+{
+  "kind": "air_otc_full_pipeline_devnet_summary",
+  "recordedAt": "2026-05-10T04:10:30.923Z",
+  "ticketId": "13e6ae1d-68d0-46f0-a50a-6329965b598c",
+  "offerId": "5024c326-3b75-4d7f-9aba-75c4aad05adb",
+  "phase": "completed",
+  "escrowPda": "5PrqGPyMspsPehK2h1PVpo3Fd4R2Pdo4TyAdqhmi7h9K",
+  "audit": {
+    "valid": true,
+    "entries": 45,
+    "requiredEvents": [
+      "confidential_shielded_credit_settled",
+      "deal_pipeline_settled_confirmed",
+      "deal_pipeline_umbra_lifecycle_completed_confirmed"
+    ]
+  },
+  "timeline": {
+    "status": "completed",
+    "totalEvents": 62
+  },
+  "zerion": {
+    "onlineCheckMode": "light",
+    "snapshotHash": "4b7726760eb4356345de5e51c3066ee6538b9fc0882c2281078bbcc8d3774969",
+    "realTransactionEvidenceRequiredForSdkOnlyPath": true
+  },
+  "transactions": {
+    "approvalTx": "2XpFSUacn2odVAZ8xy5pncei8bARX8PoFBsqw9zH2JzD5QkafzP7iBYTSWmfsgFGFwZSN8qCJiVgkjZwhaZwB6Ye",
+    "releaseTx": "4UZWGTGWXb6uiyjfS3sk9pJtxNn1cCdxAnDhjAxhRonxwQrd9aCgrLUTEY9FEmPkabS1b7eQQ5K6U9TJbe3xAZrJ"
+  },
+  "umbra": {
+    "lifecycleCompletedHash": "a578dd4568d1065c5cb66e8471d1b13604a3648e414a026dba8d70bd0a722f15"
+  },
+  "torque": {
+    "sidecarDelivery": "buyer and seller delivery rows recorded as sent after settlement"
+  },
+  "verification": {
+    "commands": [
+      "airotc_get_deal_status",
+      "airotc_umbra_lifecycle_status",
+      "airotc_get_proof_bundle"
+    ],
+    "verifiedAt": "2026-05-10"
+  },
+  "boundaries": [
+    "Devnet submission-ready does not mean mainnet production-ready.",
+    "SDK-only full-pipeline still requires real or external Zerion transaction evidence.",
+    "Python-side independent Encrypt FHE ciphertext generation remains future work."
+  ]
+}
+

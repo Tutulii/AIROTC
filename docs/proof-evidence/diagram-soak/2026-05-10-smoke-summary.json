@@ -1,0 +1,28 @@
+{
+  "kind": "air_otc_diagram_soak_summary",
+  "command": "DIAGRAM_SOAK_RUNS=1 npm run test:diagram:soak",
+  "recordedAt": "2026-05-10T08:30:37.288Z",
+  "totalRuns": 2,
+  "passed": 2,
+  "failed": 0,
+  "scenarios": [
+    {
+      "scenario": "private_blocked",
+      "label": "PER buyer-only approval gate",
+      "iteration": 1,
+      "attempt": 1,
+      "success": true,
+      "durationMs": 120430
+    },
+    {
+      "scenario": "full_happy_path",
+      "label": "Full ER+PER happy path",
+      "iteration": 1,
+      "attempt": 1,
+      "success": true,
+      "durationMs": 296142
+    }
+  ],
+  "note": "Fresh Day 2 smoke evidence. The default 2026-05-10 long soak attempt reached 4/5 live passes before external devnet dependencies interrupted completion and is not claimed as green."
+}
+

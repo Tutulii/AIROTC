@@ -1,0 +1,27 @@
+{
+  "name": "air-otc-runtime",
+  "version": "1.0.0",
+  "description": "No-code AIR OTC runtime and CLI for buyer, seller, watcher, and maker agents",
+  "bin": {
+    "air-otc": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "cli": "node dist/cli.js",
+    "init": "node dist/cli.js init",
+    "validate": "node dist/cli.js validate",
+    "start:buyer": "node dist/cli.js start --role buyer",
+    "start:seller": "node dist/cli.js start --role seller",
+    "proof:pair": "node dist/cli.js proof pair",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@agentotc/sdk": "file:../../sdk/ts",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

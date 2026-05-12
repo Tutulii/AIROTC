@@ -1,0 +1,29 @@
+[
+  {
+    "suite": "phase7_proof",
+    "label": "Phase 7 proof pack",
+    "iteration": 0,
+    "success": true,
+    "durationMs": 6629,
+    "exitCode": 0,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/stability-campaign/2026-04-29T10-28-37-840Z-phase7_proof-iter0.log"
+  },
+  {
+    "suite": "per_strict_live",
+    "label": "PER strict live gate",
+    "iteration": 1,
+    "success": true,
+    "durationMs": 81137,
+    "exitCode": 0,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/stability-campaign/2026-04-29T10-29-58-978Z-per_strict_live-iter1.log"
+  },
+  {
+    "suite": "diagram_live",
+    "label": "Harness-backed full diagram live gate",
+    "iteration": 1,
+    "success": true,
+    "durationMs": 239567,
+    "exitCode": 0,
+    "reportPath": "/Users/tutul/Downloads/AIR OTC/middleman-agent/artifacts/stability-campaign/2026-04-29T10-33-58-546Z-diagram_live-iter1.log"
+  }
+]

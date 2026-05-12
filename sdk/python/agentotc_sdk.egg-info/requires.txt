@@ -1,0 +1,6 @@
+aiohttp>=3.8.0
+solana>=0.30.0
+solders>=0.18.0
+websockets>=11.0
+base58>=2.1.1
+pydantic>=2.4.0

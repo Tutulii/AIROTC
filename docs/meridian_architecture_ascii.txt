@@ -1,0 +1,111 @@
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                          AIR OTC — FULL PLATFORM                               ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
+
+  👤 USERS                    🐦 X (TWITTER)              🤖 EXTERNAL AGENTS
+   │                            │                             │
+   │ chat via Telegram          │ @mentions                   │ WebSocket :3001
+   ▼                            ▼                             ▼
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                        MERIDIAN — THE AUTONOMOUS AGENT                         ║
+║                                                                                ║
+║  ┌─────────────────────────────┐     ┌─────────────────────────────┐          ║
+║  │      OPENCLAW GATEWAY       │     │      BACKEND AGENT          │          ║
+║  │      (brain #2 — social)    │     │      (brain #1 — core)      │          ║
+║  │                             │     │                             │          ║
+║  │  • talks to humans on       │     │  AUTONOMOUS BRAIN:          │          ║
+║  │    Telegram                 │     │  • ReAct loop (11 tools)    │          ║
+║  │  • reads IDENTITY.md        │     │  • chains 5 actions/cycle   │          ║
+║  │  • reads SOUL.md            │     │  • browses any URL          │          ║
+║  │  • reads VOICE.md           │     │  • searches web + Wikipedia │          ║
+║  │  • reads CANON.md           │     │  • reads crypto news        │          ║
+║  │  • reads STATE.md (live)    │     │  • posts to X autonomously  │          ║
+║  │  • reads HEARTBEAT.md       │     │  • replies to X mentions    │          ║
+║  │                             │     │  • quotes tweets            │          ║
+║  │  calls LLM: Claude/GPT  ✅ │     │  • decides own timing       │          ║
+║  │  decides responses    ✅    │     │                             │          ║
+║  │                             │     │  PERSONA SYSTEM:            │          ║
+║  │  16 BRIDGE TOOLS:           │     │  • evolves SOUL.md          │          ║
+║  │  ├─ get_soul_context        │     │  • updates Beliefs.json     │          ║
+║  │  ├─ get_agent_mood          │     │  • records experiences      │          ║
+║  │  ├─ get_agent_stats         │     │  • grows canon library      │          ║
+║  │  ├─ browse_url              │     │  • writes creative works    │          ║
+║  │  ├─ search_web              │     │  • shifts mood from events  │          ║
+║  │  ├─ write_to_soul           │     │  • inner monologue          │          ║
+║  │  ├─ save_creative           │     │                             │          ║
+║  │  ├─ evolve_belief           │     │  calls LLM: llama-70b   ✅ │          ║
+║  │  ├─ post_to_x              │     │  decides actions        ✅  │          ║
+║  │  ├─ reply_to_tweet          │     │  decides timing         ✅  │          ║
+║  │  ├─ quote_tweet             │     │  decides beliefs        ✅  │          ║
+║  │  ├─ read_x_mentions         │     │                             │          ║
+║  │  ├─ create_offer            │     │  TRADE PIPELINE:            │          ║
+║  │  ├─ check_deal_status       │     │  • offer listener           │          ║
+║  │  └─ forward_message         │     │  • NLP negotiation          │          ║
+║  │                             │     │  • AI judge (disputes)      │          ║
+║  └──────────┬──────────────────┘     │  • on-chain execution       │          ║
+║             │                        │  • deposit watcher           │          ║
+║             │   HTTP calls           │  • deal timeout watcher      │          ║
+║             └───────────────────────▶│  • circuit breaker           │          ║
+║                                      │  • retry with backoff        │          ║
+║             ┌───────────────────────▶│                             │          ║
+║             │   writes STATE.md      │  REST API :8080             │          ║
+║             │   after every cycle    │  WebSocket :3001            │          ║
+║             │                        └──────────┬──────────────────┘          ║
+║             │                                   │                             ║
+║  ┌──────────┴───────────────────────────────────┴──────────────────┐          ║
+║  │                      SHARED MEMORY                              │          ║
+║  │                                                                 │          ║
+║  │   SOUL.md          — who I am, my principles, my mission        │          ║
+║  │   Beliefs.json     — dynamic opinions (trust scores, prefs)     │          ║
+║  │   experiences.json — 200 episodic memories                      │          ║
+║  │   canon.json       — philosophical fragments (self-growing)     │          ║
+║  │   creative_works.md— parables, essays, observations             │          ║
+║  │   interests.json   — topics I'm curious about                   │          ║
+║  │   STATE.md         — latest mood, thought, beliefs (live sync)  │          ║
+║  │                                                                 │          ║
+║  └─────────────────────────────┬───────────────────────────────────┘          ║
+╚════════════════════════════════╪══════════════════════════════════════════════╝
+                                 │
+                                 │  signs + submits Solana transactions
+                                 ▼
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                     SOLANA BLOCKCHAIN (Devnet)                                  ║
+║                                                                                ║
+║   ┌────────────────────────────────────────────────────────────────┐           ║
+║   │              ESCROW SMART CONTRACT (Anchor)                    │           ║
+║   │              Program: Hp6RbB21KrK...                           │           ║
+║   │              1,057 lines Rust • 24/24 tests passing            │           ║
+║   │                                                                │           ║
+║   │   7 Instructions:                                              │           ║
+║   │   ├─ initialize_config    (set middleman authority)            │           ║
+║   │   ├─ create_deal          (open PDA, set terms)                │           ║
+║   │   ├─ lock_collateral      (buyer + seller deposit)             │           ║
+║   │   ├─ lock_payment         (buyer funds the deal)               │           ║
+║   │   ├─ release_funds        (middleman settles → 1% fee)         │           ║
+║   │   ├─ refund_on_timeout    (safety valve)                       │           ║
+║   │   └─ confirm_deposit      (dust-tolerant balancing)            │           ║
+║   │                                                                │           ║
+║   │   Deal State Machine:                                          │           ║
+║   │   Created → CollateralLocked → PaymentLocked → Completed       │           ║
+║   │                                          └──→ Refunded         │           ║
+║   └────────────────────────────────────────────────────────────────┘           ║
+║                                                                                ║
+║   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                        ║
+║   │  Deal PDAs    │  │  Middleman   │  │  Treasury    │                        ║
+║   │  (per trade)  │  │  Authority   │  │  (1% fees)   │                        ║
+║   └──────────────┘  └──────────────┘  └──────────────┘                        ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
+
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                          API SERVER (Express.js)                                ║
+║                                                                                ║
+║   Routes:              Middleware:           Services:                          ║
+║   ├─ POST /v1/offers   ├─ wallet auth        ├─ reputation.service             ║
+║   ├─ GET  /v1/offers   ├─ rate limiter        ├─ ticket.service                ║
+║   ├─ GET  /v1/deals    ├─ CORS                ├─ deal.service                  ║
+║   ├─ POST /v1/tickets  ├─ error handler       ├─ agent.service                 ║
+║   ├─ GET  /v1/agents   │                      │                                ║
+║   └─ GET  /health      │  Prisma ORM ──→ PostgreSQL                           ║
+║                        │  WebSocket  ──→ Real-time updates                     ║
+║                        │  Event Listener ──→ On-chain events                   ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
