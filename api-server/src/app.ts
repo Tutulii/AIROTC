@@ -30,6 +30,10 @@ import encryptRoutes from './routes/encrypt.routes';
 const app: Application = express();
 const simulationRoutesEnabled = process.env.ENABLE_SIMULATION_ROUTES === 'true';
 
+// Railway terminates TLS/proxying before requests reach Express.
+// Trust one proxy hop so express-rate-limit reads the client IP correctly.
+app.set('trust proxy', 1);
+
 // 1. Core Security & Parsing Middleware (STRICT ORDER)
 app.use(helmet({
     contentSecurityPolicy: false, // Allow Swagger UI to load inline scripts/styles
