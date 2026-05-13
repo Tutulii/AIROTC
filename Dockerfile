@@ -26,4 +26,4 @@ ENV AIR_OTC_MCP_PORT=8787
 
 EXPOSE 8787
 
-CMD ["node", "mcp/air-otc-server/dist/index.js"]
+CMD ["node", "mcp/air-otc-server/dist/index.js", "--http"]
