@@ -6,6 +6,27 @@ The current implementation is a devnet hackathon build: trust-minimized and priv
 
 > AIR OTC gives autonomous agents a private, evidence-gated OTC settlement rail with PER negotiation, encrypted deal handoff, shielded-credit funding, Umbra payout lifecycle evidence, IKA/dWallet release authorization evidence, Zerion pre-trade checks, Torque reward events, and an observability layer for humans.
 
+## Problem
+
+Autonomous agents can already discover opportunities and negotiate trades, but they still lack a clean settlement rail. Normal on-chain OTC flows expose sensitive data such as price, amount, collateral, payout wallets, and timing. They also force humans or backend operators to coordinate release, inspect sensitive terms, or manually explain what happened after the trade.
+
+AIR OTC solves this by giving agents a settlement workflow with private negotiation, shielded deal-level funding, encrypted delivery, proof-gated release, private payout lifecycle evidence, and a readable audit trail.
+
+## Target Users
+
+- **AI agent builders** who need autonomous buyer/seller agents to complete trades, not only chat about them.
+- **Solana teams and protocols** that want private OTC, access, data, or service settlement between agents.
+- **Hackathon judges and operators** who need a clear proof trail for what agents agreed, funded, delivered, approved, and settled.
+- **Developers** who want SDK, MCP, and no-code runtime entrypoints instead of wiring settlement infrastructure by hand.
+
+## Use Cases
+
+- Agent-to-agent OTC trades where one agent posts an offer and another accepts.
+- Private access delivery, such as encrypted API keys, credentials, data files, or entitlement tokens.
+- Proof-gated escrow where release requires buyer approval and recorded settlement conditions.
+- Incentivized agent activity where completed trades emit Torque reward events.
+- Human monitoring of autonomous trades through a read-only observatory.
+
 ## Product Surfaces
 
 - **TypeScript SDK**: builder-facing client and workflow API in `sdk/ts`.
@@ -43,6 +64,34 @@ flowchart TD
 - **Umbra**: stealth payout lifecycle that reduces wallet-link leakage through fresh receiver wallets and ordered evidence.
 - **Zerion**: pre-trade policy and wallet/online checks before agents enter the settlement pipeline.
 - **Torque**: post-settlement custom events for transparent reward/incentive accounting.
+
+## How AIR OTC Uses Umbra SDK
+
+AIR OTC uses Umbra in the settlement phase, after private negotiation and funding evidence are complete. The TypeScript SDK and ElizaOS demo agents create or reuse fresh Umbra receiver wallets, register them on devnet, submit shield evidence, create receiver-claimable UTXO evidence, claim the UTXO, and unshield to a fresh final wallet.
+
+The proof flow rejects a fake Umbra success. Full demo completion requires ordered Umbra lifecycle evidence from both buyer and seller:
+
+1. Receiver wallet ready.
+2. Shield transaction submitted.
+3. Receiver-claimable UTXO transaction submitted.
+4. Claim transaction submitted.
+5. Unshield transaction submitted.
+6. Lifecycle marked complete only after evidence is verified.
+
+Relevant implementation files:
+
+- `middleman-agent/src/services/umbraService.ts`
+- `middleman-agent/src/services/stealthSettlementService.ts`
+- `middleman-agent/src/services/umbraSettlementV2.ts`
+- `middleman-agent/agents/sdk/MeridianClient.ts`
+- `agents/elizaos-agent/proof/fullPipelineProof.ts`
+
+Devnet Umbra configuration uses the devnet program and official devnet indexer endpoint:
+
+```text
+Umbra devnet program: DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ
+Umbra devnet indexer: https://utxo-indexer.api-devnet.umbraprivacy.com
+```
 
 ## Judge Demo Commands
 
@@ -89,6 +138,70 @@ npm --prefix sdk/ts run build
 ```
 
 Broader verification commands are documented in `PROJECT_STATUS.md` and `docs/EVIDENCE_REGISTRY.md`.
+
+## Build, Test, And Use
+
+Install dependencies in the workspaces you want to run:
+
+```bash
+cd AIROTC
+npm install
+npm --prefix api-server install
+npm --prefix middleman-agent install
+npm --prefix sdk/ts install
+npm --prefix agents/elizaos-agent install
+```
+
+Build and test the main public surfaces:
+
+```bash
+npm --prefix sdk/ts run build
+npm --prefix agents/elizaos-agent run typecheck
+npm --prefix mcp/air-otc-server run build
+npm --prefix middleman-agent run test:torque:proof
+```
+
+Run the app locally:
+
+```bash
+# Terminal 1
+npm run api:dev
+
+# Terminal 2
+npm run middleman:demo
+
+# Terminal 3
+npm run proof:demo:prewarm
+npm run proof:demo
+```
+
+The frontend observatory can be started separately:
+
+```bash
+npm --prefix frontend install
+npm --prefix frontend run dev
+```
+
+## Deployed Program IDs And Links
+
+- GitHub repository: `https://github.com/Tutulii/AIROTC`
+- Confidential escrow devnet program: `BuTf7gVrjD2wzKe4Tu1Ny2m7gC9SY65fRCY7gHnBgLqj`
+- Legacy/event listener program used by local runtime configs: `Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx`
+- Umbra devnet program: `DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ`
+- Frontend: local observatory via `npm --prefix frontend run dev`; add deployed URL here when a hosted frontend is published.
+
+## Demo Video
+
+Record the `npm run proof:demo` flow under five minutes. The important proof lines to show are:
+
+- Zerion gate passed.
+- MagicBlock PER session joined.
+- Encrypt ciphertext handoff created.
+- SHIELDED_CREDIT funding submitted.
+- Encrypted delivery sent and received.
+- Buyer signed release confirmation.
+- Umbra shield / UTXO / claim / unshield completed.
+- Torque custom events sent for buyer and seller.
 
 ## Safe Public Claims
 
