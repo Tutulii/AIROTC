@@ -7,11 +7,14 @@ WORKDIR /app
 COPY sdk/ts/package*.json ./sdk/ts/
 RUN cd sdk/ts && npm ci --include=dev
 
+COPY middleman-agent/package*.json ./middleman-agent/
+RUN cd middleman-agent && npm ci --include=dev --legacy-peer-deps
+
 COPY mcp/air-otc-server/package*.json ./mcp/air-otc-server/
 RUN cd mcp/air-otc-server && npm ci --include=dev
 
 COPY sdk/ts ./sdk/ts
-COPY middleman-agent/src/encrypt-sdk/proto/encrypt_service.proto ./middleman-agent/src/encrypt-sdk/proto/encrypt_service.proto
+COPY middleman-agent/src ./middleman-agent/src
 COPY middleman-agent/agents/sdk/MeridianClient.ts ./middleman-agent/agents/sdk/MeridianClient.ts
 RUN cd sdk/ts && npm run build
 
