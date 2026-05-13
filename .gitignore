@@ -50,8 +50,13 @@ coverage/
 .turbo/
 *.tgz
 
-# ElizaOS agents (testing only)
-agents/elizaos-agent/
+# ElizaOS demo agents
+agents/elizaos-agent/.env
+agents/elizaos-agent/.env.*
+!agents/elizaos-agent/.env.example
+agents/elizaos-agent/node_modules/
+agents/elizaos-agent/dist/
+agents/elizaos-agent/*.log
 
 # Temp and scratch files
 tmp/

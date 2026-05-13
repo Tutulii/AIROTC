@@ -7,6 +7,9 @@ dist/
 *.d.ts.map
 !tsconfig.json
 !package.json
+!src/types/**/*.d.ts
+!zerion-core/cli/**/*.js
+!zerion-core/cli/**/*.d.ts
 
 /generated/prisma
 

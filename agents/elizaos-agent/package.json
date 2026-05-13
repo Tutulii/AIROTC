@@ -1,0 +1,48 @@
+{
+  "name": "airotc-elizaos-agent",
+  "version": "1.0.0",
+  "description": "Official ElizaOS external agents for AIR OTC private trades",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "prepare:sdk": "npm --prefix ../../sdk/ts run build",
+    "dev": "tsx index.ts --role buyer --private",
+    "buyer": "tsx index.ts --role buyer --private",
+    "seller": "tsx index.ts --role seller --private",
+    "buyer-private": "npm run buyer",
+    "seller-private": "npm run seller",
+    "buyer-public": "tsx index.ts --role buyer",
+    "seller-public": "tsx index.ts --role seller",
+    "proof:per": "tsx proof/perFlagshipProof.ts",
+    "proof:full-pipeline": "tsx proof/fullPipelineProof.ts",
+    "proof:demo:prewarm": "npm run prepare:sdk && AIROTC_DEMO_RESET_WORKFLOW_STATE=true tsx proof/prewarmUmbraWallets.ts",
+    "proof:demo": "npm run prepare:sdk && AIROTC_DEMO_LOG_STYLE=clean AIROTC_DEMO_WAIT_FOR_OFFER_BEFORE_BUYER=true AIROTC_USE_PREWARMED_UMBRA_SETTLEMENT_WALLETS=true AIROTC_PERSIST_AGENT_STATE=true AIROTC_DEMO_RESET_WORKFLOW_STATE=true AIROTC_TRADE_PRICE_SOL=0.001 AIROTC_TRADE_COLLATERAL_SOL=0.001 AIROTC_TRADE_AMOUNT=1 AIROTC_UMBRA_PHASE_TIMEOUT_MS=120000 AGENT_ACTION_TIMEOUT_MS=600000 AGENT_LOOP_DELAY_MS=1000 AGENT_MAX_LOOPS=900 npm run proof:full-pipeline",
+    "proof:demo:raw": "npm run prepare:sdk && AIROTC_DEMO_LOG_STYLE=raw AIROTC_TRADE_PRICE_SOL=0.001 AIROTC_TRADE_COLLATERAL_SOL=0.001 AIROTC_TRADE_AMOUNT=1 AIROTC_UMBRA_PHASE_TIMEOUT_MS=120000 AGENT_ACTION_TIMEOUT_MS=600000 AGENT_LOOP_DELAY_MS=1000 AGENT_MAX_LOOPS=900 npm run proof:full-pipeline",
+    "proof:full-pipeline:soak": "tsx proof/fullPipelineSoak.ts",
+    "proof:per:sdk": "npm --prefix ../../sdk/ts run proof:per:sdk",
+    "proof:full-pipeline:sdk": "npm --prefix ../../sdk/ts run proof:full-pipeline:sdk",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test:buyer": "npm run buyer",
+    "test:seller": "npm run seller"
+  },
+  "dependencies": {
+    "@agentotc/sdk": "file:../../sdk/ts",
+    "@elizaos/core": "2.0.0-alpha.535",
+    "@solana/web3.js": "^1.95.0",
+    "@coral-xyz/anchor": "^0.30.1",
+    "@magicblock-labs/ephemeral-rollups-sdk": "^0.5.0",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.4.5",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.16.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.5.0"
+  }
+}
