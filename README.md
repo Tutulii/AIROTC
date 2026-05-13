@@ -210,13 +210,6 @@ Record the `npm run proof:demo` flow under five minutes. The important proof lin
 - Full ElizaOS demo logs show Zerion, MagicBlock PER, Encrypt handoff, SHIELDED_CREDIT funding, Umbra lifecycle evidence, signed release, and Torque reward events.
 - AIR OTC is trust-minimized and privacy-hardened.
 
-## Claims To Avoid
-
-- Do not claim AIR OTC is fully trustless.
-- Do not claim native SOL has full ZK/mixer-level privacy.
-- Do not claim mainnet production readiness.
-- Do not claim Python independently creates live Encrypt FHE ciphertext unless a fresh proof is added.
-
 ## Repository Map
 
 | Path | Purpose |
