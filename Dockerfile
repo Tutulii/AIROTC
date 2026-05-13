@@ -12,6 +12,7 @@ RUN cd mcp/air-otc-server && npm ci --include=dev
 
 COPY sdk/ts ./sdk/ts
 COPY middleman-agent/src/encrypt-sdk/proto/encrypt_service.proto ./middleman-agent/src/encrypt-sdk/proto/encrypt_service.proto
+COPY middleman-agent/agents/sdk/MeridianClient.ts ./middleman-agent/agents/sdk/MeridianClient.ts
 RUN cd sdk/ts && npm run build
 
 COPY mcp/air-otc-server ./mcp/air-otc-server
