@@ -22,5 +22,5 @@ RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma gene
 
 EXPOSE 8080 3001
 
-# Start with prisma db push to ensure schema is synced, then start TS Node
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npx ts-node src/index.ts"]
+# Start with required database extensions, then sync schema and start TS Node.
+CMD ["sh", "-c", "node scripts/ensurePgVector.cjs && npx prisma db push --accept-data-loss && npx ts-node src/index.ts"]
