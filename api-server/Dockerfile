@@ -5,9 +5,9 @@ WORKDIR /app
 # Install openssl for Prisma
 RUN apk add --no-cache openssl
 
-# Install dependencies
+# Install dependencies. Keep this locked for repeatable Railway builds.
 COPY package*.json ./
-RUN npm ci --production=false
+RUN npm ci --include=dev
 
 # Copy source
 COPY . .

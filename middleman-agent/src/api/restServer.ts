@@ -40,6 +40,8 @@ import { loadConfig } from '../config';
 import { registerObservatoryTicketMapping } from '../services/observatoryBridge';
 import { pipelineStateStore } from '../state/pipelineStateStore';
 import { prisma } from '../lib/prisma';
+import { verifyAuditChain } from '../services/auditTrail';
+import dealTimelineRouter from './dealTimeline';
 
 let server: any;
 
@@ -275,6 +277,36 @@ function bridgeRateLimiter(req: express.Request, res: express.Response, next: ex
 export function startRestApi(port: number = parseInt(process.env.API_PORT || "8080")) {
     const app = express();
     app.use(express.json());
+    app.use('/api', dealTimelineRouter);
+
+    app.get('/health', async (_req, res) => {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            res.json({
+                status: 'ok',
+                timestamp: new Date().toISOString(),
+                uptime_seconds: Math.floor(process.uptime()),
+                service: 'middleman-agent',
+            });
+        } catch (e: any) {
+            res.status(503).json({
+                status: 'down',
+                timestamp: new Date().toISOString(),
+                service: 'middleman-agent',
+                error: e?.message || String(e),
+            });
+        }
+    });
+
+    app.get('/api/audit/:ticketId', async (req, res) => {
+        const result = await verifyAuditChain(req.params.ticketId);
+        const logs = await prisma.auditLog.findMany({
+            where: { ticketId: req.params.ticketId },
+            orderBy: { createdAt: 'asc' },
+            select: { event: true, createdAt: true, hash: true },
+        });
+        res.json({ ...result, events: logs });
+    });
 
     app.post('/v1/agents/register', async (req, res) => {
         try {

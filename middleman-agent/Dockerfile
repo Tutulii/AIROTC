@@ -8,9 +8,11 @@ RUN apt-get update && apt-get install -y openssl python3 make g++ libusb-1.0-0-d
 # Hide Prisma Update Warnings in Railway Logs
 ENV PRISMA_HIDE_UPDATE_MESSAGE="true"
 
-# Install dependencies
+# Install dependencies. Umbra's prover package has a peer range that lags
+# the SDK version used by the demo, so Railway builds must preserve the
+# working lockfile with legacy peer resolution.
 COPY package*.json ./
-RUN npm ci --production=false
+RUN npm ci --include=dev --legacy-peer-deps
 
 # Copy source
 COPY . .
