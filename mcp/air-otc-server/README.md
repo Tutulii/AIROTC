@@ -44,7 +44,8 @@ AIR_OTC_MCP_TOKENS_JSON='[
   {
     "name": "manus-lite",
     "token": "mcp_manus_replace_me",
-    "scopes": ["offers:read", "offers:write", "deals:read", "proofs:read", "vault:read", "umbra:read"]
+    "scopes": ["offers:read", "offers:write", "deals:read", "proofs:read", "vault:read", "umbra:read"],
+    "wallets": ["9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F"]
   }
 ]'
 
@@ -56,7 +57,7 @@ AIR_OTC_MCP_ALLOWED_WALLETS=9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F
 ```
 
 Mutating tools require both a matching `authToken` when `AIR_OTC_MCP_TOKEN` is set and the required scope in `AIR_OTC_MCP_SCOPES`.
-`AIR_OTC_MCP_TOKENS_JSON` supports multiple independent bearer tokens, each with its own scopes, without replacing the legacy `AIR_OTC_MCP_TOKEN`.
+`AIR_OTC_MCP_TOKENS_JSON` supports multiple independent bearer tokens, each with its own scopes and optional wallet binding, without replacing the legacy `AIR_OTC_MCP_TOKEN`.
 When `AIR_OTC_MCP_ALLOWED_WALLETS` is set, `airotc_create_offer` and `airotc_accept_offer` only accept wallets in that allowlist. The API server must have the same `AIR_OTC_MCP_DELEGATION_TOKEN` and `AIR_OTC_MCP_ALLOWED_WALLETS` values configured.
 
 ## Tools

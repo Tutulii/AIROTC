@@ -55,6 +55,12 @@ type TokenRule = {
   name: string;
   token: string;
   scopes: Set<Scope>;
+  wallets: Set<string> | null;
+};
+
+type TokenAuth = {
+  scopes: Set<Scope>;
+  wallets: Set<string> | null;
 };
 
 const validScopes = new Set<Scope>([
@@ -76,6 +82,14 @@ function parseScopes(value: string | string[] | undefined, fallback: Set<Scope>)
   return parsed.length > 0 ? new Set(parsed) : new Set(fallback);
 }
 
+function parseWallets(value: unknown): Set<string> | null {
+  if (!Array.isArray(value)) return null;
+  const wallets = value
+    .filter((wallet): wallet is string => typeof wallet === "string" && isValidSolanaWallet(wallet))
+    .map((wallet) => wallet.trim());
+  return wallets.length > 0 ? new Set(wallets) : null;
+}
+
 function parseTokenRules(fallbackScopes: Set<Scope>): TokenRule[] {
   const raw = process.env.AIR_OTC_MCP_TOKENS_JSON;
   if (!raw) return [];
@@ -90,7 +104,7 @@ function parseTokenRules(fallbackScopes: Set<Scope>): TokenRule[] {
   }
   return parsed
     .map((entry, index) => {
-      const item = entry as { name?: unknown; token?: unknown; scopes?: unknown };
+      const item = entry as { name?: unknown; token?: unknown; scopes?: unknown; wallets?: unknown };
       if (typeof item.token !== "string" || item.token.length < 16) {
         throw new Error(`AIR_OTC_MCP_TOKENS_JSON[${index}].token must be a secret string`);
       }
@@ -98,6 +112,7 @@ function parseTokenRules(fallbackScopes: Set<Scope>): TokenRule[] {
         name: typeof item.name === "string" && item.name.trim() ? item.name.trim() : `token-${index + 1}`,
         token: item.token,
         scopes: parseScopes(item.scopes as string[] | string | undefined, fallbackScopes),
+        wallets: parseWallets(item.wallets),
       };
     });
 }
@@ -176,10 +191,14 @@ function assertDelegatedWalletAllowed(requestedWallet?: string): asserts request
   }
 }
 
-function assertConfiguredWallet(requestedWallet?: string): void {
+function assertConfiguredWallet(requestedWallet?: string, authToken?: string): void {
   if (!requestedWallet) return;
   if (config.allowedWallets.size > 0) {
     assertDelegatedWalletAllowed(requestedWallet);
+    const auth = resolveTokenAuth(authToken);
+    if (auth?.wallets && !auth.wallets.has(requestedWallet)) {
+      throw new Error(`mcp_token_wallet_mismatch:${requestedWallet}`);
+    }
     return;
   }
   const auth = walletAuth();
@@ -204,21 +223,21 @@ function objectSchema(properties: Record<string, any>, required: string[] = []):
   };
 }
 
-function resolveTokenScopes(authToken?: string): Set<Scope> | null {
+function resolveTokenAuth(authToken?: string): TokenAuth | null {
   const hasAnyToken = Boolean(config.mcpToken) || config.tokenRules.length > 0;
-  if (!hasAnyToken) return config.scopes;
+  if (!hasAnyToken) return { scopes: config.scopes, wallets: null };
   if (!authToken) return null;
-  if (config.mcpToken && authToken === config.mcpToken) return config.scopes;
+  if (config.mcpToken && authToken === config.mcpToken) return { scopes: config.scopes, wallets: null };
   const rule = config.tokenRules.find((candidate) => candidate.token === authToken);
-  return rule?.scopes || null;
+  return rule ? { scopes: rule.scopes, wallets: rule.wallets } : null;
 }
 
 function requireScope(args: { authToken?: string }, scope: Scope): void {
-  const scopes = resolveTokenScopes(args.authToken);
-  if (!scopes) {
+  const auth = resolveTokenAuth(args.authToken);
+  if (!auth) {
     throw new Error(`mcp_auth_failed:${scope}`);
   }
-  if (!scopes.has(scope)) {
+  if (!auth.scopes.has(scope)) {
     throw new Error(`mcp_scope_missing:${scope}`);
   }
 }
@@ -363,7 +382,7 @@ const tools: ToolDefinition[] = [
     ),
     handler: async (args) => {
       requireScope(args, "offers:write");
-      assertConfiguredWallet(args.wallet);
+      assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson("/v1/offers", {
           method: "POST",
@@ -401,7 +420,7 @@ const tools: ToolDefinition[] = [
     ),
     handler: async (args) => {
       requireScope(args, "offers:write");
-      assertConfiguredWallet(args.wallet);
+      assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson(`/v1/offers/${encodeURIComponent(args.offerId)}/accept`, {
           method: "POST",
