@@ -24,6 +24,111 @@ import { MeridianClient } from '../../../middleman-agent/agents/sdk/MeridianClie
 
 const ESCROW_PROGRAM_ID = new PublicKey((idlRaw as any).address || (idlRaw as any).metadata?.address || "Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx");
 
+const MAX_SPL_TOKEN_DECIMALS = 255;
+const U64_MAX = (1n << 64n) - 1n;
+
+export type TokenAmountInput = number | string;
+
+function validateTokenDecimals(decimals: number): number {
+    if (!Number.isInteger(decimals)) {
+        throw new TypeError('Token decimals must be an integer');
+    }
+    if (decimals < 0 || decimals > MAX_SPL_TOKEN_DECIMALS) {
+        throw new RangeError(`Token decimals must be between 0 and ${MAX_SPL_TOKEN_DECIMALS}`);
+    }
+    return decimals;
+}
+
+function normalizeTokenAmountInput(amount: TokenAmountInput): string {
+    if (typeof amount === 'number') {
+        if (!Number.isFinite(amount)) {
+            throw new TypeError('Token amount must be finite');
+        }
+        if (amount <= 0) {
+            throw new RangeError('Token amount must be greater than zero');
+        }
+        if (amount > Number.MAX_SAFE_INTEGER) {
+            throw new RangeError('Token amount number exceeds Number.MAX_SAFE_INTEGER; pass a decimal string instead');
+        }
+        return amount.toString();
+    }
+
+    if (typeof amount !== 'string') {
+        throw new TypeError('Token amount must be a number or decimal string');
+    }
+
+    const normalized = amount.trim();
+    if (!normalized) {
+        throw new TypeError('Token amount must not be empty');
+    }
+    return normalized;
+}
+
+/**
+ * Convert a base-10 token amount into raw SPL token units without floating point
+ * math. Fractional digits beyond the mint precision are rejected instead of
+ * rounded or truncated.
+ */
+export function parseTokenAmountToRawUnits(amount: TokenAmountInput, decimals: number): bigint {
+    const tokenDecimals = validateTokenDecimals(decimals);
+    const normalizedAmount = normalizeTokenAmountInput(amount);
+    const match = normalizedAmount.match(/^(\d*)(?:\.(\d*))?$/);
+
+    if (!match || (match[1] === '' && (match[2] ?? '') === '')) {
+        throw new TypeError('Token amount must be a base-10 decimal string');
+    }
+
+    const wholePart = match[1] || '0';
+    const fractionalPart = match[2] ?? '';
+    const significantFractionalPart = fractionalPart.replace(/0+$/, '');
+
+    if (significantFractionalPart.length > tokenDecimals) {
+        throw new RangeError(`Token amount has too many decimal places for a ${tokenDecimals}-decimal mint`);
+    }
+
+    const scale = 10n ** BigInt(tokenDecimals);
+    const wholeRaw = BigInt(wholePart) * scale;
+    const fractionalRaw = significantFractionalPart
+        ? BigInt(significantFractionalPart.padEnd(tokenDecimals, '0'))
+        : 0n;
+    const rawAmount = wholeRaw + fractionalRaw;
+
+    if (rawAmount <= 0n) {
+        throw new RangeError('Token amount must be at least one raw unit');
+    }
+    if (rawAmount > U64_MAX) {
+        throw new RangeError('Token amount exceeds the SPL token u64 maximum');
+    }
+
+    return rawAmount;
+}
+
+function parseRawTokenAmount(rawAmount: string): bigint {
+    if (!/^\d+$/.test(rawAmount)) {
+        throw new TypeError('Raw token amount must be an unsigned integer string');
+    }
+    return BigInt(rawAmount);
+}
+
+export function rawTokenBalanceCoversAmount(rawBalanceAmount: string, requiredRawAmount: bigint): boolean {
+    if (requiredRawAmount < 0n) {
+        throw new RangeError('Required raw token amount must not be negative');
+    }
+    return parseRawTokenAmount(rawBalanceAmount) >= requiredRawAmount;
+}
+
+function formatRawTokenAmount(rawAmount: bigint, decimals: number): string {
+    const tokenDecimals = validateTokenDecimals(decimals);
+    if (tokenDecimals === 0) {
+        return rawAmount.toString();
+    }
+
+    const scale = 10n ** BigInt(tokenDecimals);
+    const whole = rawAmount / scale;
+    const fractional = (rawAmount % scale).toString().padStart(tokenDecimals, '0').replace(/0+$/, '');
+    return fractional ? `${whole}.${fractional}` : whole.toString();
+}
+
 
 
 export class Deal extends EventEmitter {
@@ -470,7 +575,7 @@ export class Deal extends EventEmitter {
      * Uses a direct SPL token transfer to the deal PDA's Associated Token Account.
      * The Middleman's deposit watcher detects the balance change and calls confirm_deposit.
      *
-     * @param amount - Amount in token units (e.g. 500 for 500 USDC)
+     * @param amount - Amount in token units (e.g. 500 for 500 USDC). Use a decimal string for fractional or large values.
      * @param role - 'buyer' or 'seller'
      * @param tokenMint - SPL token mint address (defaults to USDC on mainnet)
      * @param decimals - Token decimal places (defaults to 6 for USDC)
@@ -484,7 +589,7 @@ export class Deal extends EventEmitter {
      * const sig = await deal.depositUSDC(1000, 'buyer', 'Es9vMFrzaCE...', 6);
      */
     public async depositUSDC(
-        amount: number,
+        amount: TokenAmountInput,
         role: 'buyer' | 'seller',
         tokenMint?: string,
         decimals: number = 6
@@ -505,6 +610,7 @@ export class Deal extends EventEmitter {
         const mint = new PublicKey(tokenMint || USDC_MINTS.devnet);
         const dealPda = new PublicKey(this.escrowAddress);
         const connection = new Connection(this.rpcUrl, 'confirmed');
+        const amountRaw = parseTokenAmountToRawUnits(amount, decimals);
 
         // Import SPL token functions
         const { createTransferInstruction, getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } = await import('@solana/spl-token');
@@ -514,18 +620,18 @@ export class Deal extends EventEmitter {
         const dealAta = getAssociatedTokenAddressSync(mint, dealPda, true); // allowOwnerOffCurve for PDA
 
         // IDEMPOTENCY CHECK: verify we haven't already transferred
+        let dealRawBalance: string | null = null;
         try {
             const dealAtaInfo = await connection.getTokenAccountBalance(dealAta);
-            const currentBalance = Number(dealAtaInfo.value.amount) / Math.pow(10, decimals);
-            if (currentBalance >= amount) {
-                console.log(`[AgentOTC] USDC idempotency: deal ATA already has ${currentBalance} tokens`);
-                return 'idempotent-skip';
-            }
+            dealRawBalance = dealAtaInfo.value.amount;
         } catch {
             // ATA doesn't exist yet — that's fine, we'll create it
         }
 
-        const amountRaw = BigInt(Math.round(amount * Math.pow(10, decimals)));
+        if (dealRawBalance !== null && rawTokenBalanceCoversAmount(dealRawBalance, amountRaw)) {
+            console.log(`[AgentOTC] USDC idempotency: deal ATA already has ${formatRawTokenAmount(parseRawTokenAmount(dealRawBalance), decimals)} tokens`);
+            return 'idempotent-skip';
+        }
 
         // Build transaction
         const { Transaction } = await import('@solana/web3.js');
