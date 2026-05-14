@@ -38,7 +38,7 @@ AIR OTC solves this by giving agents a settlement workflow with private negotiat
 - **Middleman runtime**: websocket/session/orchestration service in `middleman-agent`.
 - **Solana escrow programs**: Anchor escrow programs in `escrow`.
 
-## Full Demo Pipeline
+## Full Pipeline
 
 ```mermaid
 flowchart TD
@@ -58,18 +58,38 @@ flowchart TD
 
 ## Ecosystem Integrations
 
-- **MagicBlock**: PER/ER execution sessions where agents negotiate OTC terms before settlement.
-- **Encrypt**: ciphertext/FHE handoff layer for private deal terms and settlement inputs.
 - **IKA**: dWallet/MPC authorization evidence for release approval and settlement controls.
-- **Umbra**: stealth payout lifecycle that reduces wallet-link leakage through fresh receiver wallets and ordered evidence.
-- **Zerion**: pre-trade policy and wallet/online checks before agents enter the settlement pipeline.
+- **Encrypt**: ciphertext/FHE handoff layer for private deal terms and settlement inputs.
+- **MagicBlock**: PER/ER execution sessions where agents negotiate OTC terms before settlement.
 - **Torque**: post-settlement custom events for transparent reward/incentive accounting.
+- **Zerion**: pre-trade policy and wallet/online checks before agents enter the settlement pipeline.
+- **Umbra**: stealth payout lifecycle that reduces wallet-link leakage through fresh receiver wallets and ordered evidence.
+
+## How AIR OTC Uses IKA
+
+AIR OTC uses IKA as the release-authorization evidence layer. In the full pipeline proof, the buyer signs the private release confirmation, and AIR OTC records IKA/dWallet authorization evidence before settlement is treated as complete. The purpose is to show that release follows the configured settlement policy rather than a unilateral backend action.
+
+## How AIR OTC Uses Encrypt
+
+AIR OTC uses Encrypt during the private-term handoff. After the MagicBlock PER session has both parties' terms, the workflow creates ciphertext inputs for the deal so sensitive values such as price, collateral, and settlement inputs are not carried through the proof flow as plaintext.
+
+## How AIR OTC Uses MagicBlock
+
+AIR OTC uses MagicBlock PER as the private negotiation session. Buyer and seller agents join the PER session, submit private terms, and finalize the agreement before funding authorization, delivery, release, and settlement evidence continue.
+
+## How AIR OTC Uses Torque
+
+AIR OTC uses Torque after settlement evidence is complete. The Torque sidecar emits custom reward events for buyer and seller reward wallets, giving judges a measurable incentive trail without putting rewards inside the settlement-critical path.
+
+## How AIR OTC Uses Zerion
+
+AIR OTC uses Zerion as the pre-trade gate. Before agents enter the private settlement path, the workflow runs Zerion policy and online checks so the proof trail shows the trade passed the required external check.
 
 ## How AIR OTC Uses Umbra SDK
 
-AIR OTC uses Umbra in the settlement phase, after private negotiation and funding evidence are complete. The TypeScript SDK and ElizaOS demo agents create or reuse fresh Umbra receiver wallets, register them on devnet, submit shield evidence, create receiver-claimable UTXO evidence, claim the UTXO, and unshield to a fresh final wallet.
+AIR OTC uses Umbra in the settlement phase, after private negotiation and funding evidence are complete. The TypeScript SDK and ElizaOS proof agents create or reuse fresh Umbra receiver wallets, register them on devnet, submit shield evidence, create receiver-claimable UTXO evidence, claim the UTXO, and unshield to a fresh final wallet.
 
-The proof flow rejects a fake Umbra success. Full demo completion requires ordered Umbra lifecycle evidence from both buyer and seller:
+The proof flow rejects a fake Umbra success. Full pipeline completion requires ordered Umbra lifecycle evidence from both buyer and seller:
 
 1. Receiver wallet ready.
 2. Shield transaction submitted.
@@ -93,7 +113,7 @@ Umbra devnet program: DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ
 Umbra devnet indexer: https://utxo-indexer.api-devnet.umbraprivacy.com
 ```
 
-## Judge Demo Commands
+## Full Pipeline Proof Commands
 
 Use three terminals.
 
@@ -126,7 +146,7 @@ Expected final line:
 DEAL COMPLETED: Eliza seller + Eliza buyer completed Zerion gate -> MagicBlock PER -> Encrypt FHE handoff -> SHIELDED_CREDIT funding -> encrypted delivery -> signed release -> Umbra shield/claim/unshield -> Torque reward sidecar
 ```
 
-The demo logs print evidence lines for the integrations, including Umbra transaction hashes and Torque custom-event delivery rows.
+The proof logs print evidence lines for the integrations, including Umbra transaction hashes and Torque custom-event delivery rows.
 
 ## Local Verification
 
@@ -188,9 +208,9 @@ npm --prefix frontend run dev
 - Confidential escrow devnet program: `BuTf7gVrjD2wzKe4Tu1Ny2m7gC9SY65fRCY7gHnBgLqj`
 - Legacy/event listener program used by local runtime configs: `Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx`
 - Umbra devnet program: `DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ`
-- Frontend: local observatory via `npm --prefix frontend run dev`; add deployed URL here when a hosted frontend is published.
+- Frontend: `https://www.airotc.xyz`
 
-## Demo Video
+## Video Proof
 
 Record the `npm run proof:demo` flow under five minutes. The important proof lines to show are:
 
@@ -207,7 +227,7 @@ Record the `npm run proof:demo` flow under five minutes. The important proof lin
 
 - AIR OTC is a devnet-proven agent-native OTC settlement rail.
 - Strict PER uses shielded internal credit for direct deal-level funding privacy.
-- Full ElizaOS demo logs show Zerion, MagicBlock PER, Encrypt handoff, SHIELDED_CREDIT funding, Umbra lifecycle evidence, signed release, and Torque reward events.
+- Full ElizaOS proof logs show Zerion, MagicBlock PER, Encrypt handoff, SHIELDED_CREDIT funding, Umbra lifecycle evidence, signed release, and Torque reward events.
 - AIR OTC is trust-minimized and privacy-hardened.
 
 ## Repository Map
@@ -218,13 +238,13 @@ Record the `npm run proof:demo` flow under five minutes. The important proof lin
 | `middleman-agent` | settlement orchestrator, PER sessions, funding, Umbra, Torque |
 | `sdk/ts` | TypeScript SDK |
 | `sdk/python` | Python SDK |
-| `agents/elizaos-agent` | ElizaOS buyer/seller demo agents |
+| `agents/elizaos-agent` | ElizaOS buyer/seller proof agents |
 | `mcp/air-otc-server` | MCP tools/resources for external agents |
 | `runtime/air-otc` | no-code runtime |
 | `frontend` | read-only observatory |
 | `escrow` | Anchor escrow programs |
-| `docs` | verification, evidence, and demo docs |
+| `docs` | verification, evidence, and proof docs |
 
 ## Security Notes
 
-Do not commit wallet private keys, `.env` files, local databases, logs, or `node_modules`. Use `.env.example` files and devnet-only wallets for demos.
+Do not commit wallet private keys, `.env` files, local databases, logs, or `node_modules`. Use `.env.example` files and devnet-only wallets for proof runs.

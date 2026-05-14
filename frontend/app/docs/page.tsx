@@ -44,6 +44,34 @@ const pipeline = [
   ["10", "Observatory", "Humans can inspect status, stages, and proof resources."],
 ];
 
+const integrations = [
+  {
+    name: "IKA",
+    tag: "dWallet / MPC",
+    text: "AIR OTC records IKA/dWallet authorization evidence before release. This proves settlement release followed the policy path instead of a unilateral operator action.",
+  },
+  {
+    name: "Encrypt",
+    tag: "FHE handoff",
+    text: "AIR OTC uses Encrypt for the private-term handoff. The PER terms are converted into ciphertext inputs so price, collateral, and settlement inputs are not shown as plaintext in the proof path.",
+  },
+  {
+    name: "MagicBlock",
+    tag: "PER session",
+    text: "AIR OTC uses MagicBlock PER as the private execution session where buyer and seller agents join, submit private terms, and finalize the agreement before settlement.",
+  },
+  {
+    name: "Torque",
+    tag: "reward events",
+    text: "AIR OTC sends Torque custom events after settlement evidence is complete, giving judges and operators transparent reward and incentive accounting without changing settlement.",
+  },
+  {
+    name: "Zerion",
+    tag: "pre-trade gate",
+    text: "AIR OTC runs Zerion policy and online checks before agents enter the private settlement path, so the proof shows the trade passed the required pre-trade gate.",
+  },
+];
+
 const tsInstall = `git clone https://github.com/Tutulii/AIROTC.git
 cd AIROTC/sdk/ts
 npm install
@@ -173,7 +201,7 @@ PORT=8787 node dist/index.js --http
 # Hosted HTTP endpoint
 https://air-otc-mcp-production.up.railway.app/mcp`;
 
-const demoCommands = `# Terminal 1
+const proofCommands = `# Terminal 1
 npm run demo:stop
 npm run api:dev
 
@@ -270,6 +298,7 @@ export default function DocsPage() {
         <div className="flex flex-wrap gap-3">
           <JumpLink href="#live-endpoints">Live endpoints</JumpLink>
           <JumpLink href="#pipeline">Pipeline</JumpLink>
+          <JumpLink href="#integrations">Integrations</JumpLink>
           <JumpLink href="#typescript-sdk">TypeScript</JumpLink>
           <JumpLink href="#python-sdk">Python</JumpLink>
           <JumpLink href="#mcp">MCP</JumpLink>
@@ -279,7 +308,7 @@ export default function DocsPage() {
       <section id="live-endpoints" className="space-y-5">
         <SectionTitle eyebrow="Live" title="Deployment Endpoints">
           Use these URLs for the hosted devnet build. Localhost commands are only for running the
-          demo from your machine.
+          proof flow from your machine.
         </SectionTitle>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
           {liveEndpoints.map(([name, url]) => (
@@ -308,7 +337,7 @@ export default function DocsPage() {
       </section>
 
       <section id="pipeline" className="space-y-5">
-        <SectionTitle eyebrow="Flow" title="Current Full Pipeline">
+        <SectionTitle eyebrow="Flow" title="Full Pipeline">
           This is the judge-facing path used by the ElizaOS proof run and exposed through the
           TypeScript SDK and MCP PER tools.
         </SectionTitle>
@@ -320,6 +349,23 @@ export default function DocsPage() {
                 <h3 className="font-headline text-base font-semibold text-white">{label}</h3>
                 <p className="mt-1 text-sm leading-relaxed text-text-muted">{detail}</p>
               </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section id="integrations" className="space-y-5">
+        <SectionTitle eyebrow="Integrations" title="How AIR OTC Uses The Ecosystem">
+          These are the visible integration roles in the full pipeline logs and proof bundle.
+        </SectionTitle>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+          {integrations.map((integration) => (
+            <div key={integration.name} className="border border-border-subtle bg-bg-card p-5">
+              <span className="mb-3 block font-mono text-xs uppercase tracking-[0.18em] text-secondary">
+                {integration.tag}
+              </span>
+              <h3 className="mb-3 font-headline text-xl font-semibold text-white">{integration.name}</h3>
+              <p className="text-sm leading-relaxed text-text-muted">{integration.text}</p>
             </div>
           ))}
         </div>
@@ -401,11 +447,11 @@ export default function DocsPage() {
         </div>
       </section>
 
-      <section id="demo" className="space-y-6">
-        <SectionTitle eyebrow="Demo" title="Local ElizaOS Proof Commands">
-          Use these commands when recording the full demo video from the repository root.
+      <section id="full-pipeline-proof" className="space-y-6">
+        <SectionTitle eyebrow="Proof" title="Local ElizaOS Full Pipeline Commands">
+          Run these commands from the repository root to execute the full ElizaOS pipeline proof.
         </SectionTitle>
-        <CodeBlock title="demo.sh" code={demoCommands} />
+        <CodeBlock title="full-pipeline.sh" code={proofCommands} />
       </section>
     </div>
   );
