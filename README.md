@@ -58,36 +58,24 @@ flowchart TD
 
 ## Ecosystem Integrations
 
+- **Umbra**: stealth payout lifecycle that reduces wallet-link leakage through fresh receiver wallets and ordered evidence.
 - **IKA**: dWallet/MPC authorization evidence for release approval and settlement controls.
 - **Encrypt**: ciphertext/FHE handoff layer for private deal terms and settlement inputs.
 - **MagicBlock**: PER/ER execution sessions where agents negotiate OTC terms before settlement.
 - **Torque**: post-settlement custom events for transparent reward/incentive accounting.
 - **Zerion**: pre-trade policy and wallet/online checks before agents enter the settlement pipeline.
-- **Umbra**: stealth payout lifecycle that reduces wallet-link leakage through fresh receiver wallets and ordered evidence.
-
-## How AIR OTC Uses IKA
-
-AIR OTC uses IKA as the release-authorization evidence layer. In the full pipeline proof, the buyer signs the private release confirmation, and AIR OTC records IKA/dWallet authorization evidence before settlement is treated as complete. The purpose is to show that release follows the configured settlement policy rather than a unilateral backend action.
-
-## How AIR OTC Uses Encrypt
-
-AIR OTC uses Encrypt during the private-term handoff. After the MagicBlock PER session has both parties' terms, the workflow creates ciphertext inputs for the deal so sensitive values such as price, collateral, and settlement inputs are not carried through the proof flow as plaintext.
-
-## How AIR OTC Uses MagicBlock
-
-AIR OTC uses MagicBlock PER as the private negotiation session. Buyer and seller agents join the PER session, submit private terms, and finalize the agreement before funding authorization, delivery, release, and settlement evidence continue.
-
-## How AIR OTC Uses Torque
-
-AIR OTC uses Torque after settlement evidence is complete. The Torque sidecar emits custom reward events for buyer and seller reward wallets, giving judges a measurable incentive trail without putting rewards inside the settlement-critical path.
-
-## How AIR OTC Uses Zerion
-
-AIR OTC uses Zerion as the pre-trade gate. Before agents enter the private settlement path, the workflow runs Zerion policy and online checks so the proof trail shows the trade passed the required external check.
 
 ## How AIR OTC Uses Umbra SDK
 
 AIR OTC uses Umbra in the settlement phase, after private negotiation and funding evidence are complete. The TypeScript SDK and ElizaOS proof agents create or reuse fresh Umbra receiver wallets, register them on devnet, submit shield evidence, create receiver-claimable UTXO evidence, claim the UTXO, and unshield to a fresh final wallet.
+
+Code-level usage:
+
+- `middleman-agent/package.json` depends on `@umbra-privacy/sdk` and `@umbra-privacy/web-zk-prover`.
+- `middleman-agent/src/services/umbraService.ts` imports Umbra SDK client, registration, deposit, withdrawal, UTXO creator, UTXO claimer, relayer, fee, and compliance helpers.
+- `middleman-agent/src/services/umbraService.ts` maps devnet to `https://utxo-indexer.api-devnet.umbraprivacy.com` and `https://relayer.api-devnet.umbraprivacy.com`.
+- `middleman-agent/src/services/umbraSettlementV2.ts` rejects `sdk_fallback_tx`, verifies submitted tx signatures on Solana, checks they invoke the expected Umbra program, and marks settlement `COMPLETED` only after buyer and seller unshield evidence exists.
+- `agents/elizaos-agent/services/meridianSDK.ts` calls `autoCompleteUmbraLifecycle` when the full pipeline requests the buyer/seller Umbra phases.
 
 The proof flow rejects a fake Umbra success. Full pipeline completion requires ordered Umbra lifecycle evidence from both buyer and seller:
 
@@ -112,6 +100,63 @@ Devnet Umbra configuration uses the devnet program and official devnet indexer e
 Umbra devnet program: DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ
 Umbra devnet indexer: https://utxo-indexer.api-devnet.umbraprivacy.com
 ```
+
+## How AIR OTC Uses IKA SDK Adapter
+
+AIR OTC uses a local IKA gRPC/BCS adapter for dWallet release authorization evidence.
+
+Code-level usage:
+
+- `middleman-agent/src/ika-sdk/grpc.ts` uses `@grpc/grpc-js`, generated `ika_dwallet` protobuf bindings, and `@mysten/bcs`.
+- `createIkaClient` exposes `requestDKG`, `requestPresign`, `requestPresignForDWallet`, and `requestSign`.
+- `middleman-agent/src/services/ikaService.ts` drives DKG, on-chain dWallet commitment, ownership transfer to escrow CPI authority, `approve_message`, presign, sign, and signature commitment.
+- The service reads `IKA_GRPC_URL`, defaults to `pre-alpha-dev-1.ika.ika-network.net:443`, and uses `DWALLET_PROGRAM_ID` for the on-chain dWallet program.
+
+## How AIR OTC Uses Encrypt SDK Adapter
+
+AIR OTC uses a local Encrypt gRPC adapter for private PER handoff ciphertext creation.
+
+Code-level usage:
+
+- `middleman-agent/src/encrypt-sdk/grpc.ts` loads `encrypt_service.proto` through `@grpc/proto-loader` and creates an `EncryptService` client through `@grpc/grpc-js`.
+- `createEncryptClient` defaults to `pre-alpha-dev-1.encrypt.ika-network.net:443` and exposes `createInput` and `readCiphertext`.
+- `middleman-agent/src/services/privateHandoffBundleBuilder.ts` reads the on-chain `NetworkEncryptionKey` account, extracts the network encryption public key, and calls `EncryptService.createInputViaGrpc`.
+- The handoff builder creates ciphertext handles for `buyerCollateral`, `sellerCollateral`, `paymentAmount`, and `settlementResult`, then stores the returned ciphertext identifiers/account pubkeys in the PER handoff bundle.
+
+## How AIR OTC Uses MagicBlock SDK
+
+AIR OTC uses MagicBlock's Ephemeral Rollups SDK for ER/PER session routing and private PER execution.
+
+Code-level usage:
+
+- `middleman-agent/package.json` and `agents/elizaos-agent/package.json` depend on `@magicblock-labs/ephemeral-rollups-sdk`.
+- `middleman-agent/src/sdk/meridianClient.ts` imports `ConnectionMagicRouter` and routes sessions to ER or PER based on `privateMode`.
+- `middleman-agent/src/services/negotiationRollupService.ts` imports `createCreatePermissionInstruction` and `getAuthToken` from `@magicblock-labs/ephemeral-rollups-sdk`.
+- The MagicBlock negotiation program used by AIR OTC is `BfFvxgysVSGdP2TwAjBRSFhDYtK2JA1VBd8BUqh8nGGq`.
+- The PER TEE endpoint is `devnet-tee.magicblock.app`.
+
+## How AIR OTC Uses Torque API
+
+AIR OTC uses Torque after settlement evidence is complete. Torque is a post-settlement reward sidecar, not part of escrow consensus.
+
+Code-level usage:
+
+- `middleman-agent/src/services/torqueEventService.ts` subscribes to `deal_pipeline_stage_changed`.
+- Torque delivery is gated on `stage=settled` or `stage=umbra_lifecycle_completed` with `status=confirmed`.
+- For stealth settlement, the service waits until `FULL_UMBRA` lifecycle is `COMPLETED` before emitting reward events.
+- The service creates two payloads: one for the buyer reward wallet and one for the seller reward wallet.
+- It posts to `TORQUE_INGEST_URL` with `x-api-key: TORQUE_EVENT_API_KEY` and records queued/sent/failed rows in `TorqueEventDelivery`.
+
+## How AIR OTC Uses Zerion CLI/API
+
+AIR OTC uses the Zerion CLI as the pre-trade gate for the ElizaOS full pipeline proof.
+
+Code-level usage:
+
+- `agents/elizaos-agent/services/zerionCli.ts` executes the vendored CLI at `middleman-agent/zerion-core/cli/zerion.js`.
+- When `AIROTC_REQUIRE_ZERION=true`, `verifyPreTrade` runs `airotc policy-check`.
+- The same service runs `airotc online-check`, or stricter `verify-seller` / `verify-buyer` when `AIROTC_ZERION_VERIFY_TRADE_WALLETS=true`.
+- The Zerion integration stores `AIROTC_LAST_ZERION_POLICY_HASH` and `AIROTC_LAST_ZERION_ONLINE_SNAPSHOT_HASH` for proof logging.
 
 ## Full Pipeline Proof Commands
 

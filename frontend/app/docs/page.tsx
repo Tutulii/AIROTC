@@ -44,31 +44,72 @@ const pipeline = [
   ["10", "Observatory", "Humans can inspect status, stages, and proof resources."],
 ];
 
-const integrations = [
+const integrationDocs = [
   {
-    name: "IKA",
-    tag: "dWallet / MPC",
-    text: "AIR OTC records IKA/dWallet authorization evidence before release. This proves settlement release followed the policy path instead of a unilateral operator action.",
+    title: "How AIR OTC Uses Umbra SDK",
+    tag: "@umbra-privacy/sdk",
+    points: [
+      "middleman-agent depends on @umbra-privacy/sdk and @umbra-privacy/web-zk-prover.",
+      "middleman-agent/src/services/umbraService.ts imports getUmbraClient, getUserRegistrationFunction, deposit/withdraw helpers, UTXO creators, UTXO claimers, relayer helpers, and fee helpers from the Umbra SDK.",
+      "The devnet endpoint guard maps Umbra devnet to https://utxo-indexer.api-devnet.umbraprivacy.com and https://relayer.api-devnet.umbraprivacy.com.",
+      "middleman-agent/src/services/umbraSettlementV2.ts rejects sdk_fallback_tx, verifies submitted transactions on Solana, checks they invoke the expected Umbra program, and marks COMPLETED only after buyer and seller unshield evidence exists.",
+      "agents/elizaos-agent calls autoCompleteUmbraLifecycle so the proof run records receiver wallet, shield, receiver-claimable UTXO, claim, and unshield phases.",
+    ],
   },
   {
-    name: "Encrypt",
-    tag: "FHE handoff",
-    text: "AIR OTC uses Encrypt for the private-term handoff. The PER terms are converted into ciphertext inputs so price, collateral, and settlement inputs are not shown as plaintext in the proof path.",
+    title: "How AIR OTC Uses IKA SDK Adapter",
+    tag: "IKA gRPC + BCS",
+    points: [
+      "middleman-agent/src/ika-sdk/grpc.ts is the local IKA client adapter. It uses @grpc/grpc-js, generated ika_dwallet protobuf bindings, and @mysten/bcs serialization.",
+      "createIkaClient exposes requestDKG, requestPresign, requestPresignForDWallet, and requestSign.",
+      "middleman-agent/src/services/ikaService.ts uses the adapter flow for DKG, on-chain dWallet commitment, ownership transfer to the escrow CPI authority, approve_message, presign, sign, and signature commitment.",
+      "The service reads IKA_GRPC_URL, defaults to pre-alpha-dev-1.ika.ika-network.net:443, and uses DWALLET_PROGRAM_ID for the on-chain dWallet program.",
+      "The proof path records IKA/dWallet authorization evidence as part of release and settlement verification.",
+    ],
   },
   {
-    name: "MagicBlock",
-    tag: "PER session",
-    text: "AIR OTC uses MagicBlock PER as the private execution session where buyer and seller agents join, submit private terms, and finalize the agreement before settlement.",
+    title: "How AIR OTC Uses Encrypt SDK Adapter",
+    tag: "Encrypt gRPC",
+    points: [
+      "middleman-agent/src/encrypt-sdk/grpc.ts is the local Encrypt client adapter. It loads encrypt_service.proto with @grpc/proto-loader and creates an EncryptService gRPC client with @grpc/grpc-js.",
+      "createEncryptClient defaults to pre-alpha-dev-1.encrypt.ika-network.net:443 and exposes createInput and readCiphertext.",
+      "middleman-agent/src/services/privateHandoffBundleBuilder.ts calls EncryptService.createInputViaGrpc for buyerCollateral, sellerCollateral, paymentAmount, and settlementResult.",
+      "The builder fetches the on-chain NetworkEncryptionKey account, passes the network encryption public key into gRPC, and stores returned ciphertext identifiers/account pubkeys in the PER handoff bundle.",
+      "agents/elizaos-agent/proof/fullPipelineProof.ts prints Encrypt evidence lines when the network key is found and ciphertext inputs are created.",
+    ],
   },
   {
-    name: "Torque",
-    tag: "reward events",
-    text: "AIR OTC sends Torque custom events after settlement evidence is complete, giving judges and operators transparent reward and incentive accounting without changing settlement.",
+    title: "How AIR OTC Uses MagicBlock SDK",
+    tag: "@magicblock-labs/ephemeral-rollups-sdk",
+    points: [
+      "middleman-agent and agents/elizaos-agent depend on @magicblock-labs/ephemeral-rollups-sdk.",
+      "middleman-agent/src/sdk/meridianClient.ts imports ConnectionMagicRouter and routes sessions to ER or PER based on privateMode.",
+      "middleman-agent/src/services/negotiationRollupService.ts imports createCreatePermissionInstruction and getAuthToken from the MagicBlock SDK.",
+      "The negotiation program ID is BfFvxgysVSGdP2TwAjBRSFhDYtK2JA1VBd8BUqh8nGGq, and the PER TEE endpoint is devnet-tee.magicblock.app.",
+      "The proof run shows agents joining the MagicBlock PER session, submitting encrypted private terms, finalizing the agreement, and committing the session back toward L1.",
+    ],
   },
   {
-    name: "Zerion",
-    tag: "pre-trade gate",
-    text: "AIR OTC runs Zerion policy and online checks before agents enter the private settlement path, so the proof shows the trade passed the required pre-trade gate.",
+    title: "How AIR OTC Uses Torque API",
+    tag: "custom events",
+    points: [
+      "middleman-agent/src/services/torqueEventService.ts subscribes to deal_pipeline_stage_changed.",
+      "Torque delivery is gated on stage=settled or stage=umbra_lifecycle_completed with status=confirmed.",
+      "For stealth settlement, the service waits until FULL_UMBRA lifecycle is COMPLETED before emitting reward events.",
+      "It builds two Torque custom-event payloads, one for buyer reward wallet and one for seller reward wallet, using eventName, tradeRef, participantRole, rollupMode, settlementPolicy, trade notional, platform fee, reward amount, and schema version.",
+      "It POSTs payloads to TORQUE_INGEST_URL with x-api-key from TORQUE_EVENT_API_KEY and records queued/sent/failed delivery rows in TorqueEventDelivery.",
+    ],
+  },
+  {
+    title: "How AIR OTC Uses Zerion CLI/API",
+    tag: "Zerion CLI",
+    points: [
+      "agents/elizaos-agent/services/zerionCli.ts executes the vendored Zerion CLI at middleman-agent/zerion-core/cli/zerion.js.",
+      "When AIROTC_REQUIRE_ZERION=true, verifyPreTrade runs airotc policy-check before the agent proceeds.",
+      "The same service runs airotc online-check, or stricter verify-seller / verify-buyer checks when AIROTC_ZERION_VERIFY_TRADE_WALLETS=true.",
+      "Zerion outputs policyHash and snapshotHash into process env for proof logging.",
+      "The proof run prints the Zerion gate before MagicBlock PER starts, so judges can see the external pre-trade check happened.",
+    ],
   },
 ];
 
@@ -355,17 +396,23 @@ export default function DocsPage() {
       </section>
 
       <section id="integrations" className="space-y-5">
-        <SectionTitle eyebrow="Integrations" title="How AIR OTC Uses The Ecosystem">
-          These are the visible integration roles in the full pipeline logs and proof bundle.
+        <SectionTitle eyebrow="Integrations" title="SDK And API Usage From The Codebase">
+          Ordered implementation notes based on the repo paths that call each SDK, adapter, CLI, or API.
         </SectionTitle>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-          {integrations.map((integration) => (
-            <div key={integration.name} className="border border-border-subtle bg-bg-card p-5">
+        <div className="grid grid-cols-1 gap-4">
+          {integrationDocs.map((integration) => (
+            <div key={integration.title} className="border border-border-subtle bg-bg-card p-6">
               <span className="mb-3 block font-mono text-xs uppercase tracking-[0.18em] text-secondary">
                 {integration.tag}
               </span>
-              <h3 className="mb-3 font-headline text-xl font-semibold text-white">{integration.name}</h3>
-              <p className="text-sm leading-relaxed text-text-muted">{integration.text}</p>
+              <h3 className="mb-4 font-headline text-2xl font-semibold text-white">{integration.title}</h3>
+              <ul className="list-disc space-y-2 pl-5">
+                {integration.points.map((point) => (
+                  <li key={point} className="text-sm leading-relaxed text-text-muted">
+                    {point}
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
         </div>
