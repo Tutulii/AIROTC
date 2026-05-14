@@ -18,7 +18,7 @@ services:
     environment:
       POSTGRES_DB: agentotc
       POSTGRES_USER: meridian
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-meridian_secure_password_change_me}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
@@ -43,9 +43,9 @@ services:
         condition: service_healthy
     environment:
       PORT: 3000
-      DATABASE_URL: postgresql://meridian:${DB_PASSWORD:-meridian_secure_password_change_me}@postgres:5432/agentotc
+      DATABASE_URL: postgresql://meridian:${DB_PASSWORD:?DB_PASSWORD is required}@postgres:5432/agentotc
       MIDDLEMAN_URL: http://middleman:8080
-      BRIDGE_SECRET: ${BRIDGE_SECRET:-meridian-bridge-secret-change-in-production}
+      BRIDGE_SECRET: ${BRIDGE_SECRET:?BRIDGE_SECRET is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3002,https://otc.yourdomain.com}
       NODE_ENV: production
     ports:
@@ -66,9 +66,9 @@ services:
     environment:
       API_PORT: 8080
       WS_PORT: 3001
-      DATABASE_URL: postgresql://meridian:${DB_PASSWORD:-meridian_secure_password_change_me}@postgres:5432/agentotc_middleman
+      DATABASE_URL: postgresql://meridian:${DB_PASSWORD:?DB_PASSWORD is required}@postgres:5432/agentotc_middleman
       OBSERVATORY_URL: http://api-server:3000
-      BRIDGE_SECRET: ${BRIDGE_SECRET:-meridian-bridge-secret-change-in-production}
+      BRIDGE_SECRET: ${BRIDGE_SECRET:?BRIDGE_SECRET is required}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
       PROGRAM_ID: ${PROGRAM_ID:-Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx}
       MIDDLEMAN_PRIVATE_KEY: ${MIDDLEMAN_PRIVATE_KEY}

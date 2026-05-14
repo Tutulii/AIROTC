@@ -16,10 +16,26 @@
 import crypto from 'crypto';
 
 const TEST_BRIDGE_SECRET = 'test-bridge-secret';
+const DISALLOWED_BRIDGE_SECRETS = new Set([
+    'meridian-bridge-secret-change-in-production',
+    'change-me',
+    'changeme',
+    'bridge-secret',
+    'default-bridge-secret',
+    TEST_BRIDGE_SECRET,
+]);
 
 function resolveBridgeSecret(): string {
     const configured = process.env.BRIDGE_SECRET?.trim();
-    if (configured) return configured;
+    if (configured) {
+        if (DISALLOWED_BRIDGE_SECRETS.has(configured) && process.env.NODE_ENV !== 'test') {
+            throw new Error('BRIDGE_SECRET uses a known placeholder value');
+        }
+        if (process.env.NODE_ENV === 'production' && configured.length < 32) {
+            throw new Error('BRIDGE_SECRET must be at least 32 characters in production');
+        }
+        return configured;
+    }
     if (process.env.NODE_ENV === 'test') return TEST_BRIDGE_SECRET;
     throw new Error('BRIDGE_SECRET is required for internal bridge authentication');
 }

@@ -11,36 +11,28 @@ import { logger } from "../utils/logger";
 import { dealPhaseManager } from "../../core/dealPhaseManager";
 import { walletRegistry } from "../state/walletRegistry";
 import { PhaseChangedEvent } from "../types/events";
-import crypto from "crypto";
 import { ticketStore } from "../state/ticketStore";
 import type { DealPipelineStage, PipelineStageStatus } from "../types/dealPipeline";
+import { resolveBridgeSecret, signBridgePayload } from "../security/bridgeAuth";
 
 const OBSERVATORY_URL = process.env.OBSERVATORY_API_URL || "http://localhost:3000";
-const TEST_BRIDGE_SECRET = "test-bridge-secret";
-
-function resolveBridgeSecret(): string | null {
-    const configured = process.env.BRIDGE_SECRET?.trim();
-    if (configured) return configured;
-    if (process.env.NODE_ENV === "test") return TEST_BRIDGE_SECRET;
-    return null;
-}
 
 /** Fire-and-forget HTTP call to the api-server. Never throws. */
 async function pushToObservatory(method: string, path: string, body?: any): Promise<any> {
     try {
         const bridgeSecret = resolveBridgeSecret();
-        if (!bridgeSecret) {
+        if (!bridgeSecret.ok) {
             logger.error("observatory_bridge_auth_unconfigured", {
                 path,
                 method,
+                reason: bridgeSecret.reason,
             });
             return null;
         }
 
         const bodyString = body ? JSON.stringify(body) : "";
         const timestamp = Date.now().toString();
-        const payload = `${timestamp}:${method.toUpperCase()}:${path}:${bodyString}`;
-        const signature = crypto.createHmac("sha256", bridgeSecret).update(payload).digest("hex");
+        const signature = signBridgePayload(bridgeSecret.secret, timestamp, method, path, bodyString);
         const opts: RequestInit = {
             method,
             headers: {

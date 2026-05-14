@@ -42,6 +42,7 @@ import { pipelineStateStore } from '../state/pipelineStateStore';
 import { prisma } from '../lib/prisma';
 import { verifyAuditChain } from '../services/auditTrail';
 import dealTimelineRouter from './dealTimeline';
+import { verifyBridgeRequest } from '../security/bridgeAuth';
 
 let server: any;
 
@@ -200,50 +201,19 @@ export function getHttpServer() { return server; }
 // HMAC BRIDGE SECURITY
 // Verifies that requests to bridge endpoints come from the API Server.
 // ══════════════════════════════════════
-const BRIDGE_SECRET = process.env.BRIDGE_SECRET || '';
-
 function verifyBridgeHmac(req: express.Request, res: express.Response, next: express.NextFunction): void {
-    // Dev mode: if no BRIDGE_SECRET configured, allow all (local testing)
-    if (!BRIDGE_SECRET) {
-        next();
-        return;
-    }
-
     const signature = req.headers['x-bridge-signature'] as string;
     const timestamp = req.headers['x-bridge-timestamp'] as string;
-
-    if (!signature || !timestamp) {
-        logger.warn('bridge_auth_missing', { ip: req.ip, path: req.path });
-        res.status(401).json({ error: 'Missing bridge authentication headers' });
-        return;
-    }
-
-    // Check timestamp freshness (30 second window)
-    const now = Date.now();
-    const reqTime = parseInt(timestamp, 10);
-    if (isNaN(reqTime) || Math.abs(now - reqTime) > 30000) {
-        logger.warn('bridge_auth_expired', { ip: req.ip, path: req.path, age_ms: now - reqTime });
-        res.status(401).json({ error: 'Bridge timestamp expired' });
-        return;
-    }
-
-    // Recompute HMAC
     const body = JSON.stringify(req.body) || '';
-    const payload = `${timestamp}:${req.method.toUpperCase()}:${req.path}:${body}`;
-    const expected = crypto.createHmac('sha256', BRIDGE_SECRET).update(payload).digest('hex');
+    const verification = verifyBridgeRequest(req.method, req.path, body, signature, timestamp);
 
-    // Constant-time comparison
-    try {
-        const valid = signature.length === expected.length &&
-            crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'));
-
-        if (!valid) {
-            logger.warn('bridge_auth_invalid', { ip: req.ip, path: req.path });
-            res.status(401).json({ error: 'Invalid bridge signature' });
-            return;
-        }
-    } catch {
-        res.status(401).json({ error: 'Invalid bridge signature format' });
+    if (!verification.valid) {
+        logger.warn('bridge_auth_rejected', {
+            ip: req.ip,
+            path: req.path,
+            reason: verification.reason,
+        });
+        res.status(verification.status).json({ error: verification.reason });
         return;
     }
 
