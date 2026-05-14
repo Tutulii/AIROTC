@@ -2,6 +2,12 @@ import { logger } from '../lib/logger';
 import { Socket } from 'socket.io';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
+import { isWalletAuthChallengeBound, SOCKET_IO_AUTH_PATH } from '../auth/walletChallenge';
+
+function websocketAuthPath(socket: Socket): string {
+    const handshakeUrl = socket.handshake.url || SOCKET_IO_AUTH_PATH;
+    return handshakeUrl.split('?')[0] || SOCKET_IO_AUTH_PATH;
+}
 
 export const socketAuthenticate = async (socket: Socket, next: (err?: Error) => void) => {
     try {
@@ -9,6 +15,10 @@ export const socketAuthenticate = async (socket: Socket, next: (err?: Error) => 
 
         if (!message || !signature || !wallet) {
             return next(new Error('Unauthorized: Missing required authentication fields'));
+        }
+
+        if (!isWalletAuthChallengeBound(message, 'WS', websocketAuthPath(socket))) {
+            return next(new Error('Unauthorized: Wallet auth message must be a fresh WebSocket-bound AgentOTC challenge'));
         }
 
         // 1. Extract values and decode base58

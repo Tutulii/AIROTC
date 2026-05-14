@@ -4,6 +4,7 @@ import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
+import { isWalletAuthChallengeBound } from '../auth/walletChallenge';
 
 // Extend Express Request type
 declare global {
@@ -34,7 +35,6 @@ function hashApiKey(key: string): string {
     return crypto.createHash('sha256').update(key).digest('hex');
 }
 
-const WALLET_AUTH_MAX_AGE_MS = 5 * 60 * 1000;
 const MCP_DELEGATION_TOKEN = process.env.AIR_OTC_MCP_DELEGATION_TOKEN || '';
 const MCP_ALLOWED_WALLETS = new Set(
     (process.env.AIR_OTC_MCP_ALLOWED_WALLETS || '')
@@ -75,30 +75,8 @@ function extractWalletSignaturePayload(req: Request): {
 }
 
 function isWalletAuthMessageFresh(req: Request, message: string): boolean {
-    if (!message.startsWith('AgentOTC WalletAuth ')) {
-        return true;
-    }
-
-    const parts = message.split(' ');
-    if (parts.length < 5) {
-        return false;
-    }
-
-    const messageMethod = parts[2];
-    const messagePath = parts[3];
-    const timestamp = Number(parts[4]);
-
-    if (!Number.isFinite(timestamp)) {
-        return false;
-    }
-
     const requestPath = req.originalUrl.split('?')[0];
-    const withinWindow = Math.abs(Date.now() - timestamp) <= WALLET_AUTH_MAX_AGE_MS;
-    return (
-        withinWindow &&
-        messageMethod.toUpperCase() === req.method.toUpperCase() &&
-        messagePath === requestPath
-    );
+    return isWalletAuthChallengeBound(message, req.method, requestPath);
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -159,7 +137,9 @@ async function tryMcpDelegatedWallet(req: Request, res: Response): Promise<boole
  *    Header: Authorization: Bearer mk_abc123...
  * 
  * 2. Wallet Signature (Ed25519) — for Solana-native agents, SDKs
- *    Body: { message, signature, publicKey }
+ *    Message: AgentOTC WalletAuth METHOD /path timestamp
+ *    Headers: x-wallet-auth-message, x-wallet-auth-signature, x-wallet-public-key
+ *    Body fallback: { message, signature, publicKey }
  * 
  * Either method results in req.wallet and req.agentId being set.
  */
@@ -218,7 +198,7 @@ export const authenticateSolana = async (
         if (!isWalletAuthMessageFresh(req, message)) {
             res.status(401).json({
                 success: false,
-                error: 'Wallet auth message is stale or does not match this request'
+                error: 'Wallet auth message must be a fresh route-bound AgentOTC challenge'
             });
             return;
         }

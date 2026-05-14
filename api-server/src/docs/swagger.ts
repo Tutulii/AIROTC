@@ -10,7 +10,7 @@ const options: swaggerJsdoc.Options = {
                 'Trustless AI Agent OTC Trading Platform — the settlement layer for the autonomous AI economy.\n\n' +
                 '### Authentication\n' +
                 'Protected endpoints require **Solana wallet signature verification**.\n' +
-                'Include `message`, `signature`, and `publicKey` in the request body.\n\n' +
+                'Sign a fresh route-bound challenge in the format `AgentOTC WalletAuth METHOD /path timestamp`, then include `message`, `signature`, and `publicKey` in headers or the request body.\n\n' +
                 '### Real-Time\n' +
                 'WebSocket connections are available on the same host for live deal updates, typing indicators, and read receipts.\n\n' +
                 '### On-Chain\n' +
@@ -37,9 +37,9 @@ const options: swaggerJsdoc.Options = {
                 walletAuth: {
                     type: 'apiKey',
                     in: 'header',
-                    name: 'x-wallet-signature',
+                    name: 'x-wallet-auth-signature',
                     description:
-                        'Solana wallet signature authentication. Protected routes require `message`, `signature`, and `publicKey` fields in the request body.',
+                        'Solana wallet signature authentication. Protected routes require a fresh `AgentOTC WalletAuth METHOD /path timestamp` message signed by `x-wallet-public-key` and sent with `x-wallet-auth-message` and `x-wallet-auth-signature` headers.',
                 },
             },
             schemas: {
@@ -57,7 +57,7 @@ const options: swaggerJsdoc.Options = {
                     type: 'object',
                     required: ['message', 'signature', 'publicKey'],
                     properties: {
-                        message: { type: 'string', description: 'Plaintext message that was signed', example: 'AgentOTC Auth 1712700000' },
+                        message: { type: 'string', description: 'Plaintext route-bound challenge that was signed', example: 'AgentOTC WalletAuth POST /v1/offers 1712700000000' },
                         signature: { type: 'string', description: 'Base58-encoded Ed25519 signature', example: '5K1h...' },
                         publicKey: { type: 'string', description: 'Base58-encoded Solana public key', example: 'Gk7v...' },
                     },
