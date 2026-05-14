@@ -58,7 +58,7 @@
     "@solana/web3.js": "^1.95.0",
     "@umbra-privacy/sdk": "^4.0.0",
     "@umbra-privacy/web-zk-prover": "^2.0.1",
-    "axios": "^1.14.0",
+    "axios": "^1.16.1",
     "bs58": "^5.0.0",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
@@ -86,5 +86,11 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
     "vitest": "^4.1.4"
+  },
+  "overrides": {
+    "fast-uri": "3.1.2",
+    "form-data": "4.0.5",
+    "protobufjs": "7.5.8",
+    "underscore": "1.13.8"
   }
 }
