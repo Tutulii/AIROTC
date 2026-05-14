@@ -61,6 +61,13 @@ const config = {
     process.env.AIR_OTC_TS_SDK_PATH ||
     path.resolve(__dirname, "../../../sdk/ts/dist/index.mjs"),
   mcpToken: process.env.AIR_OTC_MCP_TOKEN || "",
+  mcpDelegationToken: process.env.AIR_OTC_MCP_DELEGATION_TOKEN || "",
+  allowedWallets: new Set(
+    (process.env.AIR_OTC_MCP_ALLOWED_WALLETS || "")
+      .split(",")
+      .map((wallet) => wallet.trim())
+      .filter(Boolean)
+  ),
   scopes: new Set(
     (process.env.AIR_OTC_MCP_SCOPES || "offers:read,deals:read,proofs:read,vault:read,umbra:read")
       .split(",")
@@ -97,7 +104,32 @@ function walletAuth() {
   return cachedWalletAuth;
 }
 
+function isValidSolanaWallet(wallet: string): boolean {
+  try {
+    return bs58.decode(wallet).length === 32;
+  } catch {
+    return false;
+  }
+}
+
+function assertDelegatedWalletAllowed(requestedWallet?: string): asserts requestedWallet is string {
+  if (!requestedWallet || !isValidSolanaWallet(requestedWallet)) {
+    throw new Error("mcp_wallet_invalid");
+  }
+  if (!config.allowedWallets.has(requestedWallet)) {
+    throw new Error(`mcp_wallet_not_allowlisted:${requestedWallet}`);
+  }
+  if (!config.mcpDelegationToken) {
+    throw new Error("mcp_delegation_token_not_configured");
+  }
+}
+
 function assertConfiguredWallet(requestedWallet?: string): void {
+  if (!requestedWallet) return;
+  if (config.allowedWallets.size > 0) {
+    assertDelegatedWalletAllowed(requestedWallet);
+    return;
+  }
   const auth = walletAuth();
   if (auth && requestedWallet && requestedWallet !== auth.publicKey) {
     throw new Error(`mcp_wallet_mismatch:configured=${auth.publicKey}:requested=${requestedWallet}`);
@@ -140,10 +172,19 @@ function textResult(data: unknown) {
   };
 }
 
-async function httpJson(pathname: string, init: RequestInit = {}, baseUrl = config.apiUrl): Promise<any> {
+async function httpJson(
+  pathname: string,
+  init: RequestInit = {},
+  baseUrl = config.apiUrl,
+  options: { delegatedWallet?: string } = {}
+): Promise<any> {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json");
-  if (config.apiKey && !headers.has("authorization")) {
+  if (options.delegatedWallet && baseUrl === config.apiUrl) {
+    assertDelegatedWalletAllowed(options.delegatedWallet);
+    headers.set("x-airotc-mcp-delegation-token", config.mcpDelegationToken);
+    headers.set("x-airotc-delegated-wallet", options.delegatedWallet);
+  } else if (config.apiKey && !headers.has("authorization")) {
     headers.set("authorization", `Bearer ${config.apiKey}`);
   } else if (baseUrl === config.apiUrl && !headers.has("authorization")) {
     const auth = walletAuth();
@@ -276,7 +317,7 @@ const tools: ToolDefinition[] = [
             rewardWallet: args.rewardWallet,
             fundingWallet: args.fundingWallet,
           }),
-        })
+        }, config.apiUrl, { delegatedWallet: args.wallet })
       );
     },
   },
@@ -308,7 +349,7 @@ const tools: ToolDefinition[] = [
             rewardWallet: args.rewardWallet,
             fundingWallet: args.fundingWallet,
           }),
-        })
+        }, config.apiUrl, { delegatedWallet: args.wallet })
       );
     },
   },
@@ -687,6 +728,11 @@ async function startHttp(): Promise<void> {
       name: "air-otc-mcp",
       version: "0.1.0",
       transports: ["stdio", "http"],
+      delegatedWallets: {
+        enabled: Boolean(config.mcpDelegationToken),
+        allowlisted: config.allowedWallets.size,
+        maxActiveSeats: Number(process.env.AIR_OTC_MCP_MAX_ACTIVE_SEATS || 0) || null,
+      },
       tools: tools.map((tool) => tool.name),
       resources: [
         ...staticResources.map((resource) => resource.uri),

@@ -11,7 +11,7 @@ declare global {
         interface Request {
             wallet?: string;
             agentId?: string;
-            authMethod?: 'wallet_signature' | 'api_key';
+            authMethod?: 'wallet_signature' | 'api_key' | 'mcp_delegated_wallet';
         }
     }
 }
@@ -35,6 +35,13 @@ function hashApiKey(key: string): string {
 }
 
 const WALLET_AUTH_MAX_AGE_MS = 5 * 60 * 1000;
+const MCP_DELEGATION_TOKEN = process.env.AIR_OTC_MCP_DELEGATION_TOKEN || '';
+const MCP_ALLOWED_WALLETS = new Set(
+    (process.env.AIR_OTC_MCP_ALLOWED_WALLETS || '')
+        .split(',')
+        .map((wallet) => wallet.trim())
+        .filter(Boolean)
+);
 
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
     if (Array.isArray(value)) {
@@ -94,6 +101,55 @@ function isWalletAuthMessageFresh(req: Request, message: string): boolean {
     );
 }
 
+function safeEqual(a: string, b: string): boolean {
+    const left = Buffer.from(a);
+    const right = Buffer.from(b);
+    return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function isValidSolanaWallet(wallet: string): boolean {
+    try {
+        return bs58.decode(wallet).length === 32;
+    } catch {
+        return false;
+    }
+}
+
+async function tryMcpDelegatedWallet(req: Request, res: Response): Promise<boolean> {
+    const token = firstHeaderValue(req.headers['x-airotc-mcp-delegation-token']);
+    const wallet = firstHeaderValue(req.headers['x-airotc-delegated-wallet']);
+
+    if (!token && !wallet) {
+        return false;
+    }
+
+    if (!MCP_DELEGATION_TOKEN || !token || !safeEqual(token, MCP_DELEGATION_TOKEN)) {
+        res.status(401).json({ success: false, error: 'Invalid MCP delegated wallet token' });
+        return true;
+    }
+
+    if (!wallet || !isValidSolanaWallet(wallet)) {
+        res.status(400).json({ success: false, error: 'Invalid MCP delegated wallet' });
+        return true;
+    }
+
+    if (!MCP_ALLOWED_WALLETS.has(wallet)) {
+        res.status(403).json({ success: false, error: 'MCP delegated wallet is not allowlisted' });
+        return true;
+    }
+
+    const agent = await prisma.agent.upsert({
+        where: { wallet },
+        update: {},
+        create: { wallet }
+    });
+
+    req.wallet = wallet;
+    req.agentId = agent.id;
+    req.authMethod = 'mcp_delegated_wallet';
+    return false;
+}
+
 /**
  * Dual Authentication Middleware
  * 
@@ -113,6 +169,15 @@ export const authenticateSolana = async (
     next: NextFunction
 ): Promise<void> => {
     try {
+        const delegatedHandled = await tryMcpDelegatedWallet(req, res);
+        if (delegatedHandled) {
+            return;
+        }
+        if (req.authMethod === 'mcp_delegated_wallet') {
+            next();
+            return;
+        }
+
         // ═══════════════════════════════════════
         // Try API Key first (check Authorization header)
         // ═══════════════════════════════════════
