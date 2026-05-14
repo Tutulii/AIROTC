@@ -51,6 +51,62 @@ type ResourceTemplateDefinition = {
   mimeType: string;
 };
 
+type TokenRule = {
+  name: string;
+  token: string;
+  scopes: Set<Scope>;
+};
+
+const validScopes = new Set<Scope>([
+  "offers:read",
+  "offers:write",
+  "deals:read",
+  "per:run",
+  "proofs:read",
+  "vault:read",
+  "umbra:read",
+]);
+
+function parseScopes(value: string | string[] | undefined, fallback: Set<Scope>): Set<Scope> {
+  if (!value) return new Set(fallback);
+  const items = Array.isArray(value) ? value : value.split(",");
+  const parsed = items
+    .map((scope) => scope.trim())
+    .filter((scope): scope is Scope => validScopes.has(scope as Scope));
+  return parsed.length > 0 ? new Set(parsed) : new Set(fallback);
+}
+
+function parseTokenRules(fallbackScopes: Set<Scope>): TokenRule[] {
+  const raw = process.env.AIR_OTC_MCP_TOKENS_JSON;
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("AIR_OTC_MCP_TOKENS_JSON must be valid JSON");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("AIR_OTC_MCP_TOKENS_JSON must be an array");
+  }
+  return parsed
+    .map((entry, index) => {
+      const item = entry as { name?: unknown; token?: unknown; scopes?: unknown };
+      if (typeof item.token !== "string" || item.token.length < 16) {
+        throw new Error(`AIR_OTC_MCP_TOKENS_JSON[${index}].token must be a secret string`);
+      }
+      return {
+        name: typeof item.name === "string" && item.name.trim() ? item.name.trim() : `token-${index + 1}`,
+        token: item.token,
+        scopes: parseScopes(item.scopes as string[] | string | undefined, fallbackScopes),
+      };
+    });
+}
+
+const defaultScopes = parseScopes(
+  process.env.AIR_OTC_MCP_SCOPES || "offers:read,deals:read,proofs:read,vault:read,umbra:read",
+  new Set(validScopes)
+);
+
 const config = {
   apiUrl: (process.env.AIR_OTC_API_URL || "http://localhost:3000").replace(/\/$/, ""),
   middlemanUrl: (process.env.AIR_OTC_MIDDLEMAN_URL || "http://localhost:8080").replace(/\/$/, ""),
@@ -68,12 +124,8 @@ const config = {
       .map((wallet) => wallet.trim())
       .filter(Boolean)
   ),
-  scopes: new Set(
-    (process.env.AIR_OTC_MCP_SCOPES || "offers:read,deals:read,proofs:read,vault:read,umbra:read")
-      .split(",")
-      .map((scope) => scope.trim())
-      .filter(Boolean)
-  ),
+  scopes: defaultScopes,
+  tokenRules: parseTokenRules(defaultScopes),
   walletPrivateKey: process.env.AIR_OTC_WALLET_PRIVATE_KEY || "",
   apiKey: process.env.AIR_OTC_API_KEY || "",
 };
@@ -152,11 +204,21 @@ function objectSchema(properties: Record<string, any>, required: string[] = []):
   };
 }
 
+function resolveTokenScopes(authToken?: string): Set<Scope> | null {
+  const hasAnyToken = Boolean(config.mcpToken) || config.tokenRules.length > 0;
+  if (!hasAnyToken) return config.scopes;
+  if (!authToken) return null;
+  if (config.mcpToken && authToken === config.mcpToken) return config.scopes;
+  const rule = config.tokenRules.find((candidate) => candidate.token === authToken);
+  return rule?.scopes || null;
+}
+
 function requireScope(args: { authToken?: string }, scope: Scope): void {
-  if (config.mcpToken && args.authToken !== config.mcpToken) {
+  const scopes = resolveTokenScopes(args.authToken);
+  if (!scopes) {
     throw new Error(`mcp_auth_failed:${scope}`);
   }
-  if (!config.scopes.has(scope)) {
+  if (!scopes.has(scope)) {
     throw new Error(`mcp_scope_missing:${scope}`);
   }
 }
@@ -732,6 +794,10 @@ async function startHttp(): Promise<void> {
         enabled: Boolean(config.mcpDelegationToken),
         allowlisted: config.allowedWallets.size,
         maxActiveSeats: Number(process.env.AIR_OTC_MCP_MAX_ACTIVE_SEATS || 0) || null,
+      },
+      auth: {
+        enabled: Boolean(config.mcpToken) || config.tokenRules.length > 0,
+        tokenCount: (config.mcpToken ? 1 : 0) + config.tokenRules.length,
       },
       tools: tools.map((tool) => tool.name),
       resources: [
