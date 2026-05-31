@@ -1,0 +1,3 @@
+-- Intentionally empty migration placeholder.
+-- The middleman-side AgentPolicy tables are created by the following
+-- 20260518103500_add_agent_policy_records_middleman migration.
