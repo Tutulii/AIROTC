@@ -42,6 +42,10 @@ export class RpcManager {
     return this.currentIndex;
   }
 
+  public getEndpointCount(): number {
+    return this.endpoints.length;
+  }
+
   public markFailure(index: number): boolean {
     const now = Date.now();
     const record = this.failureRecords[index];

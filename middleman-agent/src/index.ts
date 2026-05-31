@@ -1,6 +1,6 @@
 import { loadConfig, AgentConfig } from "./config";
 import { logger } from "./utils/logger";
-import { createConnection, verifyConnection } from "./solana/connection";
+import { createVerifiedConnection } from "./solana/connection";
 import { loadWallet, getWalletBalance } from "./solana/wallet";
 import { loadProgram, deriveConfigPda } from "./solana/program";
 import { eventBus } from "./services/eventBus";
@@ -244,8 +244,7 @@ async function main(): Promise<void> {
   // Load DB and Sol connection
   await prisma.$connect();
   await ensureTorqueSchema(prisma);
-  const conn = createConnection(config.solanaRpcUrl);
-  await verifyConnection(conn);
+  await createVerifiedConnection(config.solanaRpcUrl);
 
   // Initialize Soul Engine
   soulEngine.loadSoul();
@@ -254,8 +253,7 @@ async function main(): Promise<void> {
   // to the autonomous innerMonologueLoop.
 
   // 4. Connect to Solana
-  const connection = createConnection(config.solanaRpcUrl);
-  const { slot, blockHeight } = await verifyConnection(connection);
+  const { connection, slot, blockHeight } = await createVerifiedConnection(config.solanaRpcUrl);
 
   // 5. Load wallet
   const keypair = loadWallet(config.privateKey);
