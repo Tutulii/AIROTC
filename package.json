@@ -9,7 +9,12 @@
     "proof:demo": "npm --prefix agents/elizaos-agent run proof:demo",
     "proof:demo:run": "npm run proof:demo:prewarm && npm run proof:demo",
     "proof:demo:raw": "npm --prefix agents/elizaos-agent run proof:demo:raw",
-    "proof:per": "npm --prefix agents/elizaos-agent run proof:per"
+    "proof:per": "npm --prefix agents/elizaos-agent run proof:per",
+    "agent:normal": "node scripts/manus-local-sdk-agent.cjs normal-two-agent",
+    "agent:normal:preflight": "node scripts/manus-local-sdk-agent.cjs normal-preflight",
+    "agent:normal:dry": "node scripts/manus-local-sdk-agent.cjs normal-dry-run",
+    "agent:normal:post": "node scripts/manus-local-sdk-agent.cjs normal-post",
+    "agent:normal:join": "node scripts/manus-local-sdk-agent.cjs normal-join"
   },
   "dependencies": {
     "snarkjs": "^0.7.6"
