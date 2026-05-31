@@ -1,6 +1,6 @@
 import { loadConfig, AgentConfig } from "./config";
 import { logger } from "./utils/logger";
-import { createVerifiedConnection } from "./solana/connection";
+import { createVerifiedConnection, getConnection } from "./solana/connection";
 import { loadWallet, getWalletBalance } from "./solana/wallet";
 import { loadProgram, deriveConfigPda } from "./solana/program";
 import { eventBus } from "./services/eventBus";
@@ -190,7 +190,7 @@ async function heartbeatLoop(
           const expectedTotal = Math.floor(
             ((deal.terms!.collateral_buyer || 0) + (deal.terms!.collateral_seller || 0) + (deal.terms!.price || 0)) * LAMPORTS_PER_SOL
           );
-          const connection = createConnection(loadConfig().solanaRpcUrl);
+          const connection = getConnection();
           pollDepositsForActiveDeal(
             connection, deal.ticket_id, new PublicKey(deal.escrow_pda!), expectedTotal
           ).then(detected => {
