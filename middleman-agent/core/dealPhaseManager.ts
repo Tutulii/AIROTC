@@ -492,6 +492,11 @@ class DealPhaseManager {
     if (!deal) return null;
 
     if ((party === "buyer" && deal.buyer_deposited) || (party === "seller" && deal.seller_deposited)) {
+      if (deal.buyer_deposited && deal.seller_deposited && deal.phase !== "delivery") {
+        deal.payment_locked = true;
+        this.transition(deal, "delivery", "system", "AUTO");
+        this.persistDeal(deal).catch((e: any) => logger.error("persist_deposit_heal_failed", { ticket_id }, e));
+      }
       logger.info("deposit_recorded_idempotent_skip", { ticket_id, party });
       return null;
     }
