@@ -163,20 +163,20 @@ async function markProgramStateDeposit(
     data: { confirmed: true, txHash: syntheticSignature },
   });
 
-  if (updated.count === 0) return;
-
-  const deal = await prisma.deal.findUnique({ where: { ticketId } });
-  if (deal) {
-    await prisma.transaction.create({
-      data: {
-        dealId: deal.id,
-        type: depositType,
-        txSignature: syntheticSignature,
-        status: "confirmed",
-      },
-    }).catch((err: any) => {
-      if (err.code !== "P2002") throw err;
-    });
+  if (updated.count > 0) {
+    const deal = await prisma.deal.findUnique({ where: { ticketId } });
+    if (deal) {
+      await prisma.transaction.create({
+        data: {
+          dealId: deal.id,
+          type: depositType,
+          txSignature: syntheticSignature,
+          status: "confirmed",
+        },
+      }).catch((err: any) => {
+        if (err.code !== "P2002") throw err;
+      });
+    }
   }
 
   await dealPhaseManager.getDealWithFallback(ticketId);
