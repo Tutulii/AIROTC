@@ -491,6 +491,11 @@ class DealPhaseManager {
     const deal = this.deals.get(ticket_id);
     if (!deal) return null;
 
+    if ((party === "buyer" && deal.buyer_deposited) || (party === "seller" && deal.seller_deposited)) {
+      logger.info("deposit_recorded_idempotent_skip", { ticket_id, party });
+      return null;
+    }
+
     if (party === "buyer") deal.buyer_deposited = true;
     else deal.seller_deposited = true;
 
@@ -505,7 +510,9 @@ class DealPhaseManager {
 
     if (deal.buyer_deposited && deal.seller_deposited) {
       deal.payment_locked = true;
-      this.transition(deal, "delivery", "system", "AUTO");
+      if (deal.phase !== "delivery") {
+        this.transition(deal, "delivery", "system", "AUTO");
+      }
       logger.info("payment_locked_on_dual_deposit", { ticket_id });
       return {
         success: true,
