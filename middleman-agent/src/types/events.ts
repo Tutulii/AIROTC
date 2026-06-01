@@ -82,6 +82,7 @@ export interface CommandReceivedEvent {
   intent: MiddlemanIntent;
   action: MiddlemanAction;
   sender: string;
+  sender_agent_id?: string;
   raw_message: string;
   confidence: number;
   reasoning: string;
