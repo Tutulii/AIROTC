@@ -146,7 +146,7 @@ export async function getDealContextSafe(ticketId: string): Promise<DealContext 
 // ANCHOR PROGRAM LOADER
 // ==========================================
 
-function getAnchorProgram(): { program: Program; wallet: Wallet; programId: PublicKey } {
+export function getAnchorProgram(): { program: Program; wallet: Wallet; programId: PublicKey } {
   const config = loadConfig();
   const keypair = loadWallet(config.privateKey);
 

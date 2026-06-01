@@ -1,6 +1,12 @@
 import { EventEmitter } from 'events';
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
-import { NATIVE_MINT, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import {
+    NATIVE_MINT,
+    TOKEN_PROGRAM_ID,
+    createAssociatedTokenAccountIdempotentInstruction,
+    createSyncNativeInstruction,
+    getAssociatedTokenAddressSync,
+} from '@solana/spl-token';
 import { Program, Idl, AnchorProvider, Wallet } from '@coral-xyz/anchor';
 import bs58 from 'bs58';
 import { ApiClient } from './api';
@@ -23,6 +29,18 @@ import idlRaw from './idl/escrow.json';
 import { MeridianClient } from '../../../middleman-agent/agents/sdk/MeridianClient';
 
 const ESCROW_PROGRAM_ID = new PublicKey((idlRaw as any).address || (idlRaw as any).metadata?.address || "Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx");
+
+function solToLamports(amountSol: number): bigint {
+    const text = String(amountSol);
+    if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text)) {
+        throw new Error('SOL amount must be a plain non-negative decimal value');
+    }
+    const [whole, fraction = ''] = text.split('.');
+    if (fraction.length > 9) {
+        throw new Error('SOL amount has more than 9 decimals');
+    }
+    return BigInt(`${whole}${fraction.padEnd(9, '0')}`.replace(/^0+(?=\d)/, '') || '0');
+}
 
 
 
@@ -399,7 +417,31 @@ export class Deal extends EventEmitter {
             const [configPda] = PublicKey.findProgramAddressSync([Buffer.from("config")], ESCROW_PROGRAM_ID);
             const mint = NATIVE_MINT;
             const dealAta = getAssociatedTokenAddressSync(mint, targetPubKey, true);
-            const userAta = getAssociatedTokenAddressSync(mint, this.keypair.publicKey, true);
+            const userAta = getAssociatedTokenAddressSync(mint, this.keypair.publicKey);
+            const depositLamports = solToLamports(amountSol);
+
+            let wrappedBalance = 0n;
+            try {
+                wrappedBalance = BigInt((await connection.getTokenAccountBalance(userAta)).value.amount);
+            } catch {
+                wrappedBalance = 0n;
+            }
+
+            const preInstructions = [
+                createAssociatedTokenAccountIdempotentInstruction(this.keypair.publicKey, userAta, this.keypair.publicKey, mint),
+                createAssociatedTokenAccountIdempotentInstruction(this.keypair.publicKey, dealAta, targetPubKey, mint),
+            ];
+
+            if (wrappedBalance < depositLamports) {
+                preInstructions.push(
+                    SystemProgram.transfer({
+                        fromPubkey: this.keypair.publicKey,
+                        toPubkey: userAta,
+                        lamports: Number(depositLamports - wrappedBalance),
+                    }),
+                    createSyncNativeInstruction(userAta),
+                );
+            }
 
             let sig: string;
 
@@ -415,6 +457,7 @@ export class Deal extends EventEmitter {
                         systemProgram: SystemProgram.programId,
                         tokenProgram: TOKEN_PROGRAM_ID,
                     })
+                    .preInstructions(preInstructions)
                     .signers([this.keypair])
                     .rpc();
             } else if (this.currentPhase === 'delivery') {
@@ -430,6 +473,7 @@ export class Deal extends EventEmitter {
                         systemProgram: SystemProgram.programId,
                         tokenProgram: TOKEN_PROGRAM_ID,
                     })
+                    .preInstructions(preInstructions)
                     .signers([this.keypair])
                     .rpc();
             } else {

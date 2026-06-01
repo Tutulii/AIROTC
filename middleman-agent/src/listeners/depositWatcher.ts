@@ -18,9 +18,11 @@ import { eventBus } from "../services/eventBus";
 import { dealTracker } from "../state/dealTracker";
 import { prisma } from "../lib/prisma";
 import { duneSIM } from "../services/duneSIMService";
+import { getAnchorProgram } from "../services/onChainExecutionService";
+import { dealPhaseManager } from "../../core/dealPhaseManager";
 
 // Track active watchers so we can unsubscribe later
-const activeWatchers: Map<string, { subId: number; connection: Connection }> = new Map();
+const activeWatchers: Map<string, { subId?: number; pollId?: ReturnType<typeof setInterval>; connection: Connection }> = new Map();
 
 // Track last known balance per PDA to detect deposits
 const lastKnownBalance: Map<string, number> = new Map(); // pda_base58 → lamports
@@ -102,36 +104,127 @@ export async function watchForDeposits(
     throw e;
   }
 
-  const subscriptionId = connection.onAccountChange(
-    dealPda,
-    (accountInfo, _context) => {
-      const newBalance = accountInfo.lamports;
-      const prevBalance = lastKnownBalance.get(pdaStr) || 0;
+  const pollIntervalMs = Number(process.env.AIROTC_DEPOSIT_POLL_INTERVAL_MS || "3000");
+  const pollId = setInterval(() => {
+    const expect = expectations.get(ticketId);
+    if (!expect) return;
+    pollOnChainDealState(connection, ticketId, expect).catch(e => {
+      watcherLog.error("deposit_poll_failed", { error: e.message });
+    });
+  }, pollIntervalMs);
 
-      if (newBalance > prevBalance) {
-        const deposit = newBalance - prevBalance;
+  void pollOnChainDealState(connection, ticketId, expectations.get(ticketId)!).catch(e => {
+    watcherLog.error("deposit_initial_poll_failed", { error: e.message });
+  });
 
-        watcherLog.info("deposit_detected", {
-          previousBalance: prevBalance / LAMPORTS_PER_SOL,
-          newBalance: newBalance / LAMPORTS_PER_SOL,
-          depositAmount: deposit / LAMPORTS_PER_SOL,
-        });
+  let subscriptionId: number | undefined;
+  if (process.env.AIROTC_ENABLE_DEPOSIT_WS_WATCHER === "true") {
+    subscriptionId = connection.onAccountChange(
+      dealPda,
+      (accountInfo, _context) => {
+        const newBalance = accountInfo.lamports;
+        const prevBalance = lastKnownBalance.get(pdaStr) || 0;
 
-        lastKnownBalance.set(pdaStr, newBalance);
+        if (newBalance > prevBalance) {
+          const deposit = newBalance - prevBalance;
 
-        const expect = expectations.get(ticketId);
-        if (expect) {
-          // Fire-and-forget async confirmation
-          identifyAndConfirmDeposit(connection, ticketId, expect, newBalance, deposit).catch(e => {
-            watcherLog.error("deposit_confirmation_failed", { error: e.message });
+          watcherLog.info("deposit_detected", {
+            previousBalance: prevBalance / LAMPORTS_PER_SOL,
+            newBalance: newBalance / LAMPORTS_PER_SOL,
+            depositAmount: deposit / LAMPORTS_PER_SOL,
           });
-        }
-      }
-    },
-    "confirmed",
-  );
 
-  activeWatchers.set(ticketId, { subId: subscriptionId, connection });
+          lastKnownBalance.set(pdaStr, newBalance);
+
+          const expect = expectations.get(ticketId);
+          if (expect) {
+            // Fire-and-forget async confirmation
+            identifyAndConfirmDeposit(connection, ticketId, expect, newBalance, deposit).catch(e => {
+              watcherLog.error("deposit_confirmation_failed", { error: e.message });
+            });
+          }
+        }
+      },
+      "confirmed",
+    );
+  }
+
+  activeWatchers.set(ticketId, { subId: subscriptionId, pollId, connection });
+}
+
+async function markProgramStateDeposit(
+  ticketId: string,
+  expect: DepositExpectation,
+  depositType: DepositType,
+): Promise<void> {
+  const syntheticSignature = `program-state:${expect.dealPda.toBase58()}:${depositType}`;
+  const updated = await prisma.depositConfirmation.updateMany({
+    where: { ticketId, type: depositType, confirmed: false },
+    data: { confirmed: true, txHash: syntheticSignature },
+  });
+
+  if (updated.count === 0) return;
+
+  const deal = await prisma.deal.findUnique({ where: { ticketId } });
+  if (deal) {
+    await prisma.transaction.create({
+      data: {
+        dealId: deal.id,
+        type: depositType,
+        txSignature: syntheticSignature,
+        status: "confirmed",
+      },
+    }).catch((err: any) => {
+      if (err.code !== "P2002") throw err;
+    });
+  }
+
+  await dealPhaseManager.getDealWithFallback(ticketId);
+  if (depositType === "buyer_collateral") {
+    expect.buyerDeposited = true;
+    await dealPhaseManager.recordDeposit(ticketId, "buyer");
+  } else if (depositType === "seller_collateral") {
+    expect.sellerDeposited = true;
+    await dealPhaseManager.recordDeposit(ticketId, "seller");
+  } else {
+    expect.paymentDeposited = true;
+    const phaseDeal = await dealPhaseManager.getDealWithFallback(ticketId);
+    if (phaseDeal) {
+      phaseDeal.payment_locked = true;
+      dealPhaseManager.persistDealPublic(phaseDeal);
+    }
+  }
+
+  logger.info("deposit_program_state_confirmed", {
+    ticket_id: ticketId,
+    depositType,
+    deal_pda: expect.dealPda.toBase58(),
+  });
+}
+
+async function pollOnChainDealState(
+  _connection: Connection,
+  ticketId: string,
+  expect: DepositExpectation,
+): Promise<void> {
+  const { program } = getAnchorProgram();
+  const account = await (program.account as any).deal.fetch(expect.dealPda);
+
+  if (account.buyerCollateralLocked && !expect.buyerDeposited) {
+    await markProgramStateDeposit(ticketId, expect, "buyer_collateral");
+  }
+
+  if (account.sellerCollateralLocked && !expect.sellerDeposited) {
+    await markProgramStateDeposit(ticketId, expect, "seller_collateral");
+  }
+
+  if (account.paymentLocked && !expect.paymentDeposited) {
+    await markProgramStateDeposit(ticketId, expect, "buyer_payment");
+  }
+
+  if (expect.buyerDeposited && expect.sellerDeposited && expect.paymentDeposited) {
+    stopWatching(ticketId);
+  }
 }
 
 
@@ -395,9 +488,12 @@ async function identifyAndConfirmDeposit(
 export function stopWatching(ticketId: string): void {
   const watcher = activeWatchers.get(ticketId);
   if (watcher !== undefined) {
-    void watcher.connection.removeAccountChangeListener(watcher.subId).catch((e: any) => {
-      logger.warn("deposit_watcher_unsubscribe_failed", { ticket_id: ticketId, error: e.message });
-    });
+    if (watcher.pollId) clearInterval(watcher.pollId);
+    if (watcher.subId !== undefined) {
+      void watcher.connection.removeAccountChangeListener(watcher.subId).catch((e: any) => {
+        logger.warn("deposit_watcher_unsubscribe_failed", { ticket_id: ticketId, error: e.message });
+      });
+    }
     activeWatchers.delete(ticketId);
     expectations.delete(ticketId);
     logger.info("deposit_watcher_stopped", { ticket_id: ticketId });
