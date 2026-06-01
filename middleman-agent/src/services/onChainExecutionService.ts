@@ -262,6 +262,46 @@ function normalizeEscrowAssetType(rawAssetType?: string): string {
   return `asset:${compact.slice(0, 26)}`;
 }
 
+function isCreateDealAlreadyInitializedError(error: any): boolean {
+  const message = [
+    error?.message,
+    error?.logs?.join("\n"),
+    error?.transactionLogs?.join("\n"),
+    String(error ?? ""),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+
+  return (
+    message.includes("already in use") ||
+    message.includes("accountalreadyinuse")
+  );
+}
+
+async function recoverCreateDealSuccessIfPresent(
+  ticketId: string,
+  txSignature: string,
+  executionLogger = logger.withContext({ ticket_id: ticketId })
+): Promise<ExecutionResult | null> {
+  const onChainCheck = await verifyOnChainState(ticketId);
+  if (
+    onChainCheck.verified &&
+    (onChainCheck.onChainStatus === "created" || onChainCheck.onChainStatus === "active")
+  ) {
+    await dealTracker.updateStatus(ticketId, "created");
+    await executionStore.markSuccess(ticketId, "create_deal", txSignature);
+    executionLogger.info("tx_confirmed_idempotent_recovery", {
+      step: "create_deal",
+      tx: txSignature,
+      on_chain_status: onChainCheck.onChainStatus,
+    });
+    return { success: true, tx: txSignature, step: "create_deal" };
+  }
+
+  return null;
+}
+
 // ==========================================
 // 1. CREATE DEAL
 // ==========================================
@@ -357,6 +397,13 @@ export async function executeCreateDeal(result: AgreementResult): Promise<Execut
       seller: seller.toBase58(),
     });
 
+    const existingDeal = await recoverCreateDealSuccessIfPresent(
+      result.ticketId,
+      "existing_onchain_deal",
+      executionLogger
+    );
+    if (existingDeal) return existingDeal;
+
     const tx = await withRetry(
       async () => {
         const { program } = getAnchorProgram();
@@ -421,6 +468,14 @@ export async function executeCreateDeal(result: AgreementResult): Promise<Execut
 
   } catch (error: any) {
     const executionLogger = logger.withContext({ ticket_id: result.ticketId });
+    if (isCreateDealAlreadyInitializedError(error)) {
+      const recovered = await recoverCreateDealSuccessIfPresent(
+        result.ticketId,
+        "existing_onchain_deal",
+        executionLogger
+      );
+      if (recovered) return recovered;
+    }
     executionLogger.error("tx_failed", { step: "create_deal" }, error);
     await dealTracker.updateStatus(result.ticketId, "failed", error.message);
     await executionStore.markFailed(result.ticketId, "create_deal", error.message);
