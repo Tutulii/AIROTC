@@ -171,7 +171,10 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
         return null;
     }
 
+    const escrowPda = persistedDeal?.dealIdOnChain || legacyDeal?.escrow_pda || null;
+    const onChainPhase = escrowPda ? await resolveOnChainPublicPhase(escrowPda) : null;
     const publicPhase =
+        onChainPhase ||
         legacyDeal?.phase ||
         mapPersistedDealStatusToPublicPhase(persistedDeal?.status) ||
         mapPipelineStageToPublicPhase(latestPipelineStage?.stage) ||
@@ -181,7 +184,7 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
         phase: publicPhase,
         buyer: legacyDeal?.buyer || null,
         seller: legacyDeal?.seller || null,
-        escrow_pda: persistedDeal?.dealIdOnChain || legacyDeal?.escrow_pda || null,
+        escrow_pda: escrowPda,
         payment_locked:
             publicPhase === 'delivery' ||
             publicPhase === 'awaiting_buyer_release_confirmation' ||
@@ -191,6 +194,34 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
         terms: legacyDeal?.terms || null,
         history: legacyDeal?.history?.slice(-5) || [],
     };
+}
+
+async function resolveOnChainPublicPhase(escrowPda: string): Promise<string | null> {
+    try {
+        const { getAnchorProgram } = await import('../services/onChainExecutionService');
+        const { program } = getAnchorProgram();
+        const account = await (program.account as any).deal.fetch(new PublicKey(escrowPda));
+        const status = Object.keys(account.status || {})[0];
+        switch (status) {
+            case 'created':
+                return null;
+            case 'collateralLocked':
+                return 'delivery';
+            case 'paymentLocked':
+                return 'delivery';
+            case 'completed':
+                return 'completed';
+            case 'refunded':
+                return 'refunded';
+            case 'cancelled':
+                return 'cancelled';
+            default:
+                return null;
+        }
+    } catch (error: any) {
+        logger.warn('deal_status_onchain_phase_read_failed', { escrowPda, error: error.message });
+        return null;
+    }
 }
 
 /** Get the underlying HTTP server (used by wsServer to share the same port) */
