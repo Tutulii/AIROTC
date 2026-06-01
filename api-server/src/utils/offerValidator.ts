@@ -50,8 +50,8 @@ export function validateCreateOffer(body: any): ValidationResult {
         return { valid: false, error: 'mode must be either "buy" or "sell"' };
     }
 
-    if (rollupMode !== undefined && rollupMode !== 'ER' && rollupMode !== 'PER') {
-        return { valid: false, error: 'rollupMode must be either "ER" or "PER"' };
+    if (rollupMode !== undefined && rollupMode !== 'ER' && rollupMode !== 'PER' && rollupMode !== 'NONE') {
+        return { valid: false, error: 'rollupMode must be "NONE", "ER", or "PER"' };
     }
 
     if (privateMode !== undefined && typeof privateMode !== 'boolean') {

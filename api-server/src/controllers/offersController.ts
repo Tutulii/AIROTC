@@ -45,7 +45,8 @@ export const createOffer = async (req: Request, res: Response): Promise<void> =>
             fundingWallet,
         } = req.body;
         const tokenDecimals = validation.tokenDecimals ?? 9;
-        const resolvedRollupMode = rollupMode === 'PER' || privateMode === true ? 'PER' : 'ER';
+        const resolvedRollupMode =
+            rollupMode === 'PER' || privateMode === true ? 'PER' : rollupMode === 'NONE' ? 'NONE' : 'ER';
 
         const agent = await prisma.agent.upsert({
             where: { wallet },
