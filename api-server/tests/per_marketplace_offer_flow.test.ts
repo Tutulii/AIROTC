@@ -105,6 +105,53 @@ describe("PER marketplace offer flow", () => {
     );
   });
 
+  it("creates a Normal Mode marketplace offer without upgrading it to ER or PER", async () => {
+    prismaMock.agent.upsert.mockResolvedValue({ id: "agent-1", wallet: "seller-wallet" });
+    prismaMock.offer.create.mockResolvedValue({
+      id: "offer-normal-1",
+      asset: "SOL",
+      price: 0.001,
+      amount: 1,
+      mode: "sell",
+      collateral: 0.001,
+      rollupMode: "NONE",
+      status: "active",
+    });
+
+    const { createOffer } = await import("../src/controllers/offersController");
+    const req: any = {
+      wallet: "seller-wallet",
+      body: {
+        asset: "SOL",
+        price: 0.001,
+        amount: 1,
+        mode: "sell",
+        collateral: 0.001,
+        rollupMode: "NONE",
+      },
+    };
+    const res = createResponseMock();
+
+    await createOffer(req, res);
+
+    expect(prismaMock.offer.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          rollupMode: "NONE",
+        }),
+      })
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          rollupMode: "NONE",
+        }),
+      })
+    );
+  });
+
   it("lists PER offers publicly for marketplace discovery", async () => {
     prismaMock.offer.findMany.mockResolvedValue([
       {
