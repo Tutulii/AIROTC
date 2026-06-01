@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const publishMock = vi.fn();
 const upsertMock = vi.fn().mockResolvedValue({});
 const agentFindUniqueMock = vi.fn();
+const phaseFindUniqueMock = vi.fn().mockResolvedValue(null);
+const onChainDealFetchMock = vi.fn();
 const initDealMock = vi.fn().mockResolvedValue(undefined);
 const updateStatusMock = vi.fn().mockResolvedValue(undefined);
 const appendAuditLogMock = vi.fn();
@@ -40,9 +42,21 @@ vi.mock("../src/lib/prisma", () => ({
     },
     dealPhaseState: {
       upsert: upsertMock,
-      findUnique: vi.fn().mockResolvedValue(null),
+      findUnique: phaseFindUniqueMock,
     },
   },
+}));
+
+vi.mock("../src/services/onChainExecutionService", () => ({
+  getAnchorProgram: () => ({
+    program: {
+      account: {
+        deal: {
+          fetch: onChainDealFetchMock,
+        },
+      },
+    },
+  }),
 }));
 
 vi.mock("../src/services/auditTrail", () => ({
@@ -58,6 +72,8 @@ describe("dealPhaseManager identity authorization", () => {
     vi.resetModules();
     vi.clearAllMocks();
     upsertMock.mockResolvedValue({});
+    phaseFindUniqueMock.mockResolvedValue(null);
+    onChainDealFetchMock.mockReset();
     initDealMock.mockResolvedValue(undefined);
     updateStatusMock.mockResolvedValue(undefined);
   });
@@ -119,5 +135,54 @@ describe("dealPhaseManager identity authorization", () => {
     expect(result.on_chain_action).toBeUndefined();
     expect(result.response.content).toContain("Only the buyer");
     expect(dealPhaseManager.getPhase(ticketId)).toBe("delivery");
+  });
+
+  it("heals stale terminal phase state from authoritative on-chain escrow state", async () => {
+    const ticketId = "ticket-stale-cancelled";
+    const escrowPda = "11111111111111111111111111111111";
+    const now = new Date();
+
+    phaseFindUniqueMock.mockResolvedValue({
+      ticketId,
+      phase: "cancelled",
+      buyer: "buyer-wallet-3",
+      seller: "seller-wallet-3",
+      termsPrice: 0.001,
+      termsColBuyer: 0.001,
+      termsColSeller: 0.001,
+      termsAssetType: "SOL",
+      escrowPda,
+      createdAt: now,
+      updatedAt: now,
+      buyerDeposited: false,
+      sellerDeposited: false,
+      paymentLocked: false,
+      historyJson: "[]",
+    });
+    onChainDealFetchMock.mockResolvedValue({
+      status: { paymentLocked: {} },
+      buyerCollateralLocked: true,
+      sellerCollateralLocked: true,
+      paymentLocked: true,
+    });
+
+    const { dealPhaseManager } = await import("../core/dealPhaseManager");
+    const restored = await dealPhaseManager.getDealWithFallback(ticketId);
+
+    expect(restored?.phase).toBe("delivery");
+    expect(restored?.buyer_deposited).toBe(true);
+    expect(restored?.seller_deposited).toBe(true);
+    expect(restored?.payment_locked).toBe(true);
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { ticketId },
+        update: expect.objectContaining({
+          phase: "delivery",
+          buyerDeposited: true,
+          sellerDeposited: true,
+          paymentLocked: true,
+        }),
+      })
+    );
   });
 });
