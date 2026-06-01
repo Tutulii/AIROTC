@@ -36,6 +36,7 @@ import { dealTracker } from "../src/state/dealTracker";
 import { logger } from "../src/utils/logger";
 import { prisma } from "../src/lib/prisma";
 import { appendAuditLog } from "../src/services/auditTrail";
+import { PublicKey } from "@solana/web3.js";
 
 // ==========================================
 // TYPES
@@ -112,6 +113,56 @@ async function identitiesMatch(left: string, right: string): Promise<boolean> {
     resolveWalletIdentity(right),
   ]);
   return leftWallet === rightWallet;
+}
+
+type OnChainDealSnapshot = {
+  phase: DealPhase | null;
+  buyerDeposited: boolean;
+  sellerDeposited: boolean;
+  paymentLocked: boolean;
+};
+
+function mapOnChainStatusToPhase(status: string | undefined): DealPhase | null {
+  switch (status) {
+    case "created":
+      return "escrow_created";
+    case "collateralLocked":
+    case "paymentLocked":
+      return "delivery";
+    case "completed":
+      return "completed";
+    case "refunded":
+      return "refunded";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return null;
+  }
+}
+
+async function readOnChainDealSnapshot(escrowPda: string | null): Promise<OnChainDealSnapshot | null> {
+  if (!escrowPda) {
+    return null;
+  }
+
+  try {
+    const { getAnchorProgram } = await import("../src/services/onChainExecutionService");
+    const { program } = getAnchorProgram();
+    const account = await (program.account as any).deal.fetch(new PublicKey(escrowPda));
+    const status = Object.keys(account.status || {})[0];
+    return {
+      phase: mapOnChainStatusToPhase(status),
+      buyerDeposited: Boolean(account.buyerCollateralLocked),
+      sellerDeposited: Boolean(account.sellerCollateralLocked),
+      paymentLocked: Boolean(account.paymentLocked),
+    };
+  } catch (error: any) {
+    logger.warn("deal_phase_onchain_reconcile_failed", {
+      escrowPda,
+      error: error?.message || String(error),
+    });
+    return null;
+  }
 }
 
 // ==========================================
@@ -206,6 +257,7 @@ class DealPhaseManager {
           payment_locked: phaseState.paymentLocked,
           history: JSON.parse(phaseState.historyJson || "[]"),
         };
+        await this.reconcileDealWithChain(reconstructed);
         this.deals.set(ticket_id, reconstructed);
         logger.info("deal_phase_restored_from_phase_state", { ticket_id, phase: reconstructed.phase });
         return reconstructed;
@@ -235,6 +287,7 @@ class DealPhaseManager {
         history: [],
       };
 
+      await this.reconcileDealWithChain(reconstructed);
       this.deals.set(ticket_id, reconstructed);
       logger.info("deal_phase_restored_from_deal_table", { ticket_id, phase: reconstructed.phase });
       return reconstructed;
@@ -582,6 +635,42 @@ class DealPhaseManager {
 
   // ── INTERNAL ──
 
+  private async reconcileDealWithChain(deal: DealState): Promise<void> {
+    const snapshot = await readOnChainDealSnapshot(deal.escrow_pda);
+    if (!snapshot) {
+      return;
+    }
+
+    const previousPhase = deal.phase;
+    const phaseChanged = Boolean(snapshot.phase && snapshot.phase !== deal.phase);
+    const flagsChanged =
+      deal.buyer_deposited !== snapshot.buyerDeposited ||
+      deal.seller_deposited !== snapshot.sellerDeposited ||
+      deal.payment_locked !== snapshot.paymentLocked;
+
+    deal.buyer_deposited = snapshot.buyerDeposited;
+    deal.seller_deposited = snapshot.sellerDeposited;
+    deal.payment_locked = snapshot.paymentLocked;
+
+    if (snapshot.phase && snapshot.phase !== deal.phase) {
+      this.transition(deal, snapshot.phase, "on_chain_reconcile", "AUTO");
+    }
+
+    if (phaseChanged || flagsChanged) {
+      await this.persistDeal(deal).catch((e: any) =>
+        logger.error("persist_onchain_reconcile_failed", { ticket_id: deal.ticket_id }, e)
+      );
+      logger.warn("deal_phase_reconciled_from_onchain", {
+        ticket_id: deal.ticket_id,
+        from: previousPhase,
+        to: deal.phase,
+        buyerDeposited: deal.buyer_deposited,
+        sellerDeposited: deal.seller_deposited,
+        paymentLocked: deal.payment_locked,
+      });
+    }
+  }
+
   public transition(
     deal: DealState,
     newPhase: DealPhase,
@@ -763,6 +852,7 @@ class DealPhaseManager {
         payment_locked: row.paymentLocked,
         history: JSON.parse(row.historyJson || "[]"),
       };
+      await this.reconcileDealWithChain(deal);
       this.deals.set(row.ticketId, deal);
     }
     logger.info("deal_phase_state_recovered", { count: rows.length });
