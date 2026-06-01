@@ -36,6 +36,7 @@ import { loadConfig } from "../config";
 import { appendAuditLog } from "./auditTrail";
 import { economicSafety } from "./economicSafety";
 import { reputationEngine } from "./reputationEngine";
+import { shouldEnforceReleaseLifetime } from "./releaseLifetimePolicy";
 
 import { shutdownManager } from "../utils/shutdownManager";
 import { getPrivacyStatus } from "./privacyService";
@@ -147,7 +148,7 @@ export async function executeRelease(ticket_id: string): Promise<void> {
   try {
     // Deal TTL check before release — handle timeout distinctly from execution failure
     const deal = await dealPhaseManager.getDealWithFallback(ticket_id);
-    if (deal) {
+    if (deal && shouldEnforceReleaseLifetime(deal)) {
       try {
         assertDealWithinLifetime(deal.created_at, ticket_id);
       } catch (lifetimeError: any) {
@@ -157,6 +158,11 @@ export async function executeRelease(ticket_id: string): Promise<void> {
         executionLogger.warn("deal_timed_out", { step: "release_funds", error_message: lifetimeError.message });
         return;
       }
+    } else if (deal) {
+      executionLogger.info("release_lifetime_check_bypassed", {
+        reason: "payment_locked_buyer_release",
+        payment_locked: deal.payment_locked,
+      });
     }
 
     const result = await executeReleasePhase(ticket_id);
