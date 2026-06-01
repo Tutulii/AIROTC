@@ -1000,6 +1000,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             const { walletRegistry } = await import('../state/walletRegistry');
             const agent = await walletRegistry.getOrCreateAgent(sender);
             const agentId = agent.id;
+            const senderWallet = agent.wallet || sender;
             const ticket = await ticketStore.getTicket(ticketId);
             const strictPerOpaque =
                 ticket?.rollup_mode === 'PER' && isPerStrictOpaqueModeEnabled();
@@ -1032,6 +1033,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             logger.info("rest_negotiation_signals", {
                 ticketId,
                 sender: agentId,
+                senderWallet,
                 agreement_score: signals.agreement_score,
                 price_converged: signals.price_converged,
                 both_parties: signals.both_parties_present,
@@ -1050,7 +1052,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             const isReleaseSignal = lowerContent.includes("release funds") || lowerContent.includes("received my items") || lowerContent.includes("i received");
 
             if (deal && isDepositSignal && (deal.phase === "escrow_created" || deal.phase === "awaiting_deposits")) {
-                const party = agentId === deal.buyer ? "buyer" : "seller";
+                const party = senderWallet === deal.buyer ? "buyer" : "seller";
                 if (deal.phase === "escrow_created") {
                     await dealPhaseManager.advanceToAwaitingDeposits(ticketId);
                 }
@@ -1081,7 +1083,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 if (!deal.buyer_deposited) await dealPhaseManager.recordDeposit(ticketId, "buyer");
                 if (!deal.seller_deposited) await dealPhaseManager.recordDeposit(ticketId, "seller");
 
-                const releaseResult = await dealPhaseManager.handleAction("RELEASE_FUNDS", ticketId, agentId);
+                const releaseResult = await dealPhaseManager.handleAction("RELEASE_FUNDS", ticketId, senderWallet);
                 logger.info("release_attempted", { ticketId, success: releaseResult.success, phase: releaseResult.new_phase });
 
                 res.json({
@@ -1096,7 +1098,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 const result = await dealPhaseManager.handleAction(
                     decision.action,
                     ticketId,
-                    agentId,
+                    senderWallet,
                     decision.terms || undefined,
                     decision.reasoning
                 );
@@ -1123,7 +1125,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 });
             }
 
-            logger.info("bridge_message_forwarded", { ticketId, sender: agentId, action: decision.action });
+            logger.info("bridge_message_forwarded", { ticketId, sender: agentId, senderWallet, action: decision.action });
         } catch (e: any) {
             res.status(500).json({ error: e.message });
         }

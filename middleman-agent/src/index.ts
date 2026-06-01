@@ -335,6 +335,7 @@ async function main(): Promise<void> {
         return;
       }
 
+      const rawSender = message.sender;
       let agent;
       try {
         agent = await walletRegistry.getOrCreateAgent(message.sender);
@@ -342,6 +343,11 @@ async function main(): Promise<void> {
         logger.error("message_rejected", { reason: "Invalid sender identity" });
         return;
       }
+
+      const senderWallet =
+        typeof message.senderWallet === "string" && message.senderWallet.trim() !== ""
+          ? message.senderWallet
+          : agent.wallet || rawSender;
 
       // overwrite raw wallet with agent uuid
       message.sender = agent.id;
@@ -437,7 +443,8 @@ async function main(): Promise<void> {
         ticket_id: message.ticket_id,
         intent: decision.trigger === "mention" ? "EXECUTE_DEAL" : "NONE",
         action: decision.action,
-        sender: message.sender,
+        sender: senderWallet,
+        sender_agent_id: message.sender,
         raw_message: message.content,
         confidence: decision.confidence,
         reasoning: decision.reasoning,
@@ -476,7 +483,7 @@ async function main(): Promise<void> {
       const result = await dealPhaseManager.handleAction(
         decision.action,
         message.ticket_id,
-        message.sender,
+        senderWallet,
         decision.terms || undefined,
         decision.reasoning
       );

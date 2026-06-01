@@ -84,6 +84,36 @@ export interface ActionResult {
   splitRatios?: { buyerRefundPercent: number; sellerReleasePercent: number; };
 }
 
+function looksLikeAgentId(identity: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identity);
+}
+
+async function resolveWalletIdentity(identity: string): Promise<string> {
+  if (!looksLikeAgentId(identity)) {
+    return identity;
+  }
+
+  const agentDelegate = (prisma as any).agent;
+  if (!agentDelegate?.findUnique) {
+    return identity;
+  }
+
+  const agent = await agentDelegate.findUnique({ where: { id: identity } }).catch(() => null);
+  return agent?.wallet || identity;
+}
+
+async function identitiesMatch(left: string, right: string): Promise<boolean> {
+  if (left === right) {
+    return true;
+  }
+
+  const [leftWallet, rightWallet] = await Promise.all([
+    resolveWalletIdentity(left),
+    resolveWalletIdentity(right),
+  ]);
+  return leftWallet === rightWallet;
+}
+
 // ==========================================
 // DEAL PHASE MANAGER
 // ==========================================
@@ -357,7 +387,7 @@ class DealPhaseManager {
       };
     }
 
-    if (sender !== deal.buyer) {
+    if (!(await identitiesMatch(sender, deal.buyer))) {
       return {
         success: false,
         response: await invalidCommandMessage(deal.ticket_id,

@@ -397,6 +397,7 @@ export function initAgentMessageListener(): void {
                     message_id: `msg-${uuidv4()}`,
                     ticket_id: ticket_id,
                     sender: agent_id,
+                    senderWallet: agentWallet,
                     content: contentStr,
                     timestamp: new Date(timestamp).toISOString()
                 });
