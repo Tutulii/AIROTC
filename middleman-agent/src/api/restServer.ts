@@ -172,9 +172,9 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
     }
 
     const publicPhase =
-        mapPipelineStageToPublicPhase(latestPipelineStage?.stage) ||
-        mapPersistedDealStatusToPublicPhase(persistedDeal?.status) ||
         legacyDeal?.phase ||
+        mapPersistedDealStatusToPublicPhase(persistedDeal?.status) ||
+        mapPipelineStageToPublicPhase(latestPipelineStage?.stage) ||
         'negotiation';
 
     return {

@@ -150,7 +150,7 @@ export class ApiClient {
 
     /** Send a negotiation message immediately to the backend via REST (Alternative to WS) */
     public async sendMessage(ticketId: string, content: string): Promise<NegotiationMessage> {
-        const res = await this.request<{ success: boolean; data: NegotiationMessage }>(`/v1/tickets/${ticketId}/message`, {
+        const res = await this.request<{ success: boolean; data: NegotiationMessage }>(`/v1/tickets/${ticketId}/messages`, {
             method: 'POST',
             body: JSON.stringify({ content })
         });

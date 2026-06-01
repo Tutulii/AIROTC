@@ -180,6 +180,19 @@ export class Deal extends EventEmitter {
         return status;
     }
 
+    private async ensureEscrowAddress(timeoutMs = 90_000): Promise<string> {
+        if (this.escrowAddress) return this.escrowAddress;
+
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const status = await this.refreshStatus();
+            if (status.escrowAddress) return status.escrowAddress;
+            await this.sleep(1_000);
+        }
+
+        throw new PhaseViolationError("Escrow address not assigned yet.", this.currentPhase, "escrow_created");
+    }
+
     /** Helper to block execution until a target phase is reached via WS events OR REST polling */
     public waitForPhase(targetPhase: string | string[], options?: { timeoutMs?: number; pollIntervalMs?: number }): Promise<void> {
         const targets = Array.isArray(targetPhase) ? targetPhase : [targetPhase];
@@ -388,33 +401,28 @@ export class Deal extends EventEmitter {
 
     /** Trigger the secure on-chain SOL deposit to the Escrow Address with idempotency via Smart Contract IDL. */
     public async depositToEscrow(amountSol: number, role: 'buyer' | 'seller'): Promise<string> {
-        if (!this.escrowAddress) {
-            await this.refreshStatus();
-            if (!this.escrowAddress) {
-                throw new PhaseViolationError("Escrow address not assigned yet.", this.currentPhase, "escrow_created");
-            }
-        }
+        const escrowAddress = await this.ensureEscrowAddress();
 
         const connection = new Connection(this.rpcUrl, 'confirmed');
-        const targetPubKey = new PublicKey(this.escrowAddress);
-
-        // IDEMPOTENCY CHECK: Ensure we haven't already executed
-        const recentSigs = await connection.getSignaturesForAddress(targetPubKey, { limit: 10 });
-        for (const sigInfo of recentSigs) {
-            if (!sigInfo.err) {
-                const txData = await connection.getParsedTransaction(sigInfo.signature, { maxSupportedTransactionVersion: 0 });
-                if (txData?.transaction.message.accountKeys.some(a => a.pubkey.equals(this.keypair.publicKey) && a.signer)) {
-                    console.log(`[AgentOTC] Idempotency cache hit: Anchor execution already occurred on tx ${sigInfo.signature}`);
-                    return sigInfo.signature;
-                }
-            }
-        }
+        const targetPubKey = new PublicKey(escrowAddress);
 
         // Execute Anchor Instruction with correct SPL token accounts
         try {
             const provider = new AnchorProvider(connection, new Wallet(this.keypair), { commitment: "confirmed" });
             const program = new Program(idlRaw as Idl, provider);
             const [configPda] = PublicKey.findProgramAddressSync([Buffer.from("config")], ESCROW_PROGRAM_ID);
+            const onChainDeal = await (program.account as any).deal.fetch(targetPubKey).catch(() => null);
+            if (onChainDeal) {
+                if (role === 'buyer' && ['escrow_created', 'awaiting_deposits'].includes(this.currentPhase) && onChainDeal.buyerCollateralLocked) {
+                    return 'idempotent-skip:buyer-collateral';
+                }
+                if (role === 'seller' && ['escrow_created', 'awaiting_deposits'].includes(this.currentPhase) && onChainDeal.sellerCollateralLocked) {
+                    return 'idempotent-skip:seller-collateral';
+                }
+                if (role === 'buyer' && this.currentPhase === 'delivery' && onChainDeal.paymentLocked) {
+                    return 'idempotent-skip:buyer-payment';
+                }
+            }
             const mint = NATIVE_MINT;
             const dealAta = getAssociatedTokenAddressSync(mint, targetPubKey, true);
             const userAta = getAssociatedTokenAddressSync(mint, this.keypair.publicKey);
