@@ -8,6 +8,7 @@ import { logger } from './lib/logger';
 import { prisma } from './lib/prisma';
 import { ensureApiSchema } from './lib/ensureApiSchema';
 import { startTransactionMonitor, stopTransactionMonitor } from './services/transactionMonitor';
+import { shouldInitializeSolanaEventListener } from './config/solanaEventListener';
 
 // Load environment variables
 dotenv.config();
@@ -21,7 +22,13 @@ const startServer = async () => {
 
         // Initialize WebSockets and Listeners
         initializeWebSocket(server);
-        initializeEventListener();
+        if (shouldInitializeSolanaEventListener()) {
+            initializeEventListener();
+        } else {
+            logger.info('solana_event_listener_disabled', {
+                reason: 'set ENABLE_SOLANA_EVENT_LISTENER=true to enable API-side Solana log subscriptions',
+            });
+        }
 
         // Start transaction monitoring (stale deal detection, settlement rate alerts)
         startTransactionMonitor();
