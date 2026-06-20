@@ -9,6 +9,14 @@ function isStrictPerOpaqueMode(): boolean {
     return raw !== 'false';
 }
 
+function decimalLikeToNumber(value: unknown): number {
+    return typeof value === 'number'
+        ? value
+        : typeof (value as any)?.toNumber === 'function'
+            ? (value as any).toNumber()
+            : Number((value as any)?.toString?.() ?? value);
+}
+
 export const getStats = async (req: Request, res: Response) => {
     try {
         const since24h = new Date(Date.now() - (24 * 60 * 60 * 1000));
@@ -26,7 +34,9 @@ export const getStats = async (req: Request, res: Response) => {
             include: { offer: { select: { price: true, amount: true } } },
         });
         const volumeNum = ticketsWithOffers.reduce((sum, t) => {
-            if (t.offer) return sum + (t.offer.price * t.offer.amount);
+            if (t.offer) {
+                return sum + (decimalLikeToNumber(t.offer.price) * decimalLikeToNumber(t.offer.amount));
+            }
             return sum;
         }, 0);
         const volume24h = volumeNum > 1_000_000
