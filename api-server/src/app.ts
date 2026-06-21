@@ -26,6 +26,7 @@ import fileRoutes from './routes/file.routes';
 import feeRoutes from './routes/fee.routes';
 import analyticsRoutes from './routes/analytics.routes';
 import encryptRoutes from './routes/encrypt.routes';
+import mcpRoutes from './routes/mcp.routes';
 
 const app: Application = express();
 const simulationRoutesEnabled = process.env.ENABLE_SIMULATION_ROUTES === 'true';
@@ -96,6 +97,7 @@ app.use('/', fileRoutes);
 app.use('/', feeRoutes);
 app.use('/v1/analytics', analyticsRoutes);
 app.use('/v1/encrypt', encryptRoutes);
+app.use('/v1/mcp', mcpRoutes);
 
 // Stats overview alias (maps /v1/stats/overview → /v1/stats)
 app.get('/v1/stats/overview', (req: Request, res: Response, next) => {

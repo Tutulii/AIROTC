@@ -37,13 +37,19 @@ model Offer {
   creatorRewardWallet String?
   creatorFundingWallet String?
   asset         String
-  price         Float
-  amount        Float
+  price         Decimal  @db.Decimal(38, 18) // Compatibility/display mirror only; priceRaw is authoritative.
+  priceRaw      String?  // Authoritative price in lamports/base units
+  amount        Decimal  @db.Decimal(38, 18) // Compatibility/display mirror only; amountRaw is authoritative.
+  amountRaw     String?  // Authoritative asset amount in mint base units
   mode          String   // "buy" | "sell"
   rollupMode    String   @default("ER") // ER | PER
-  collateral    Float
+  collateral    Decimal  @db.Decimal(38, 18) // Compatibility/display mirror only; collateralRaw is authoritative.
+  collateralRaw String?  // Authoritative collateral in lamports/base units
   tokenMint     String?  // SPL token mint address (null = native SOL)
   tokenDecimals Int      @default(9) // Token decimal precision (9 for SOL, 6 for USDC/USDT)
+  privacyTier   String   @default("SHIELDED_CREDIT") // PUBLIC_SOL | SHIELDED_CREDIT | UMBRA_WSOL | UMBRA_WSOL_COMPLIANCE
+  settlementRail String  @default("SOL_ESCROW") // SOL_ESCROW | UMBRA_WSOL | CROSS_CHAIN_DWALLET
+  confidentialComputeProvider String @default("NONE") // NONE | ARCIUM | ENCRYPT
   status        String   @default("active")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -133,7 +139,7 @@ model FeeCollection {
   sellerWallet String  // Seller's wallet address
   dealAmount  String   // Total deal value in lamports/token units
   feeAmount   String   // Fee collected in lamports/token units
-  feeRate     Float    // Fee percentage applied (e.g. 1.0 = 1%)
+  feeRate     Decimal  @db.Decimal(20, 10) // Fee percentage applied (e.g. 1.0 = 1%)
   token       String   @default("SOL") // "SOL" | USDC mint address | token symbol
   txSignature String?  // Transaction signature of the release_funds call
   collectedAt DateTime @default(now())
@@ -141,4 +147,49 @@ model FeeCollection {
   @@index([collectedAt(sort: Desc)])
   @@index([buyerWallet])
   @@index([sellerWallet])
+}
+
+model AgentPolicy {
+  id                       String   @id @default(uuid())
+  wallet                   String
+  version                  Int
+  status                   String   @default("active") // active | superseded | revoked
+  policyHash               String
+  maxDealValueRaw          String?
+  allowedAssets            Json
+  allowedCounterparties    Json
+  allowedSettlementRails   Json
+  approvedEscrowProgramIds Json
+  allowedActions           Json
+  expiresAt                DateTime
+  activatedAt              DateTime @default(now())
+  revokedAt                DateTime?
+  revokedBy                String?
+  revokeReason             String?
+  ikaDWalletPolicyPda      String?
+  createdBy                String   @default("system")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@unique([wallet, version])
+  @@index([wallet, status, expiresAt])
+  @@index([policyHash])
+}
+
+model AgentPolicyAudit {
+  id                String   @id @default(uuid())
+  wallet            String
+  policyId          String?
+  policyVersion     Int?
+  action            String
+  actorWallet       String?
+  decision          String?
+  signingIntentHash String?
+  policyHash        String?
+  evidence          Json?
+  createdAt         DateTime @default(now())
+
+  @@index([wallet, createdAt])
+  @@index([policyId, createdAt])
+  @@index([signingIntentHash])
 }

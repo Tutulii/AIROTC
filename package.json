@@ -14,7 +14,11 @@
     "agent:normal:preflight": "node scripts/manus-local-sdk-agent.cjs normal-preflight",
     "agent:normal:dry": "node scripts/manus-local-sdk-agent.cjs normal-dry-run",
     "agent:normal:post": "node scripts/manus-local-sdk-agent.cjs normal-post",
-    "agent:normal:join": "node scripts/manus-local-sdk-agent.cjs normal-join"
+    "agent:normal:join": "node scripts/manus-local-sdk-agent.cjs normal-join",
+    "mcp:normal:offline-resume:e2e": "node scripts/hosted-mcp-offline-resume-e2e.mjs",
+    "proof:normal:hosted:mcp": "node scripts/hosted-mcp-offline-resume-e2e.mjs",
+    "proof:normal:hosted:refund": "node scripts/hosted-mcp-offline-resume-e2e.mjs --scenario=timeout_refund",
+    "proof:normal:hosted:mcp:test": "node --test scripts/hosted-mcp-offline-resume-e2e.test.mjs"
   },
   "dependencies": {
     "snarkjs": "^0.7.6"

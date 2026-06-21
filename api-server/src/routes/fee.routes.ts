@@ -52,7 +52,7 @@ router.get('/v1/fees/summary', async (_req: Request, res: Response): Promise<voi
         // Overall stats
         const totalDeals = allFees.length;
         const avgFeeRate = totalDeals > 0
-            ? (allFees.reduce((sum, f) => sum + f.feeRate, 0) / totalDeals).toFixed(2)
+            ? (allFees.reduce((sum, f) => sum + Number(f.feeRate), 0) / totalDeals).toFixed(2)
             : '0';
 
         res.status(200).json({
