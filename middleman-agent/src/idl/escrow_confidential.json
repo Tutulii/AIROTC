@@ -1,0 +1,3166 @@
+{
+  "address": "BuTf7gVrjD2wzKe4Tu1Ny2m7gC9SY65fRCY7gHnBgLqj",
+  "metadata": {
+    "name": "escrow_confidential",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Confidential escrow with Encrypt (FHE) and Ika (dWallet) CPI integration"
+  },
+  "instructions": [
+    {
+      "name": "approve_cross_chain",
+      "docs": [
+        "Instruction 4: Approve a cross-chain message for signing via dWallet.",
+        "",
+        "When a deal completes, the middleman program can authorize the Ika network",
+        "to sign a cross-chain settlement proof. This creates a MessageApproval PDA",
+        "on the dWallet program, which the Ika validators detect and sign via 2PC-MPC."
+      ],
+      "discriminator": [
+        136,
+        235,
+        237,
+        92,
+        102,
+        92,
+        161,
+        6
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "buyer_approval"
+        },
+        {
+          "name": "seller_approval"
+        },
+        {
+          "name": "dwallet_program"
+        },
+        {
+          "name": "coordinator"
+        },
+        {
+          "name": "message_approval",
+          "writable": true
+        },
+        {
+          "name": "dwallet"
+        },
+        {
+          "name": "caller_program"
+        },
+        {
+          "name": "dwallet_cpi_authority"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "message_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "message_metadata_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "user_pubkey",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "signature_scheme",
+          "type": "u16"
+        },
+        {
+          "name": "message_approval_bump",
+          "type": "u8"
+        },
+        {
+          "name": "dwallet_cpi_authority_bump",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "cancel_deal",
+      "docs": [
+        "Instruction 5: Cancel a deal before both parties have deposited.",
+        "",
+        "Only the creator (middleman) can cancel. Refunds any existing deposit."
+      ],
+      "discriminator": [
+        158,
+        86,
+        193,
+        45,
+        168,
+        111,
+        48,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "confirm_release",
+      "discriminator": [
+        181,
+        157,
+        89,
+        7,
+        37,
+        54,
+        72,
+        90
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "release_approval",
+          "writable": true
+        },
+        {
+          "name": "approver"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payload",
+          "type": {
+            "defined": {
+              "name": "ReleaseApprovalPayload"
+            }
+          }
+        },
+        {
+          "name": "role_seed",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "create_confidential_deal",
+      "docs": [
+        "Instruction 0: Create a confidential deal with encrypted collateral references.",
+        "",
+        "The caller provides ciphertext account pubkeys (created off-chain via gRPC",
+        "createInput) and a pre-created result ciphertext account. The instruction",
+        "stores references and CPIs into Encrypt to execute the settlement validation",
+        "graph under FHE."
+      ],
+      "discriminator": [
+        211,
+        28,
+        162,
+        254,
+        174,
+        22,
+        130,
+        127
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  97,
+                  108,
+                  95,
+                  100,
+                  101,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "deal_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "middleman",
+          "docs": [
+            "Middleman agent (must sign)"
+          ],
+          "signer": true
+        },
+        {
+          "name": "dwallet"
+        },
+        {
+          "name": "buyer_collateral_ciphertext",
+          "writable": true
+        },
+        {
+          "name": "seller_collateral_ciphertext",
+          "writable": true
+        },
+        {
+          "name": "payment_amount_ciphertext",
+          "writable": true
+        },
+        {
+          "name": "settlement_result_ciphertext",
+          "writable": true
+        },
+        {
+          "name": "encrypt_program"
+        },
+        {
+          "name": "config",
+          "writable": true
+        },
+        {
+          "name": "deposit",
+          "writable": true
+        },
+        {
+          "name": "cpi_authority"
+        },
+        {
+          "name": "caller_program"
+        },
+        {
+          "name": "network_encryption_key"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "deal_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "bet_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "terms_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "plan_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "settlement_policy",
+          "type": {
+            "defined": {
+              "name": "ReleaseSettlementPolicy"
+            }
+          }
+        },
+        {
+          "name": "buyer_identity_commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "seller_identity_commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "seller_dispute_window_seconds",
+          "type": "u32"
+        },
+        {
+          "name": "encrypt_cpi_authority_bump",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "deposit_encrypted",
+      "docs": [
+        "Instruction 1: Record a deposit against a confidential deal.",
+        "",
+        "Buyer or seller deposits SOL into the deal PDA. The deposit amount is",
+        "validated against the on-chain deal state (not the encrypted amount — that",
+        "is verified during settlement via FHE)."
+      ],
+      "discriminator": [
+        101,
+        9,
+        128,
+        212,
+        79,
+        183,
+        72,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "depositor",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "deposit_type",
+          "type": {
+            "defined": {
+              "name": "DepositType"
+            }
+          }
+        },
+        {
+          "name": "amount_lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deposit_sol_for_credit",
+      "docs": [
+        "Deposit native SOL into the program-controlled vault and mint internal",
+        "1:1 credit in the caller's CreditBalance account."
+      ],
+      "discriminator": [
+        234,
+        120,
+        1,
+        49,
+        184,
+        90,
+        180,
+        244
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit_balance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount_lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "emergency_refund_after_timeout",
+      "docs": [
+        "Recover a locked credit leg after a timeout without middleman cooperation."
+      ],
+      "discriminator": [
+        95,
+        59,
+        230,
+        154,
+        209,
+        39,
+        61,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "credit_lock",
+          "writable": true
+        },
+        {
+          "name": "credit_balance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "timeout_seconds",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "execute_withdrawal_batch",
+      "docs": [
+        "Execute one queued withdrawal. Multiple calls with different withdrawal",
+        "accounts form a batch while keeping each record replay-safe."
+      ],
+      "discriminator": [
+        222,
+        248,
+        33,
+        183,
+        120,
+        121,
+        129,
+        195
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "withdrawal",
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_credit_vault",
+      "docs": [
+        "Initialize the vault-backed internal PER credit ledger."
+      ],
+      "discriminator": [
+        144,
+        211,
+        239,
+        19,
+        252,
+        41,
+        141,
+        56
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "lock_credit_for_deal",
+      "docs": [
+        "Lock internal shielded credit against one funding leg of a PER deal."
+      ],
+      "discriminator": [
+        16,
+        229,
+        75,
+        17,
+        95,
+        50,
+        49,
+        200
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit_balance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit_lock",
+          "writable": true
+        },
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "deposit_type",
+          "type": {
+            "defined": {
+              "name": "DepositType"
+            }
+          }
+        },
+        {
+          "name": "amount_lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "open_release_dispute",
+      "discriminator": [
+        215,
+        230,
+        247,
+        82,
+        47,
+        147,
+        154,
+        49
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "release_approval",
+          "writable": true
+        },
+        {
+          "name": "approver"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payload",
+          "type": {
+            "defined": {
+              "name": "ReleaseApprovalPayload"
+            }
+          }
+        },
+        {
+          "name": "role_seed",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "queue_withdrawal",
+      "docs": [
+        "Queue a delayed withdrawal from internal credit to a fresh public wallet."
+      ],
+      "discriminator": [
+        153,
+        8,
+        176,
+        235,
+        189,
+        140,
+        146,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit_balance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "withdrawal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  105,
+                  116,
+                  104,
+                  100,
+                  114,
+                  97,
+                  119,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "arg",
+                "path": "withdrawal_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "withdrawal_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "amount_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "not_before_ts",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "register_private_funding_commitments",
+      "discriminator": [
+        79,
+        138,
+        220,
+        168,
+        105,
+        135,
+        77,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "session_pda",
+          "type": "pubkey"
+        },
+        {
+          "name": "buyer_payment_funding_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "buyer_collateral_funding_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "seller_collateral_funding_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "request_settlement_decryption",
+      "docs": [
+        "Instruction 2: Request decryption of the settlement result.",
+        "",
+        "After the Encrypt executor has computed the FHE settlement graph and",
+        "written the result to settlement_result_ct, anyone can request decryption.",
+        "The digest is stored in the deal for later verification (store-and-verify)."
+      ],
+      "discriminator": [
+        158,
+        27,
+        43,
+        229,
+        243,
+        255,
+        189,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "request_account",
+          "docs": [
+            "Fresh decryption request account keypair. Must sign because Encrypt creates it."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "result_ciphertext"
+        },
+        {
+          "name": "encrypt_program"
+        },
+        {
+          "name": "config",
+          "writable": true
+        },
+        {
+          "name": "deposit",
+          "writable": true
+        },
+        {
+          "name": "cpi_authority"
+        },
+        {
+          "name": "caller_program"
+        },
+        {
+          "name": "network_encryption_key"
+        },
+        {
+          "name": "payer",
+          "signer": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "encrypt_cpi_authority_bump",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "resolve_release_dispute",
+      "discriminator": [
+        84,
+        121,
+        191,
+        177,
+        149,
+        2,
+        97,
+        41
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "buyer_approval",
+          "writable": true
+        },
+        {
+          "name": "seller_approval",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "reveal_and_release",
+      "docs": [
+        "Instruction 3: Reveal the decrypted settlement result and release funds.",
+        "",
+        "Implements the store-and-verify pattern:",
+        "1. Read the decrypted value from the decryption request account",
+        "2. Verify the digest matches what was stored during request_settlement_decryption",
+        "3. If valid, release funds to the appropriate party",
+        "",
+        "This prevents stale-value and race-condition attacks — if the ciphertext",
+        "was modified between request and reveal, the digest won't match."
+      ],
+      "discriminator": [
+        108,
+        55,
+        158,
+        67,
+        113,
+        14,
+        57,
+        252
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "request_account"
+        },
+        {
+          "name": "message_approval"
+        },
+        {
+          "name": "buyer_approval",
+          "writable": true
+        },
+        {
+          "name": "seller_approval",
+          "writable": true
+        },
+        {
+          "name": "buyer_target",
+          "writable": true
+        },
+        {
+          "name": "seller_target",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "buyer_payment_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "buyer_collateral_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "seller_collateral_lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "revoke_release_approval",
+      "discriminator": [
+        59,
+        118,
+        41,
+        230,
+        249,
+        118,
+        34,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "release_approval",
+          "writable": true
+        },
+        {
+          "name": "approver"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payload",
+          "type": {
+            "defined": {
+              "name": "ReleaseApprovalPayload"
+            }
+          }
+        },
+        {
+          "name": "role_seed",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "settle_locked_credit",
+      "docs": [
+        "Release locked internal credit after the FHE/IKA approval path has",
+        "decided whether the seller or buyer receives the payment leg."
+      ],
+      "discriminator": [
+        225,
+        179,
+        15,
+        32,
+        214,
+        250,
+        35,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "buyer_payment_lock",
+          "writable": true
+        },
+        {
+          "name": "buyer_collateral_lock",
+          "writable": true
+        },
+        {
+          "name": "seller_collateral_lock",
+          "writable": true
+        },
+        {
+          "name": "buyer_credit_balance",
+          "writable": true
+        },
+        {
+          "name": "seller_credit_balance",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "settlement_valid",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "submit_release_approval",
+      "discriminator": [
+        98,
+        214,
+        103,
+        179,
+        212,
+        109,
+        186,
+        213
+      ],
+      "accounts": [
+        {
+          "name": "deal",
+          "writable": true
+        },
+        {
+          "name": "release_approval",
+          "writable": true
+        },
+        {
+          "name": "approver"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payload",
+          "type": {
+            "defined": {
+              "name": "ReleaseApprovalPayload"
+            }
+          }
+        },
+        {
+          "name": "role_seed",
+          "type": "u8"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "ConfidentialDeal",
+      "discriminator": [
+        229,
+        84,
+        145,
+        36,
+        204,
+        126,
+        13,
+        200
+      ]
+    },
+    {
+      "name": "CreditBalance",
+      "discriminator": [
+        12,
+        242,
+        51,
+        104,
+        25,
+        236,
+        199,
+        237
+      ]
+    },
+    {
+      "name": "CreditLock",
+      "discriminator": [
+        221,
+        136,
+        143,
+        180,
+        55,
+        106,
+        59,
+        136
+      ]
+    },
+    {
+      "name": "CreditVault",
+      "discriminator": [
+        143,
+        180,
+        135,
+        248,
+        84,
+        85,
+        183,
+        70
+      ]
+    },
+    {
+      "name": "CreditWithdrawal",
+      "discriminator": [
+        121,
+        114,
+        66,
+        6,
+        15,
+        108,
+        255,
+        48
+      ]
+    },
+    {
+      "name": "ReleaseApproval",
+      "discriminator": [
+        198,
+        252,
+        131,
+        92,
+        210,
+        47,
+        18,
+        145
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ConfidentialDealCreated",
+      "discriminator": [
+        249,
+        182,
+        197,
+        86,
+        105,
+        12,
+        14,
+        8
+      ]
+    },
+    {
+      "name": "CreditDeposited",
+      "discriminator": [
+        249,
+        87,
+        223,
+        209,
+        9,
+        119,
+        31,
+        117
+      ]
+    },
+    {
+      "name": "CreditLocked",
+      "discriminator": [
+        230,
+        12,
+        150,
+        133,
+        234,
+        195,
+        165,
+        169
+      ]
+    },
+    {
+      "name": "CreditSettled",
+      "discriminator": [
+        24,
+        44,
+        107,
+        210,
+        97,
+        98,
+        226,
+        136
+      ]
+    },
+    {
+      "name": "CrossChainApproved",
+      "discriminator": [
+        121,
+        49,
+        168,
+        99,
+        100,
+        249,
+        100,
+        155
+      ]
+    },
+    {
+      "name": "DealCancelled",
+      "discriminator": [
+        229,
+        189,
+        86,
+        176,
+        134,
+        151,
+        43,
+        152
+      ]
+    },
+    {
+      "name": "DealSettled",
+      "discriminator": [
+        41,
+        213,
+        235,
+        64,
+        55,
+        168,
+        51,
+        76
+      ]
+    },
+    {
+      "name": "DecryptionRequested",
+      "discriminator": [
+        113,
+        218,
+        107,
+        36,
+        135,
+        73,
+        33,
+        73
+      ]
+    },
+    {
+      "name": "DepositRecorded",
+      "discriminator": [
+        0,
+        223,
+        90,
+        235,
+        183,
+        248,
+        79,
+        67
+      ]
+    },
+    {
+      "name": "ReleaseApprovalRecorded",
+      "discriminator": [
+        126,
+        72,
+        247,
+        153,
+        252,
+        150,
+        117,
+        171
+      ]
+    },
+    {
+      "name": "ReleaseApprovalRevoked",
+      "discriminator": [
+        221,
+        69,
+        152,
+        123,
+        39,
+        159,
+        24,
+        70
+      ]
+    },
+    {
+      "name": "ReleaseDisputeOpened",
+      "discriminator": [
+        98,
+        199,
+        117,
+        97,
+        122,
+        77,
+        239,
+        71
+      ]
+    },
+    {
+      "name": "ReleaseDisputeResolved",
+      "discriminator": [
+        34,
+        21,
+        231,
+        19,
+        18,
+        172,
+        34,
+        147
+      ]
+    },
+    {
+      "name": "WithdrawalBatchExecuted",
+      "discriminator": [
+        0,
+        73,
+        124,
+        1,
+        108,
+        213,
+        151,
+        180
+      ]
+    },
+    {
+      "name": "WithdrawalQueued",
+      "discriminator": [
+        116,
+        223,
+        187,
+        38,
+        197,
+        80,
+        19,
+        250
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidDealStatus",
+      "msg": "Invalid deal status for this operation"
+    },
+    {
+      "code": 6001,
+      "name": "Unauthorized",
+      "msg": "Unauthorized: signer is not the expected party"
+    },
+    {
+      "code": 6002,
+      "name": "DigestMismatch",
+      "msg": "Decryption digest does not match stored value — possible stale-value attack"
+    },
+    {
+      "code": 6003,
+      "name": "DealExpired",
+      "msg": "Deal has exceeded maximum lifetime"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidProgramId",
+      "msg": "Invalid external program ID"
+    },
+    {
+      "code": 6005,
+      "name": "CiphertextMismatch",
+      "msg": "Ciphertext account mismatch"
+    },
+    {
+      "code": 6006,
+      "name": "DecryptionPending",
+      "msg": "Decryption not yet complete"
+    },
+    {
+      "code": 6007,
+      "name": "AmountOverflow",
+      "msg": "Lamport amount overflow"
+    },
+    {
+      "code": 6008,
+      "name": "ApprovalPending",
+      "msg": "dWallet approval is not yet signed on-chain"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidMessageApproval",
+      "msg": "Invalid MessageApproval account for this deal"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidEncryptAccount",
+      "msg": "Invalid Encrypt account or PDA wiring"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidCallerProgram",
+      "msg": "Caller program account is invalid or not executable"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidCiphertextAccount",
+      "msg": "Ciphertext account is invalid or missing digest data"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidSettlementTarget",
+      "msg": "Settlement target is invalid for this deal"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidApprovalNonce",
+      "msg": "Approval nonce must strictly increase"
+    },
+    {
+      "code": 6015,
+      "name": "ApprovalExpired",
+      "msg": "Approval expired before it could be recorded"
+    },
+    {
+      "code": 6016,
+      "name": "InvalidApprovalAction",
+      "msg": "Release payload action did not match the invoked instruction"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidApprovalRole",
+      "msg": "Release payload role does not match the approver wallet"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidApprovalSignature",
+      "msg": "Release payload failed Ed25519 verification"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidReleaseApprovalAccount",
+      "msg": "Release approval PDA is not valid for this deal"
+    },
+    {
+      "code": 6020,
+      "name": "DisputeOpen",
+      "msg": "A release dispute is already open"
+    },
+    {
+      "code": 6021,
+      "name": "DisputeNotOpen",
+      "msg": "No dispute is open for this deal"
+    },
+    {
+      "code": 6022,
+      "name": "DisputeWindowClosed",
+      "msg": "The release dispute window is not open"
+    },
+    {
+      "code": 6023,
+      "name": "ReleaseAlreadyAuthorized",
+      "msg": "Release already authorized for IKA signing"
+    },
+    {
+      "code": 6024,
+      "name": "ReleaseAlreadyExecuted",
+      "msg": "Release has already executed"
+    },
+    {
+      "code": 6025,
+      "name": "ReleaseNotAuthorized",
+      "msg": "Release is not yet authorized"
+    },
+    {
+      "code": 6026,
+      "name": "SettlementPlanNotApproved",
+      "msg": "Both buyer and seller must approve the settlement plan first"
+    },
+    {
+      "code": 6027,
+      "name": "BuyerReleaseConfirmationMissing",
+      "msg": "Buyer has not yet confirmed the final release"
+    },
+    {
+      "code": 6028,
+      "name": "SellerDisputeWindowActive",
+      "msg": "The seller dispute window is still active"
+    },
+    {
+      "code": 6029,
+      "name": "InvalidDepositType",
+      "msg": "The deposit type is not valid for this funding model"
+    },
+    {
+      "code": 6030,
+      "name": "DuplicateDepositType",
+      "msg": "This deposit leg has already been recorded"
+    },
+    {
+      "code": 6031,
+      "name": "InvalidFundingCommitment",
+      "msg": "The provided deposit amount does not match the committed funding hash"
+    },
+    {
+      "code": 6032,
+      "name": "FundingRailMismatch",
+      "msg": "Funding rail does not match this deal"
+    },
+    {
+      "code": 6033,
+      "name": "CreditVaultPaused",
+      "msg": "The credit vault is paused"
+    },
+    {
+      "code": 6034,
+      "name": "InvalidCreditVault",
+      "msg": "Invalid credit vault account"
+    },
+    {
+      "code": 6035,
+      "name": "InvalidCreditAmount",
+      "msg": "Credit amount must be positive"
+    },
+    {
+      "code": 6036,
+      "name": "InsufficientCredit",
+      "msg": "Insufficient internal credit"
+    },
+    {
+      "code": 6037,
+      "name": "InsufficientEscrowFunds",
+      "msg": "Escrow account cannot cover payout while preserving rent"
+    },
+    {
+      "code": 6038,
+      "name": "CreditReserveInvariantFailed",
+      "msg": "Vault reserve invariant failed"
+    },
+    {
+      "code": 6039,
+      "name": "WithdrawalAlreadyExecuted",
+      "msg": "Withdrawal has already been executed"
+    },
+    {
+      "code": 6040,
+      "name": "WithdrawalNotReady",
+      "msg": "Withdrawal delay has not elapsed"
+    },
+    {
+      "code": 6041,
+      "name": "TimeoutNotReached",
+      "msg": "Timeout has not been reached"
+    }
+  ],
+  "types": [
+    {
+      "name": "ApprovalRole",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Buyer"
+          },
+          {
+            "name": "Seller"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfidentialDeal",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "docs": [
+              "Unique deal identifier (32 bytes)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "buyer_identity_commitment",
+            "docs": [
+              "Buyer identity commitment (hash of the participant wallet)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "seller_identity_commitment",
+            "docs": [
+              "Seller identity commitment (hash of the participant wallet)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "middleman",
+            "docs": [
+              "Middleman agent pubkey"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "session_pda",
+            "docs": [
+              "PER session PDA used to bind private funding commitments"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer_collateral_ct",
+            "docs": [
+              "Buyer collateral ciphertext account pubkey (Encrypt)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "seller_collateral_ct",
+            "docs": [
+              "Seller collateral ciphertext account pubkey (Encrypt)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "payment_amount_ct",
+            "docs": [
+              "Payment amount ciphertext account pubkey (Encrypt)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "settlement_result_ct",
+            "docs": [
+              "Settlement result ciphertext account pubkey (Encrypt, written by executor)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "dwallet",
+            "docs": [
+              "dWallet account for cross-chain signing (Ika)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer_payment_funding_hash",
+            "docs": [
+              "Funding commitment hash for the buyer's payment leg"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "buyer_collateral_funding_hash",
+            "docs": [
+              "Funding commitment hash for the buyer's collateral leg"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "seller_collateral_funding_hash",
+            "docs": [
+              "Funding commitment hash for the seller's collateral leg"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "private_funding_registered",
+            "docs": [
+              "True once the private funding commitments are registered"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "buyer_payment_deposited",
+            "docs": [
+              "Buyer payment deposit status"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "buyer_collateral_deposited",
+            "docs": [
+              "Buyer collateral deposit status"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "seller_collateral_deposited",
+            "docs": [
+              "Seller collateral deposit status"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "terms_hash",
+            "docs": [
+              "Terms hash bound to release approvals"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "plan_hash",
+            "docs": [
+              "Settlement plan hash bound to release approvals"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "settlement_policy",
+            "docs": [
+              "Settlement policy bound to the committed release plan"
+            ],
+            "type": {
+              "defined": {
+                "name": "ReleaseSettlementPolicy"
+              }
+            }
+          },
+          {
+            "name": "funding_privacy_tier",
+            "docs": [
+              "PER funding rail used for this deal."
+            ],
+            "type": {
+              "defined": {
+                "name": "FundingPrivacyTier"
+              }
+            }
+          },
+          {
+            "name": "buyer_release_nonce",
+            "docs": [
+              "Latest buyer approval nonce"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "seller_release_nonce",
+            "docs": [
+              "Latest seller approval nonce"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buyer_plan_approved",
+            "docs": [
+              "True once buyer approves the settlement plan"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "seller_plan_approved",
+            "docs": [
+              "True once seller approves the settlement plan"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "buyer_release_confirmed",
+            "docs": [
+              "Buyer has explicitly requested final release after settlement verification"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "release_requested_at",
+            "docs": [
+              "Timestamp when buyer requested final release"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "seller_dispute_deadline_at",
+            "docs": [
+              "Seller can dispute until this unix timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "seller_dispute_window_seconds",
+            "docs": [
+              "Configured dispute window length in seconds"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "dispute_open",
+            "docs": [
+              "Hard block while dispute is unresolved"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "release_authorized",
+            "docs": [
+              "True once both approvals are locked and IKA signing begins"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "release_executed",
+            "docs": [
+              "True once payout has executed"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "pending_digest",
+            "docs": [
+              "Decryption digest for store-and-verify pattern"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Deal status enum"
+            ],
+            "type": {
+              "defined": {
+                "name": "DealStatus"
+              }
+            }
+          },
+          {
+            "name": "bet_lamports",
+            "docs": [
+              "Bet amount per side in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Unix timestamp of deal creation"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump seed"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfidentialDealCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "buyer_collateral_ct",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "seller_collateral_ct",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "settlement_result_ct",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "dwallet",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreditBalance",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "available_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "locked_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreditDeposited",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreditLock",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "deal",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "deposit_type",
+            "type": {
+              "defined": {
+                "name": "DepositType"
+              }
+            }
+          },
+          {
+            "name": "amount_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          },
+          {
+            "name": "refunded",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreditLocked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "deposit_type",
+            "type": {
+              "defined": {
+                "name": "DepositType"
+              }
+            }
+          },
+          {
+            "name": "amount_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreditSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "settlement_valid",
+            "type": "bool"
+          },
+          {
+            "name": "total_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreditVault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_deposited_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "total_issued_credit",
+            "type": "u64"
+          },
+          {
+            "name": "total_locked_credit",
+            "type": "u64"
+          },
+          {
+            "name": "pending_withdrawal_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "executed_withdrawal_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreditWithdrawal",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "withdrawal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "not_before_ts",
+            "type": "i64"
+          },
+          {
+            "name": "executed",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CrossChainApproved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "message_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "dwallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "signature_scheme",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DealCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "cancelled_by",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DealSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "winner",
+            "type": "pubkey"
+          },
+          {
+            "name": "payout",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DealStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Created"
+          },
+          {
+            "name": "PartiallyFunded"
+          },
+          {
+            "name": "Funded"
+          },
+          {
+            "name": "Settling"
+          },
+          {
+            "name": "Completed"
+          },
+          {
+            "name": "Disputed"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DecryptionRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "result_ct",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DepositRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "deposit_type",
+            "type": {
+              "defined": {
+                "name": "DepositType"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DepositType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "BuyerPayment"
+          },
+          {
+            "name": "BuyerCollateral"
+          },
+          {
+            "name": "SellerCollateral"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FundingPrivacyTier",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Unset"
+          },
+          {
+            "name": "DirectSol"
+          },
+          {
+            "name": "StealthSol"
+          },
+          {
+            "name": "ShieldedCredit"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseApproval",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal",
+            "type": "pubkey"
+          },
+          {
+            "name": "role",
+            "type": {
+              "defined": {
+                "name": "ApprovalRole"
+              }
+            }
+          },
+          {
+            "name": "settlement_policy",
+            "type": {
+              "defined": {
+                "name": "ReleaseSettlementPolicy"
+              }
+            }
+          },
+          {
+            "name": "terms_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "plan_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "approval_kind",
+            "type": {
+              "defined": {
+                "name": "ReleaseApprovalAction"
+              }
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseApprovalAction",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "ApproveSettlement"
+          },
+          {
+            "name": "RevokeSettlement"
+          },
+          {
+            "name": "ConfirmRelease"
+          },
+          {
+            "name": "OpenDispute"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseApprovalPayload",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "action",
+            "type": {
+              "defined": {
+                "name": "ReleaseApprovalAction"
+              }
+            }
+          },
+          {
+            "name": "ticket_id_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "deal_pda",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_pda",
+            "type": "pubkey"
+          },
+          {
+            "name": "intent_id_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "role",
+            "type": {
+              "defined": {
+                "name": "ApprovalRole"
+              }
+            }
+          },
+          {
+            "name": "route",
+            "type": {
+              "defined": {
+                "name": "ReleaseRoute"
+              }
+            }
+          },
+          {
+            "name": "settlement_policy",
+            "type": {
+              "defined": {
+                "name": "ReleaseSettlementPolicy"
+              }
+            }
+          },
+          {
+            "name": "terms_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "plan_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseApprovalRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "role",
+            "type": {
+              "defined": {
+                "name": "ApprovalRole"
+              }
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseApprovalRevoked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "role",
+            "type": {
+              "defined": {
+                "name": "ApprovalRole"
+              }
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseDisputeOpened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "role",
+            "type": {
+              "defined": {
+                "name": "ApprovalRole"
+              }
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseDisputeResolved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "resolver",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseRoute",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "ConfidentialEscrow"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReleaseSettlementPolicy",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Direct"
+          },
+          {
+            "name": "Stealth"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawalBatchExecuted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "withdrawal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawalQueued",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "withdrawal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "not_before_ts",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

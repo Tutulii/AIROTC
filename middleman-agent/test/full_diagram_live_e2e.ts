@@ -79,7 +79,7 @@ import { prisma } from "../src/lib/prisma";
 import { startWsGateway, stopWsGateway } from "../src/gateway/wsServer";
 import { initAgentMessageListener } from "../src/listeners/agentMessageListener";
 import negotiationIdl from "../src/idl/magicblock_negotiation.json";
-import escrowConfidentialIdl from "../../escrow/target/idl/escrow_confidential.json";
+import escrowConfidentialIdl from "../src/idl/escrow_confidential.json";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 process.env.ENABLE_CONFIDENTIAL_ESCROW = "true";
