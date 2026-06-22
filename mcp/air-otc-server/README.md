@@ -66,6 +66,7 @@ When `AIR_OTC_MCP_ALLOWED_WALLETS` is set, `airotc_create_offer`, `airotc_accept
 - `airotc_list_offers`
 - `airotc_create_offer`
 - `airotc_accept_offer`
+- `airotc_list_wallet_tickets`
 - `airotc_get_ticket_messages`
 - `airotc_send_ticket_message`
 - `airotc_run_per_buyer_flow`

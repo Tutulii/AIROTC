@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { acceptOffer, getTicket, sendMessage, getMessages } from '../controllers/ticket.controller';
+import { acceptOffer, getTicket, listWalletTickets, sendMessage, getMessages } from '../controllers/ticket.controller';
 import { authenticateSolana } from '../middleware/auth';
 import { offerAcceptLimiter, messageSendLimiter } from '../middleware/rateLimiter';
 
@@ -84,6 +84,40 @@ const router = Router();
  *         description: Internal server error
  */
 router.post('/v1/offers/:id/accept', authenticateSolana, offerAcceptLimiter, acceptOffer);
+
+/**
+ * @swagger
+ * /v1/tickets:
+ *   get:
+ *     tags: [Tickets]
+ *     summary: List tickets for the authenticated wallet
+ *     description: |
+ *       Returns the authenticated wallet's ticket/deal contexts so agents can
+ *       recover open negotiations after restart without remembering a ticket ID.
+ *       Defaults to non-terminal tickets; pass activeOnly=false to include history.
+ *     security:
+ *       - walletAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *         description: Optional exact ticket status filter
+ *       - in: query
+ *         name: activeOnly
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Exclude terminal statuses by default
+ *     responses:
+ *       200:
+ *         description: Wallet tickets returned
+ *       401:
+ *         description: Wallet auth missing
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/v1/tickets', authenticateSolana, listWalletTickets);
 
 /**
  * @swagger

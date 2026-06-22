@@ -8,6 +8,9 @@ const prismaMock = {
     create: vi.fn(),
     findMany: vi.fn(),
   },
+  ticket: {
+    findMany: vi.fn(),
+  },
   $transaction: vi.fn(),
 };
 
@@ -45,6 +48,7 @@ describe("PER marketplace offer flow", () => {
     prismaMock.agent.upsert.mockReset();
     prismaMock.offer.create.mockReset();
     prismaMock.offer.findMany.mockReset();
+    prismaMock.ticket.findMany.mockReset();
     prismaMock.$transaction.mockReset();
   });
 
@@ -242,6 +246,67 @@ describe("PER marketplace offer flow", () => {
         rollupMode: "PER",
       })
     );
+  });
+
+  it("lists non-terminal wallet tickets for agent recovery", async () => {
+    const createdAt = new Date("2026-06-22T11:00:00.000Z");
+    prismaMock.ticket.findMany.mockResolvedValue([
+      {
+        id: "ticket-1",
+        buyer: "buyer-wallet",
+        seller: "seller-wallet",
+        status: "negotiating",
+        rollupMode: "NONE",
+        createdAt,
+        offer: {
+          id: "offer-1",
+          mode: "sell",
+          asset: "SOL",
+          price: 0.001,
+          collateral: 0.001,
+          status: "matched",
+        },
+        messages: [
+          {
+            id: "message-1",
+            sender: "buyer-wallet",
+            content: "I propose price: 0.001 SOL.",
+            createdAt,
+          },
+        ],
+        _count: { messages: 3 },
+      },
+    ]);
+
+    const { listTicketsForWalletService } = await import("../src/services/ticket.service");
+    const tickets = await listTicketsForWalletService("buyer-wallet");
+
+    expect(prismaMock.ticket.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{ buyer: "buyer-wallet" }, { seller: "buyer-wallet" }],
+          status: {
+            notIn: ["completed", "cancelled", "disputed"],
+          },
+        }),
+      })
+    );
+    expect(tickets).toEqual([
+      expect.objectContaining({
+        id: "ticket-1",
+        messageCount: 3,
+        lastMessage: expect.objectContaining({
+          content: "I propose price: 0.001 SOL.",
+        }),
+        offer: expect.objectContaining({
+          price: 0.001,
+          collateral: 0.001,
+          privateTermsRedacted: false,
+        }),
+      }),
+    ]);
+    expect((tickets[0] as any).messages).toBeUndefined();
+    expect((tickets[0] as any)._count).toBeUndefined();
   });
 
   it("rejects invalid reward wallets during PER offer creation", async () => {

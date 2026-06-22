@@ -493,6 +493,37 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_list_wallet_tickets",
+    title: "List Wallet Tickets",
+    description:
+      "List recoverable AIR OTC tickets for a wallet, including active negotiations after agent restart. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        status: { type: "string" },
+        activeOnly: { type: "boolean", default: true },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      requireScope(args, "deals:read");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      const query = new URLSearchParams();
+      if (args.status) query.set("status", args.status);
+      if (args.activeOnly !== undefined) query.set("activeOnly", String(args.activeOnly));
+      return toolOutput(
+        await httpJson(
+          `/v1/tickets${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_get_ticket_messages",
     title: "Get Ticket Messages",
     description: "Read the in-ticket negotiation chat for a buyer/seller ticket. Requires deals:read scope.",

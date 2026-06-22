@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { isUUID, assertParticipant } from '../utils/validators';
 import { getIO } from '../ws/socket';
 import { webhookNewMessage } from './webhook.service';
+import { TERMINAL_TICKET_STATUSES } from './ticketStatusPolicy';
 
 function looksLikeSensitivePerTerms(content: string): boolean {
     const normalized = content.toLowerCase();
@@ -14,6 +15,117 @@ function isStrictPerOpaqueMode(): boolean {
     if (raw === undefined) return true;
     return raw !== 'false';
 }
+
+function toSafeNumber(value: unknown): number {
+    if (typeof value === 'number') return value;
+    if (value && typeof (value as { toNumber?: () => number }).toNumber === 'function') {
+        return (value as { toNumber: () => number }).toNumber();
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        throw new Error('Invalid numeric offer field');
+    }
+    return parsed;
+}
+
+function summarizeTicket<T extends {
+    rollupMode: string;
+    offer: {
+        id: string;
+        mode: string;
+        asset: string;
+        price: unknown;
+        collateral: unknown;
+        status?: string;
+    };
+    messages?: Array<{
+        id: string;
+        sender: string;
+        content: string;
+        createdAt: Date;
+    }>;
+    _count?: { messages: number };
+}>(ticket: T) {
+    const redactPrivateTerms = ticket.rollupMode === 'PER' && isStrictPerOpaqueMode();
+    const [lastMessage] = ticket.messages || [];
+
+    return {
+        ...ticket,
+        messages: undefined,
+        _count: undefined,
+        messageCount: ticket._count?.messages ?? 0,
+        lastMessage: lastMessage || null,
+        privateTermsRedacted: redactPrivateTerms,
+        offer: {
+            id: ticket.offer.id,
+            type: ticket.offer.mode,
+            asset: ticket.offer.asset,
+            status: ticket.offer.status,
+            price: redactPrivateTerms ? null : toSafeNumber(ticket.offer.price),
+            collateral: redactPrivateTerms ? null : toSafeNumber(ticket.offer.collateral),
+            privateTermsRedacted: redactPrivateTerms,
+        },
+    };
+}
+
+export const listTicketsForWalletService = async (
+    wallet: string,
+    options: { status?: string; activeOnly?: boolean } = {},
+) => {
+    const normalizedStatus =
+        typeof options.status === 'string' && options.status.trim().length > 0
+            ? options.status.trim()
+            : undefined;
+    const activeOnly = options.activeOnly !== false;
+
+    const tickets = await prisma.ticket.findMany({
+        where: {
+            OR: [{ buyer: wallet }, { seller: wallet }],
+            ...(normalizedStatus
+                ? { status: normalizedStatus }
+                : activeOnly
+                    ? { status: { notIn: [...TERMINAL_TICKET_STATUSES] } }
+                    : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+            id: true,
+            status: true,
+            rollupMode: true,
+            buyer: true,
+            seller: true,
+            createdAt: true,
+            offer: {
+                select: {
+                    id: true,
+                    mode: true,
+                    asset: true,
+                    price: true,
+                    collateral: true,
+                    status: true,
+                },
+            },
+            messages: {
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                take: 1,
+                select: {
+                    id: true,
+                    sender: true,
+                    content: true,
+                    createdAt: true,
+                },
+            },
+            _count: {
+                select: {
+                    messages: true,
+                },
+            },
+        },
+    });
+
+    return tickets.map(summarizeTicket);
+};
 
 export const acceptOfferService = async (
     offerId: string,

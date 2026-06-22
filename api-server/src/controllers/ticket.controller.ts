@@ -1,7 +1,13 @@
 import { logger } from '../lib/logger';
 import { Request, Response } from 'express';
 import { PublicKey } from '@solana/web3.js';
-import { acceptOfferService, getTicketByIdService, createMessageService, getMessagesByTicketId } from '../services/ticket.service';
+import {
+    acceptOfferService,
+    getTicketByIdService,
+    createMessageService,
+    getMessagesByTicketId,
+    listTicketsForWalletService,
+} from '../services/ticket.service';
 import { middlemanForwarder } from '../services/middlemanForwarder';
 import { prisma } from '../lib/prisma';
 import { webhooks } from '../services/webhookDelivery';
@@ -242,6 +248,36 @@ export const getTicket = async (req: Request, res: Response): Promise<void> => {
 
         logger.error("error");
         res.status(500).json({ success: false, error: 'Internal server error while fetching ticket' });
+    }
+};
+
+export const listWalletTickets = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const wallet = (req as any).wallet;
+
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        const status =
+            typeof req.query.status === 'string' && req.query.status.trim().length > 0
+                ? req.query.status.trim()
+                : undefined;
+        const activeOnly = req.query.activeOnly === undefined
+            ? true
+            : String(req.query.activeOnly).toLowerCase() !== 'false';
+
+        const tickets = await listTicketsForWalletService(wallet, { status, activeOnly });
+
+        res.status(200).json({
+            success: true,
+            wallet,
+            tickets,
+        });
+    } catch (error: any) {
+        logger.error("list_wallet_tickets_failed", { error: error?.message });
+        res.status(500).json({ success: false, error: 'Internal server error while listing tickets' });
     }
 };
 
