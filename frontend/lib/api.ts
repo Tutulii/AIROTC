@@ -64,10 +64,13 @@ export interface Offer {
   id: string;
   asset: string;
   price: number;
+  priceRaw?: string | null;
   amount: number;
+  amountRaw?: string | null;
   mode: "buy" | "sell";
   rollupMode?: "ER" | "PER" | "NONE";
   collateral: number;
+  collateralRaw?: string | null;
   status: string;
   createdAt: string;
   creator?: { id: string; wallet: string };
@@ -81,9 +84,48 @@ export interface WalletAuthPayload {
   publicKey: string;
 }
 
+export interface McpTokenMessageResponse {
+  message: string;
+  scopes: string[];
+  expiresInSeconds: number;
+  timestamp: number;
+}
+
+export interface McpTokenIssueResponse {
+  token: string;
+  mcpUrl: string;
+  wallet: string;
+  scopes: string[];
+  issuedAt: number;
+  expiresAt: number;
+  tokenFormat: "mcp_v1";
+}
+
 export interface OffersResponse {
   success: boolean;
   data: Offer[];
+}
+
+function parseDecimal(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return fallback;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function normalizeOffer(offer: Offer): Offer {
+  return {
+    ...offer,
+    price: parseDecimal(offer.price),
+    amount: parseDecimal(offer.amount),
+    collateral: parseDecimal(offer.collateral),
+    tokenDecimals: Number.isInteger(offer.tokenDecimals) ? offer.tokenDecimals : 9,
+  };
 }
 
 export async function fetchOffers(params?: {
@@ -104,12 +146,44 @@ export async function fetchOffers(params?: {
   const res = await apiFetch<OffersResponse>(
     `/v1/offers${query ? `?${query}` : ""}`
   );
-  return res.data;
+  return res.data.map(normalizeOffer);
 }
 
 export async function fetchOfferById(id: string): Promise<Offer> {
   const res = await apiFetch<{ success: boolean; data: Offer }>(
     `/v1/offers/${id}`
+  );
+  return normalizeOffer(res.data);
+}
+
+export async function requestMcpTokenMessage(params: {
+  publicKey: string;
+  scopes: string[];
+  expiresInSeconds: number;
+}): Promise<McpTokenMessageResponse> {
+  const res = await apiFetch<{ success: boolean; data: McpTokenMessageResponse }>(
+    "/v1/mcp/message",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    }
+  );
+  return res.data;
+}
+
+export async function issueMcpToken(params: {
+  publicKey: string;
+  message: string;
+  signature: string;
+  scopes: string[];
+  expiresInSeconds: number;
+}): Promise<McpTokenIssueResponse> {
+  const res = await apiFetch<{ success: boolean; data: McpTokenIssueResponse }>(
+    "/v1/mcp/token",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    }
   );
   return res.data;
 }

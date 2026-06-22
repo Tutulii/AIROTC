@@ -1,5 +1,5 @@
 /**
- * AlphaBot — Autonomous Buyer Agent (Dual-Mode: ER + PER)
+ * AlphaBot — Autonomous Buyer Agent (Normal + ER + PER)
  * 
  * ER Mode:  Chat-based negotiation → middleman analyzes → auto-escrow → deposit → release
  * PER Mode: Brief chat greeting → terms via SDK (opaque) → deposit → threshold-signed release
@@ -20,7 +20,7 @@ export interface AlphaBotConfig {
   targetPrice: number;
   maxPrice: number;
   collateral: number;
-  rollupMode: "ER" | "PER";
+  rollupMode: "ER" | "PER" | "NONE";
   bridgeSecret: string;
 }
 
@@ -200,7 +200,7 @@ export class AlphaBot {
       await this.sendSol(pda, this.config.targetPrice + this.config.collateral);
       log("AlphaBot", "✅ PER deposit complete", "green");
     } else {
-      // ER: Standard two-step deposit
+      // Normal/ER: Standard two-step deposit
       log("AlphaBot", `Sending ${this.config.collateral} SOL collateral...`, "cyan");
       await this.sendSol(pda, this.config.collateral);
       log("AlphaBot", "✅ Collateral deposited", "green");
@@ -244,7 +244,7 @@ export class AlphaBot {
         this.dealCompleted = true;
       }
     } else {
-      // ER: Standard release
+      // Normal/ER: Standard release
       const msg = formatRelease("buyer");
       log("AlphaBot", `💬 "${msg}"`, "cyan");
       const response = await this.api.sendMessage(ticketId, this.wallet, msg);

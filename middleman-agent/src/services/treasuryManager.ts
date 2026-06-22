@@ -23,6 +23,23 @@ import { prisma } from "../lib/prisma";
 import { logger } from "../utils/logger";
 import { eventBus } from "./eventBus";
 
+function toNumber(value: unknown, field: string): number {
+    if (value === null || value === undefined) {
+        return 0;
+    }
+    if (typeof value === "number") {
+        return value;
+    }
+    if (value && typeof (value as { toNumber?: () => number }).toNumber === "function") {
+        return (value as { toNumber: () => number }).toNumber();
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        throw new Error(`treasury_manager_invalid_numeric_field:${field}`);
+    }
+    return parsed;
+}
+
 // ==========================================
 // TYPES
 // ==========================================
@@ -144,7 +161,7 @@ export async function getTreasuryStatus(): Promise<TreasuryStatus> {
     return {
         balanceSol,
         alertTier: tier,
-        totalRevenue: revenueAgg._sum.feeAmount || 0,
+        totalRevenue: toNumber(revenueAgg._sum.feeAmount, "feeAmount"),
         totalDeals: revenueAgg._count || 0,
         canAcceptNewDeals: tier !== "EMERGENCY",
     };

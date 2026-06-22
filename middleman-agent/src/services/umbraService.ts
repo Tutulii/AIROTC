@@ -662,16 +662,17 @@ export class UmbraService {
                 );
 
                 // Fail-closed: reject if callback didn't finalize
-                this.assertCallbackFinalized(result.callbackStatus, "deposit");
+                const callbackStatus = (result as any).callbackStatus;
+                this.assertCallbackFinalized(callbackStatus, "deposit");
 
                 logger.info("umbra_deposit_shielded", {
                     mint: mint.substring(0, 8) + "...",
                     amount: amount.toString(),
                     destination: String(destination).substring(0, 16) + "...",
                     queueSignature: result.queueSignature,
-                    callbackStatus: result.callbackStatus,
-                    callbackSignature: result.callbackSignature,
-                    callbackElapsedMs: result.callbackElapsedMs,
+                    callbackStatus,
+                    callbackSignature: (result as any).callbackSignature,
+                    callbackElapsedMs: (result as any).callbackElapsedMs,
                 });
 
                 return result;
@@ -724,16 +725,17 @@ export class UmbraService {
                     amount as unknown as Parameters<typeof withdraw>[2]
                 );
 
-                this.assertCallbackFinalized(result.callbackStatus, "withdraw");
+                const callbackStatus = (result as any).callbackStatus;
+                this.assertCallbackFinalized(callbackStatus, "withdraw");
 
                 logger.info("umbra_withdraw_unshielded", {
                     mint: mint.substring(0, 8) + "...",
                     amount: amount.toString(),
                     destination: String(destination).substring(0, 16) + "...",
                     queueSignature: result.queueSignature,
-                    callbackStatus: result.callbackStatus,
-                    callbackSignature: result.callbackSignature,
-                    callbackElapsedMs: result.callbackElapsedMs,
+                    callbackStatus,
+                    callbackSignature: (result as any).callbackSignature,
+                    callbackElapsedMs: (result as any).callbackElapsedMs,
                 });
 
                 return result;
@@ -1514,7 +1516,7 @@ export class UmbraService {
                     tree_index: String(treeIndex),
                     start_index: String(startIndex),
                     local_count: localCount,
-                    next_scan_start_index: localResult.nextScanStartIndex?.toString?.(),
+                    next_scan_start_index: (localResult as any).nextScanStartIndex?.toString?.(),
                 });
                 return localResult;
             }
@@ -1557,7 +1559,7 @@ export class UmbraService {
                 received_count: result.received.length,
                 public_self_burnable_count: result.publicSelfBurnable?.length ?? 0,
                 public_received_count: result.publicReceived?.length ?? 0,
-                next_scan_start_index: result.nextScanStartIndex?.toString?.(),
+                next_scan_start_index: (result as any).nextScanStartIndex?.toString?.(),
             });
 
             return result;

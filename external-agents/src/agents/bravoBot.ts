@@ -1,5 +1,5 @@
 /**
- * BravoBot — Autonomous Seller Agent (Dual-Mode: ER + PER)
+ * BravoBot — Autonomous Seller Agent (Normal + ER + PER)
  * 
  * ER Mode:  Chat-based negotiation → middleman analyzes → auto-escrow → collateral deposit → deliver
  * PER Mode: Brief chat greeting → terms via SDK (opaque) → deposit → encrypted delivery
@@ -20,7 +20,7 @@ export interface BravoBotConfig {
   askingPrice: number;
   minPrice: number;
   collateral: number;
-  rollupMode: "ER" | "PER";
+  rollupMode: "ER" | "PER" | "NONE";
   bridgeSecret: string;
 }
 
@@ -206,7 +206,7 @@ export class BravoBot {
       await this.sendSol(pda, this.config.collateral);
       log("BravoBot", "✅ PER collateral deposited", "green");
     } else {
-      // ER: Standard collateral deposit
+      // Normal/ER: Standard collateral deposit
       log("BravoBot", `Sending ${this.config.collateral} SOL collateral...`, "magenta");
       await this.sendSol(pda, this.config.collateral);
       log("BravoBot", "✅ Collateral deposited", "green");

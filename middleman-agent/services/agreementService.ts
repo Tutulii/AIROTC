@@ -4,6 +4,20 @@ import { parseMessage } from "./parserService";
 import { negotiationStore } from "../src/state/negotiationStore";
 import { walletRegistry } from "../src/state/walletRegistry";
 
+function toNumber(value: unknown, field: string): number {
+    if (typeof value === "number") {
+        return value;
+    }
+    if (value && typeof (value as { toNumber?: () => number }).toNumber === "function") {
+        return (value as { toNumber: () => number }).toNumber();
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        throw new Error(`agreement_service_invalid_numeric_field:${field}`);
+    }
+    return parsed;
+}
+
 export interface AgreementResult {
     ticket_id: string;
     price: number;
@@ -63,14 +77,14 @@ export async function detectAgreement(ticketId: string): Promise<AgreementResult
         const isSeller = step.proposedBy === sellerId;
 
         if (isBuyer) {
-            if (step.proposedPrice !== null) buyerPrice = step.proposedPrice;
-            if (step.collateralBuyer !== null) buyerProposedBuyerCol = step.collateralBuyer;
-            if (step.collateralSeller !== null) buyerProposedSellerCol = step.collateralSeller;
+            if (step.proposedPrice !== null) buyerPrice = toNumber(step.proposedPrice, "proposedPrice");
+            if (step.collateralBuyer !== null) buyerProposedBuyerCol = toNumber(step.collateralBuyer, "collateralBuyer");
+            if (step.collateralSeller !== null) buyerProposedSellerCol = toNumber(step.collateralSeller, "collateralSeller");
             if (step.agreementScore >= 40) buyerStrongSignals++;
         } else if (isSeller) {
-            if (step.proposedPrice !== null) sellerPrice = step.proposedPrice;
-            if (step.collateralBuyer !== null) sellerProposedBuyerCol = step.collateralBuyer;
-            if (step.collateralSeller !== null) sellerProposedSellerCol = step.collateralSeller;
+            if (step.proposedPrice !== null) sellerPrice = toNumber(step.proposedPrice, "proposedPrice");
+            if (step.collateralBuyer !== null) sellerProposedBuyerCol = toNumber(step.collateralBuyer, "collateralBuyer");
+            if (step.collateralSeller !== null) sellerProposedSellerCol = toNumber(step.collateralSeller, "collateralSeller");
             if (step.agreementScore >= 40) sellerStrongSignals++;
         }
     }

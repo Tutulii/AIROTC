@@ -11,6 +11,7 @@
  *   Phase 6: Verification (final status check)
  * 
  * Usage:
+ *   npx ts-node src/run.ts --normal     # Normal Mode (public SOL escrow)
  *   npx ts-node src/run.ts              # ER mode (default)
  *   npx ts-node src/run.ts --per        # PER private mode
  */
@@ -45,7 +46,8 @@ const TRADE_PRICE = parseFloat(process.env.TRADE_PRICE || "0.002");
 const TRADE_COLLATERAL = parseFloat(process.env.TRADE_COLLATERAL || "0.001");
 
 const isPER = process.argv.includes("--per");
-const ROLLUP_MODE = isPER ? "PER" as const : "ER" as const;
+const isNormal = process.argv.includes("--normal");
+const ROLLUP_MODE = isPER ? "PER" as const : isNormal ? "NONE" as const : "ER" as const;
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -62,6 +64,8 @@ async function main() {
 
   const modeLabel = ROLLUP_MODE === "PER"
     ? "PER (Private Ephemeral Rollup — Intel TDX)"
+    : ROLLUP_MODE === "NONE"
+      ? "NORMAL (Public SOL escrow — no advanced providers)"
     : "ER (Ephemeral Rollup — Public Fast-Path)";
   log("Harness", `Mode: ${modeLabel}`, "bold");
   log("Harness", `Asset: ${TRADE_ASSET} | Price: ${TRADE_PRICE} SOL | Collateral: ${TRADE_COLLATERAL} SOL`, "bold");
@@ -173,8 +177,8 @@ async function main() {
   await bravo.negotiate(ticketId, alpha.getMessageHistory());
   await sleep(2000);
 
-  // If no agreement yet, do another round from each side (ER only)
-  if (ROLLUP_MODE === "ER") {
+  // If no agreement yet, do another round from each side (Normal/ER only)
+  if (ROLLUP_MODE !== "PER") {
     try {
       const status = await alpha["api"].getDealStatus(ticketId);
       if (status.phase === "negotiation") {
@@ -230,6 +234,9 @@ async function main() {
     if (ROLLUP_MODE === "PER") {
       console.log("║  ✅  FULL PER TRADE COMPLETED SUCCESSFULLY              ║");
       console.log("║  Private settlement via Intel TDX enclave               ║");
+    } else if (ROLLUP_MODE === "NONE") {
+      console.log("║  ✅  FULL NORMAL MODE TRADE COMPLETED SUCCESSFULLY      ║");
+      console.log("║  Public SOL escrow with no advanced providers           ║");
     } else {
       console.log("║  ✅  FULL ER TRADE COMPLETED SUCCESSFULLY               ║");
       console.log("║  Public fast-path settlement via MagicBlock              ║");

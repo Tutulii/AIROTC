@@ -4,6 +4,7 @@ import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
+import { verifyMcpToken } from '../services/mcpToken';
 
 // Extend Express Request type
 declare global {
@@ -117,15 +118,11 @@ function isValidSolanaWallet(wallet: string): boolean {
 
 async function tryMcpDelegatedWallet(req: Request, res: Response): Promise<boolean> {
     const token = firstHeaderValue(req.headers['x-airotc-mcp-delegation-token']);
+    const userToken = firstHeaderValue(req.headers['x-airotc-mcp-user-token']);
     const wallet = firstHeaderValue(req.headers['x-airotc-delegated-wallet']);
 
-    if (!token && !wallet) {
+    if (!token && !userToken && !wallet) {
         return false;
-    }
-
-    if (!MCP_DELEGATION_TOKEN || !token || !safeEqual(token, MCP_DELEGATION_TOKEN)) {
-        res.status(401).json({ success: false, error: 'Invalid MCP delegated wallet token' });
-        return true;
     }
 
     if (!wallet || !isValidSolanaWallet(wallet)) {
@@ -133,9 +130,27 @@ async function tryMcpDelegatedWallet(req: Request, res: Response): Promise<boole
         return true;
     }
 
-    if (!MCP_ALLOWED_WALLETS.has(wallet)) {
-        res.status(403).json({ success: false, error: 'MCP delegated wallet is not allowlisted' });
-        return true;
+    if (userToken) {
+        try {
+            const payload = verifyMcpToken(userToken);
+            if (payload.sub !== wallet) {
+                res.status(403).json({ success: false, error: 'MCP token wallet mismatch' });
+                return true;
+            }
+        } catch (error: any) {
+            res.status(401).json({ success: false, error: error?.message || 'Invalid MCP user token' });
+            return true;
+        }
+    } else {
+        if (!MCP_DELEGATION_TOKEN || !token || !safeEqual(token, MCP_DELEGATION_TOKEN)) {
+            res.status(401).json({ success: false, error: 'Invalid MCP delegated wallet token' });
+            return true;
+        }
+
+        if (!MCP_ALLOWED_WALLETS.has(wallet)) {
+            res.status(403).json({ success: false, error: 'MCP delegated wallet is not allowlisted' });
+            return true;
+        }
     }
 
     const agent = await prisma.agent.upsert({

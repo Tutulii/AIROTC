@@ -5,7 +5,9 @@ const prismaMock = {
     agent: {
         count: vi.fn(),
         findFirst: vi.fn(),
+        findUnique: vi.fn(),
         upsert: vi.fn(),
+        update: vi.fn(),
         updateMany: vi.fn(),
     },
     offer: {
@@ -72,7 +74,9 @@ describe('Signed internal bridge routes', () => {
 
         prismaMock.agent.count.mockReset();
         prismaMock.agent.findFirst.mockReset();
+        prismaMock.agent.findUnique.mockReset();
         prismaMock.agent.upsert.mockReset();
+        prismaMock.agent.update.mockReset();
         prismaMock.agent.updateMany.mockReset();
         prismaMock.offer.create.mockReset();
         prismaMock.ticket.findUnique.mockReset();
@@ -184,6 +188,16 @@ describe('Signed internal bridge routes', () => {
             seller: 'seller-wallet',
         });
         prismaMock.dealReputationProcessing.findUnique.mockResolvedValue(null);
+        prismaMock.agent.findUnique.mockImplementation(async ({ where }: { where: { wallet: string } }) => ({
+            id: where.wallet === 'buyer-wallet' ? 'buyer-agent' : 'seller-agent',
+            wallet: where.wallet,
+            totalDeals: 0,
+            successfulDeals: 0,
+            cancelledDeals: 0,
+            disputedDeals: 0,
+            totalVolume: 0,
+            avgSettlementTime: null,
+        }));
 
         const { signRequest } = await import('../src/services/hmacSigner');
         const bridgeRoutes = (await import('../src/routes/bridge.routes')).default;
@@ -202,6 +216,7 @@ describe('Signed internal bridge routes', () => {
 
         expect(agreedResponse.status).toBe(200);
         expect(prismaMock.agent.updateMany).not.toHaveBeenCalled();
+        expect(prismaMock.agent.update).not.toHaveBeenCalled();
         expect(prismaMock.dealReputationProcessing.create).not.toHaveBeenCalled();
 
         const completedPayload = { status: 'completed' };
@@ -213,13 +228,28 @@ describe('Signed internal bridge routes', () => {
         });
 
         expect(completedResponse.status).toBe(200);
-        expect(prismaMock.agent.updateMany).toHaveBeenCalledWith({
-            where: { wallet: { in: ['buyer-wallet', 'seller-wallet'] } },
-            data: {
-                totalDeals: { increment: 1 },
-                successfulDeals: { increment: 1 },
-            },
-        });
+        expect(prismaMock.agent.updateMany).not.toHaveBeenCalled();
+        expect(prismaMock.agent.update).toHaveBeenCalledTimes(2);
+        expect(prismaMock.agent.update).toHaveBeenCalledWith(expect.objectContaining({
+            where: { id: 'buyer-agent' },
+            data: expect.objectContaining({
+                totalDeals: 1,
+                successfulDeals: 1,
+                cancelledDeals: 0,
+                disputedDeals: 0,
+                reputationScore: expect.any(Number),
+            }),
+        }));
+        expect(prismaMock.agent.update).toHaveBeenCalledWith(expect.objectContaining({
+            where: { id: 'seller-agent' },
+            data: expect.objectContaining({
+                totalDeals: 1,
+                successfulDeals: 1,
+                cancelledDeals: 0,
+                disputedDeals: 0,
+                reputationScore: expect.any(Number),
+            }),
+        }));
         expect(prismaMock.dealReputationProcessing.create).toHaveBeenCalledWith({
             data: { dealId: 'offer-1_completed' },
         });

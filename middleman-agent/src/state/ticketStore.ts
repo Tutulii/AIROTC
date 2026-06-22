@@ -5,6 +5,20 @@ import { logger } from "../utils/logger";
 import type { AgreedTerms } from "../types/ticket";
 import { MeridianOtcGuard } from "../services/meridianOtcGuard";
 
+function toNumber(value: unknown, field: string): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (value && typeof (value as { toNumber?: () => number }).toNumber === "function") {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`ticket_store_invalid_numeric_field:${field}`);
+  }
+  return parsed;
+}
+
 class TicketStore {
   public async createTicket(ticket: TicketInterface): Promise<void> {
     logger.debug("ticket_store_creating", { ticket_id: ticket.ticket_id });
@@ -70,9 +84,9 @@ class TicketStore {
         dbTicket.lastCollateralBuyer !== null &&
         dbTicket.lastCollateralSeller !== null
           ? {
-              price: dbTicket.lastProposedPrice,
-              collateral_buyer: dbTicket.lastCollateralBuyer,
-              collateral_seller: dbTicket.lastCollateralSeller,
+              price: toNumber(dbTicket.lastProposedPrice, "lastProposedPrice"),
+              collateral_buyer: toNumber(dbTicket.lastCollateralBuyer, "lastCollateralBuyer"),
+              collateral_seller: toNumber(dbTicket.lastCollateralSeller, "lastCollateralSeller"),
               asset_type: dbTicket.tokenMint ?? undefined,
             }
           : undefined,
@@ -102,9 +116,9 @@ class TicketStore {
         t.lastCollateralBuyer !== null &&
         t.lastCollateralSeller !== null
           ? {
-              price: t.lastProposedPrice,
-              collateral_buyer: t.lastCollateralBuyer,
-              collateral_seller: t.lastCollateralSeller,
+              price: toNumber(t.lastProposedPrice, "lastProposedPrice"),
+              collateral_buyer: toNumber(t.lastCollateralBuyer, "lastCollateralBuyer"),
+              collateral_seller: toNumber(t.lastCollateralSeller, "lastCollateralSeller"),
               asset_type: t.tokenMint ?? undefined,
             }
           : undefined,

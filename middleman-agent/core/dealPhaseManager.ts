@@ -38,6 +38,20 @@ import { prisma } from "../src/lib/prisma";
 import { appendAuditLog } from "../src/services/auditTrail";
 import { PublicKey } from "@solana/web3.js";
 
+function toNumber(value: unknown, field: string): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (value && typeof (value as { toNumber?: () => number }).toNumber === "function") {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`deal_phase_manager_invalid_numeric_field:${field}`);
+  }
+  return parsed;
+}
+
 // ==========================================
 // TYPES
 // ==========================================
@@ -244,9 +258,9 @@ class DealPhaseManager {
           buyer: phaseState.buyer,
           seller: phaseState.seller,
           terms: phaseState.termsPrice ? {
-            price: phaseState.termsPrice,
-            collateral_buyer: phaseState.termsColBuyer!,
-            collateral_seller: phaseState.termsColSeller!,
+            price: toNumber(phaseState.termsPrice, "termsPrice"),
+            collateral_buyer: toNumber(phaseState.termsColBuyer, "termsColBuyer"),
+            collateral_seller: toNumber(phaseState.termsColSeller, "termsColSeller"),
             asset_type: phaseState.termsAssetType ?? undefined,
           } : null,
           escrow_pda: phaseState.escrowPda,
@@ -838,9 +852,9 @@ class DealPhaseManager {
         seller: row.seller,
         terms: row.termsPrice
           ? {
-            price: row.termsPrice,
-            collateral_buyer: row.termsColBuyer!,
-            collateral_seller: row.termsColSeller!,
+            price: toNumber(row.termsPrice, "termsPrice"),
+            collateral_buyer: toNumber(row.termsColBuyer, "termsColBuyer"),
+            collateral_seller: toNumber(row.termsColSeller, "termsColSeller"),
             asset_type: row.termsAssetType ?? undefined,
           }
           : null,

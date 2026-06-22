@@ -6,6 +6,18 @@ import { middlemanForwarder } from '../services/middlemanForwarder';
 import { prisma } from '../lib/prisma';
 import { webhooks } from '../services/webhookDelivery';
 
+function toNumber(value: unknown): number {
+    if (typeof value === 'number') return value;
+    if (value && typeof (value as { toNumber?: () => number }).toNumber === 'function') {
+        return (value as { toNumber: () => number }).toNumber();
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        throw new Error('Invalid numeric offer field');
+    }
+    return parsed;
+}
+
 export const acceptOffer = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
@@ -133,9 +145,9 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
                 buyerWallet: ticket.buyer,
                 sellerWallet: ticket.seller,
                 asset: offer.asset,
-                price: offer.price,
-                amount: offer.amount,
-                collateral: offer.collateral,
+                price: toNumber(offer.price),
+                amount: toNumber(offer.amount),
+                collateral: toNumber(offer.collateral),
                 tokenMint: (offer as any).tokenMint || null,
                 rollupMode: (offer as any).rollupMode || 'ER',
                 buyerSettlementWallet,

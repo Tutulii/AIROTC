@@ -3,6 +3,15 @@ import { prisma } from '../lib/prisma';
 import { SUCCESSFUL_TICKET_STATUSES } from '../services/ticketStatusPolicy';
 import { calculateVisibleReputation } from '../utils/reputation';
 
+function toNumber(value: unknown): number {
+    if (typeof value === 'number') return value;
+    if (value && typeof (value as { toNumber?: () => number }).toNumber === 'function') {
+        return (value as { toNumber: () => number }).toNumber();
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function isStrictPerOpaqueMode(): boolean {
     const raw = process.env.PER_STRICT_OPAQUE_MODE;
     if (raw === undefined) return true;
@@ -26,7 +35,7 @@ export const getStats = async (req: Request, res: Response) => {
             include: { offer: { select: { price: true, amount: true } } },
         });
         const volumeNum = ticketsWithOffers.reduce((sum, t) => {
-            if (t.offer) return sum + (t.offer.price * t.offer.amount);
+            if (t.offer) return sum + (toNumber(t.offer.price) * toNumber(t.offer.amount));
             return sum;
         }, 0);
         const volume24h = volumeNum > 1_000_000

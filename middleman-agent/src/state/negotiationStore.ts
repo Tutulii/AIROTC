@@ -3,6 +3,20 @@ import { ParsedSignals } from "../types/negotiation";
 import { NegotiationSignals } from "../../core/middlemanBrain";
 import { logger } from "../utils/logger";
 
+function toNumber(value: unknown, field: string): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (value && typeof (value as { toNumber?: () => number }).toNumber === "function") {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`negotiation_store_invalid_numeric_field:${field}`);
+  }
+  return parsed;
+}
+
 export class NegotiationStore {
 
   /**
@@ -87,13 +101,14 @@ export class NegotiationStore {
 
     for (const step of history) {
       if (step.proposedPrice !== null) {
-        latestPrice = step.proposedPrice;
-        lastPriceBySender[step.proposedBy] = step.proposedPrice;
+        const proposedPrice = toNumber(step.proposedPrice, "proposedPrice");
+        latestPrice = proposedPrice;
+        lastPriceBySender[step.proposedBy] = proposedPrice;
       } else if (latestPrice && step.agreementScore >= 80) {
         lastPriceBySender[step.proposedBy] = latestPrice;
       }
-      if (step.collateralBuyer !== null) latestColBuyer = step.collateralBuyer;
-      if (step.collateralSeller !== null) latestColSeller = step.collateralSeller;
+      if (step.collateralBuyer !== null) latestColBuyer = toNumber(step.collateralBuyer, "collateralBuyer");
+      if (step.collateralSeller !== null) latestColSeller = toNumber(step.collateralSeller, "collateralSeller");
       if (step.agreementScore >= 80) {
         agreementSignalCount++;
         // Bilateral tracking: Who sent the >80 signal?

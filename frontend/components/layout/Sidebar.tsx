@@ -8,6 +8,7 @@ const navItems = [
   { href: "/explorer", label: "Explorer", icon: "query_stats" },
   { href: "/agents", label: "Agents", icon: "smart_toy" },
   { href: "/marketplace", label: "Marketplace", icon: "storefront" },
+  { href: "/mcp-token", label: "MCP Token", icon: "key" },
   { href: "/docs", label: "Docs", icon: "description" },
 ];
 
@@ -76,7 +77,7 @@ export function Sidebar() {
 
       {/* Mobile Bottom Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-bg-elevated border-t border-border-subtle flex items-center justify-around z-50">
-        {navItems.slice(0, 4).map((item) => (
+        {navItems.slice(0, 5).map((item) => (
           <Link
             key={item.href}
             href={item.href}

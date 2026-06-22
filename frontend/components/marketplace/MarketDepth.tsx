@@ -1,17 +1,6 @@
 "use client";
 
-import {
-    BarChart,
-    Bar,
-    XAxis,
-    YAxis,
-    ResponsiveContainer,
-    Tooltip,
-    Cell,
-    ReferenceLine,
-} from "recharts";
 import { type Offer } from "@/lib/api";
-import { getTokenMetadata, formatTokenAmount } from "@/lib/tokenConfig";
 
 interface MarketDepthProps {
     offers: Offer[];
@@ -67,8 +56,12 @@ export function MarketDepth({ offers }: MarketDepthProps) {
         price: `$${price}`,
         priceNum: price,
         bid: Math.round(bidVol),
-        ask: -Math.round(askVol), // negative for left-side rendering
+        ask: Math.round(askVol),
     }));
+    const maxDepthVol = Math.max(
+        1,
+        ...chartData.flatMap((level) => [level.bid, level.ask]),
+    );
 
     // Calculate mid price
     const allPrices = offers.map((o) => o.price).sort((a, b) => a - b);
@@ -117,36 +110,46 @@ export function MarketDepth({ offers }: MarketDepthProps) {
 
             {/* Depth Chart */}
             {chartData.length > 0 && (
-                <div className="h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData} layout="vertical" barCategoryGap="20%">
-                            <XAxis type="number" hide />
-                            <YAxis
-                                type="category"
-                                dataKey="price"
-                                axisLine={false}
-                                tickLine={false}
-                                tick={{ fontSize: 10, fill: "#64748B", fontFamily: "JetBrains Mono" }}
-                                width={50}
-                            />
-                            <Tooltip
-                                contentStyle={{
-                                    background: "#1d2026",
-                                    border: "1px solid #2A3042",
-                                    borderRadius: "4px",
-                                    fontSize: "11px",
-                                    fontFamily: "JetBrains Mono",
-                                    color: "#e1e2eb",
-                                }}
-                                formatter={(value, name) => [
-                                    `$${Math.abs(Number(value)).toLocaleString()}`,
-                                    name === "bid" ? "Bid Volume" : "Ask Volume",
-                                ]}
-                            />
-                            <Bar dataKey="bid" fill="#22c55e" radius={[0, 4, 4, 0]} animationDuration={800} />
-                            <Bar dataKey="ask" fill="#ef4444" radius={[4, 0, 0, 4]} animationDuration={800} />
-                        </BarChart>
-                    </ResponsiveContainer>
+                <div className="h-48 min-w-0 w-full overflow-y-auto pr-1">
+                    <div className="grid grid-cols-[56px_1fr_1fr] gap-x-2 gap-y-2 text-[10px] font-mono">
+                        <span className="text-text-muted">Price</span>
+                        <span className="text-right text-success">Bid Vol</span>
+                        <span className="text-error">Ask Vol</span>
+                        {chartData.map((level) => {
+                            const bidWidth = level.bid > 0 ? Math.max(3, (level.bid / maxDepthVol) * 100) : 0;
+                            const askWidth = level.ask > 0 ? Math.max(3, (level.ask / maxDepthVol) * 100) : 0;
+                            return (
+                                <div
+                                    key={level.price}
+                                    className="contents"
+                                >
+                                    <span className="self-center text-text-muted">{level.price}</span>
+                                    <div className="flex items-center justify-end gap-2">
+                                        <span className="tabular-nums text-text-muted">
+                                            ${level.bid.toLocaleString()}
+                                        </span>
+                                        <div className="h-4 flex-1 rounded-sm bg-bg-bright">
+                                            <div
+                                                className="ml-auto h-full rounded-sm bg-success/60"
+                                                style={{ width: `${bidWidth}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="h-4 flex-1 rounded-sm bg-bg-bright">
+                                            <div
+                                                className="h-full rounded-sm bg-error/60"
+                                                style={{ width: `${askWidth}%` }}
+                                            />
+                                        </div>
+                                        <span className="tabular-nums text-text-muted">
+                                            ${level.ask.toLocaleString()}
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
         </div>

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import express from "express";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
@@ -61,6 +62,17 @@ type TokenRule = {
 type TokenAuth = {
   scopes: Set<Scope>;
   wallets: Set<string> | null;
+};
+
+type McpTokenPayload = {
+  v: 1;
+  iss: "air-otc-api";
+  aud: "air-otc-mcp";
+  sub: string;
+  scopes: Scope[];
+  iat: number;
+  exp: number;
+  jti: string;
 };
 
 const validScopes = new Set<Scope>([
@@ -132,6 +144,11 @@ const config = {
     process.env.AIR_OTC_TS_SDK_PATH ||
     path.resolve(__dirname, "../../../sdk/ts/dist/index.mjs"),
   mcpToken: process.env.AIR_OTC_MCP_TOKEN || "",
+  mcpTokenSigningSecret:
+    process.env.AIR_OTC_MCP_TOKEN_SIGNING_SECRET ||
+    process.env.AIR_OTC_MCP_DELEGATION_TOKEN ||
+    process.env.AIR_OTC_MCP_TOKEN ||
+    "",
   mcpDelegationToken: process.env.AIR_OTC_MCP_DELEGATION_TOKEN || "",
   allowedWallets: new Set(
     (process.env.AIR_OTC_MCP_ALLOWED_WALLETS || "")
@@ -179,9 +196,41 @@ function isValidSolanaWallet(wallet: string): boolean {
   }
 }
 
-function assertDelegatedWalletAllowed(requestedWallet?: string): asserts requestedWallet is string {
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function verifyDynamicMcpToken(authToken?: string): TokenAuth | null {
+  if (!authToken?.startsWith("mcp_v1.")) return null;
+  if (!config.mcpTokenSigningSecret || config.mcpTokenSigningSecret.length < 16) return null;
+  const parts = authToken.split(".");
+  if (parts.length !== 3) return null;
+  const [, encodedPayload, signature] = parts;
+  const expected = crypto
+    .createHmac("sha256", config.mcpTokenSigningSecret)
+    .update(encodedPayload)
+    .digest("base64url");
+  if (!safeEqual(signature, expected)) return null;
+  const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as McpTokenPayload;
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.v !== 1 || payload.iss !== "air-otc-api" || payload.aud !== "air-otc-mcp" || payload.exp <= now) {
+    return null;
+  }
+  if (!isValidSolanaWallet(payload.sub)) return null;
+  const scopes = parseScopes(payload.scopes, new Set());
+  if (scopes.size === 0) return null;
+  return { scopes, wallets: new Set([payload.sub]) };
+}
+
+function assertDelegatedWalletAllowed(requestedWallet?: string, authToken?: string): asserts requestedWallet is string {
   if (!requestedWallet || !isValidSolanaWallet(requestedWallet)) {
     throw new Error("mcp_wallet_invalid");
+  }
+  const dynamicAuth = verifyDynamicMcpToken(authToken);
+  if (dynamicAuth?.wallets?.has(requestedWallet)) {
+    return;
   }
   if (!config.allowedWallets.has(requestedWallet)) {
     throw new Error(`mcp_wallet_not_allowlisted:${requestedWallet}`);
@@ -193,17 +242,20 @@ function assertDelegatedWalletAllowed(requestedWallet?: string): asserts request
 
 function assertConfiguredWallet(requestedWallet?: string, authToken?: string): void {
   if (!requestedWallet) return;
+  const auth = resolveTokenAuth(authToken);
   if (config.allowedWallets.size > 0) {
-    assertDelegatedWalletAllowed(requestedWallet);
-    const auth = resolveTokenAuth(authToken);
+    assertDelegatedWalletAllowed(requestedWallet, authToken);
     if (auth?.wallets && !auth.wallets.has(requestedWallet)) {
       throw new Error(`mcp_token_wallet_mismatch:${requestedWallet}`);
     }
     return;
   }
-  const auth = walletAuth();
-  if (auth && requestedWallet && requestedWallet !== auth.publicKey) {
-    throw new Error(`mcp_wallet_mismatch:configured=${auth.publicKey}:requested=${requestedWallet}`);
+  if (auth?.wallets?.has(requestedWallet)) {
+    return;
+  }
+  const configuredWallet = walletAuth();
+  if (configuredWallet && requestedWallet && requestedWallet !== configuredWallet.publicKey) {
+    throw new Error(`mcp_wallet_mismatch:configured=${configuredWallet.publicKey}:requested=${requestedWallet}`);
   }
 }
 
@@ -224,6 +276,8 @@ function objectSchema(properties: Record<string, any>, required: string[] = []):
 }
 
 function resolveTokenAuth(authToken?: string): TokenAuth | null {
+  const dynamicAuth = verifyDynamicMcpToken(authToken);
+  if (dynamicAuth) return dynamicAuth;
   const hasAnyToken = Boolean(config.mcpToken) || config.tokenRules.length > 0;
   if (!hasAnyToken) return { scopes: config.scopes, wallets: null };
   if (!authToken) return null;
@@ -257,13 +311,17 @@ async function httpJson(
   pathname: string,
   init: RequestInit = {},
   baseUrl = config.apiUrl,
-  options: { delegatedWallet?: string } = {}
+  options: { delegatedWallet?: string; authToken?: string } = {}
 ): Promise<any> {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json");
   if (options.delegatedWallet && baseUrl === config.apiUrl) {
-    assertDelegatedWalletAllowed(options.delegatedWallet);
-    headers.set("x-airotc-mcp-delegation-token", config.mcpDelegationToken);
+    assertDelegatedWalletAllowed(options.delegatedWallet, options.authToken);
+    if (options.authToken?.startsWith("mcp_v1.")) {
+      headers.set("x-airotc-mcp-user-token", options.authToken);
+    } else {
+      headers.set("x-airotc-mcp-delegation-token", config.mcpDelegationToken);
+    }
     headers.set("x-airotc-delegated-wallet", options.delegatedWallet);
   } else if (config.apiKey && !headers.has("authorization")) {
     headers.set("authorization", `Bearer ${config.apiKey}`);
@@ -373,7 +431,7 @@ const tools: ToolDefinition[] = [
         amount: { type: "number", exclusiveMinimum: 0 },
         price: { type: "number", exclusiveMinimum: 0 },
         collateral: { type: "number", minimum: 0 },
-        rollupMode: { type: "string", enum: ["ER", "PER", "NONE"], default: "PER" },
+        rollupMode: { type: "string", enum: ["ER", "PER", "NONE"], default: "NONE" },
         settlementWallet: { type: "string" },
         rewardWallet: { type: "string" },
         fundingWallet: { type: "string" },
@@ -393,12 +451,12 @@ const tools: ToolDefinition[] = [
             amount: args.amount,
             price: args.price,
             collateral: args.collateral,
-            rollupMode: args.rollupMode || "PER",
+            rollupMode: args.rollupMode || "NONE",
             settlementWallet: args.settlementWallet,
             rewardWallet: args.rewardWallet,
             fundingWallet: args.fundingWallet,
           }),
-        }, config.apiUrl, { delegatedWallet: args.wallet })
+        }, config.apiUrl, { delegatedWallet: args.wallet, authToken: args.authToken })
       );
     },
   },
@@ -430,7 +488,7 @@ const tools: ToolDefinition[] = [
             rewardWallet: args.rewardWallet,
             fundingWallet: args.fundingWallet,
           }),
-        }, config.apiUrl, { delegatedWallet: args.wallet })
+        }, config.apiUrl, { delegatedWallet: args.wallet, authToken: args.authToken })
       );
     },
   },

@@ -17,6 +17,15 @@ import { logger } from '../lib/logger';
 
 const router = Router();
 
+function toNumber(value: unknown): number {
+    if (typeof value === 'number') return value;
+    if (value && typeof (value as { toNumber?: () => number }).toNumber === 'function') {
+        return (value as { toNumber: () => number }).toNumber();
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
 // ─── GET /v1/fees/summary — Platform Revenue Summary (Public) ───
 
 router.get('/v1/fees/summary', async (_req: Request, res: Response): Promise<void> => {
@@ -52,7 +61,7 @@ router.get('/v1/fees/summary', async (_req: Request, res: Response): Promise<voi
         // Overall stats
         const totalDeals = allFees.length;
         const avgFeeRate = totalDeals > 0
-            ? (allFees.reduce((sum, f) => sum + f.feeRate, 0) / totalDeals).toFixed(2)
+            ? (allFees.reduce((sum, f) => sum + toNumber(f.feeRate), 0) / totalDeals).toFixed(2)
             : '0';
 
         res.status(200).json({

@@ -1,4 +1,6 @@
 #!/usr/bin/env ts-node
+import { describe, it } from 'vitest';
+
 /**
  * SPL Token Lifecycle Test — Day 22 Verification
  *
@@ -209,7 +211,16 @@ function printSummary() {
     process.exit(failed > 0 ? 1 : 0);
 }
 
-runTests().catch(err => {
-    console.error('Test suite crashed:', err.message);
-    process.exit(2);
-});
+if (process.env.RUN_SPL_LIFECYCLE_E2E === 'true') {
+    runTests().catch(err => {
+        console.error('Test suite crashed:', err.message);
+        process.exit(2);
+    });
+} else {
+    describe.skip('SPL token lifecycle live E2E', () => {
+        it('runs with RUN_SPL_LIFECYCLE_E2E=true against a running API server', () => {
+            // This file remains a manual/live E2E script. Keeping it skipped here
+            // prevents normal unit runs from calling process.exit.
+        });
+    });
+}

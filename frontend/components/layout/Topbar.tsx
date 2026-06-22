@@ -79,9 +79,13 @@ export function Topbar() {
               settings_input_component
             </span>
           </Link>
-          <div className="w-8 h-8 rounded-full bg-bg-highest border border-border-subtle flex items-center justify-center text-text-secondary overflow-hidden">
-            <span className="material-symbols-outlined text-sm">terminal</span>
-          </div>
+          <Link
+            href="/mcp-token"
+            aria-label="Generate MCP token"
+            className="w-10 h-10 rounded-full bg-bg-highest border border-border-subtle flex items-center justify-center text-text-secondary overflow-hidden hover:text-accent hover:border-accent transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
+          >
+            <span className="material-symbols-outlined text-sm" aria-hidden="true">terminal</span>
+          </Link>
         </div>
       </header>
 
