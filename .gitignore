@@ -84,3 +84,6 @@ eliza-agents/node_modules
 external-agents/node_modules
 
 sdk/python/venv/
+
+# Middleman local runtime state
+middleman-agent/decay_state.json
