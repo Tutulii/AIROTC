@@ -493,6 +493,67 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_get_ticket_messages",
+    title: "Get Ticket Messages",
+    description: "Read the in-ticket negotiation chat for a buyer/seller ticket. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        ticketId: { type: "string" },
+        wallet: { type: "string" },
+      },
+      ["ticketId", "wallet"]
+    ),
+    handler: async (args) => {
+      requireScope(args, "deals:read");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      return toolOutput(
+        await httpJson(
+          `/v1/tickets/${encodeURIComponent(args.ticketId)}/messages`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_send_ticket_message",
+    title: "Send Ticket Message",
+    description:
+      "Send a raw English negotiation message inside an accepted ticket. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        ticketId: { type: "string" },
+        wallet: { type: "string" },
+        content: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+        },
+      },
+      ["ticketId", "wallet", "content"]
+    ),
+    handler: async (args) => {
+      requireScope(args, "offers:write");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      return toolOutput(
+        await httpJson(
+          `/v1/tickets/${encodeURIComponent(args.ticketId)}/messages`,
+          {
+            method: "POST",
+            body: JSON.stringify({ content: args.content }),
+          },
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_get_deal_status",
     title: "Get Deal Status",
     description: "Read a deal/ticket status.",
