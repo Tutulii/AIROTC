@@ -1,8 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_lang::system_program;
 use sha2::{Sha256, Digest};
+use anchor_spl::token::spl_token::native_mint;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
-use anchor_spl::associated_token::AssociatedToken;
 
 declare_id!("Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx");
 
@@ -280,6 +279,16 @@ fn assert_rent_safe(pda: &AccountInfo, total_out: u64) -> Result<()> {
         .ok_or(EscrowError::InsufficientFunds)?;
     require!(remaining >= min_rent, EscrowError::InsufficientFunds);
     Ok(())
+}
+
+fn is_native_sol_mint(mint: &Pubkey) -> bool {
+    *mint == native_mint::id()
+}
+
+fn escrowed_native_lamports(pda: &AccountInfo) -> Result<u64> {
+    let rent = Rent::get()?;
+    let min_rent = rent.minimum_balance(pda.data_len());
+    Ok(pda.lamports().saturating_sub(min_rent))
 }
 
 /// Helper method to transfer SPL tokens from user to PDA (or vice versa).
@@ -920,6 +929,7 @@ pub mod escrow {
         // ── Pause guard ──
         require!(!ctx.accounts.config.paused, EscrowError::Paused);
 
+        let deal_info = ctx.accounts.deal.to_account_info();
         let deal = &mut ctx.accounts.deal;
 
         // ── State guards ──
@@ -952,35 +962,54 @@ pub mod escrow {
             .checked_add(fee)
             .ok_or(EscrowError::ArithmeticOverflow)?;
 
-        require!(ctx.accounts.deal_ata.amount >= total_out, EscrowError::InsufficientFunds);
+        if is_native_sol_mint(&deal.mint) {
+            assert_rent_safe(&deal_info, total_out)?;
+            transfer_lamports_from_pda(
+                &deal_info,
+                &ctx.accounts.seller.to_account_info(),
+                seller_total,
+            )?;
+            transfer_lamports_from_pda(
+                &deal_info,
+                &ctx.accounts.buyer.to_account_info(),
+                buyer_total,
+            )?;
+            transfer_lamports_from_pda(
+                &deal_info,
+                &ctx.accounts.fee_receiver.to_account_info(),
+                fee,
+            )?;
+        } else {
+            require!(ctx.accounts.deal_ata.amount >= total_out, EscrowError::InsufficientFunds);
 
-        // ── Disburse via token account CPIs ──
-        deal.transfer_tokens_from_pda(
-            ctx.accounts.deal_ata.to_account_info(),
-            ctx.accounts.seller_ata.to_account_info(),
-            deal.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
-            seller_total,
-            deal.bump,
-        )?;
+            // ── Disburse via token account CPIs ──
+            deal.transfer_tokens_from_pda(
+                ctx.accounts.deal_ata.to_account_info(),
+                ctx.accounts.seller_ata.to_account_info(),
+                deal.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                seller_total,
+                deal.bump,
+            )?;
 
-        deal.transfer_tokens_from_pda(
-            ctx.accounts.deal_ata.to_account_info(),
-            ctx.accounts.buyer_ata.to_account_info(),
-            deal.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
-            buyer_total,
-            deal.bump,
-        )?;
+            deal.transfer_tokens_from_pda(
+                ctx.accounts.deal_ata.to_account_info(),
+                ctx.accounts.buyer_ata.to_account_info(),
+                deal.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                buyer_total,
+                deal.bump,
+            )?;
 
-        deal.transfer_tokens_from_pda(
-            ctx.accounts.deal_ata.to_account_info(),
-            ctx.accounts.fee_ata.to_account_info(),
-            deal.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
-            fee,
-            deal.bump,
-        )?;
+            deal.transfer_tokens_from_pda(
+                ctx.accounts.deal_ata.to_account_info(),
+                ctx.accounts.fee_ata.to_account_info(),
+                deal.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                fee,
+                deal.bump,
+            )?;
+        }
 
         deal.status = DealStatus::Completed;
 
@@ -1004,6 +1033,7 @@ pub mod escrow {
         // ── Pause guard ──
         require!(!ctx.accounts.config.paused, EscrowError::Paused);
 
+        let deal_info = ctx.accounts.deal.to_account_info();
         let deal = &mut ctx.accounts.deal;
         let caller = &ctx.accounts.caller;
 
@@ -1037,31 +1067,49 @@ pub mod escrow {
             .checked_add(seller_refund)
             .ok_or(EscrowError::ArithmeticOverflow)?;
 
-        // ── Verify deal_ata token balance ──
-        if total_refund > 0 {
-            require!(ctx.accounts.deal_ata.amount >= total_refund, EscrowError::InsufficientFunds);
-        }
+        if is_native_sol_mint(&deal.mint) {
+            assert_rent_safe(&deal_info, total_refund)?;
+            if buyer_refund > 0 {
+                transfer_lamports_from_pda(
+                    &deal_info,
+                    &ctx.accounts.buyer.to_account_info(),
+                    buyer_refund,
+                )?;
+            }
+            if seller_refund > 0 {
+                transfer_lamports_from_pda(
+                    &deal_info,
+                    &ctx.accounts.seller.to_account_info(),
+                    seller_refund,
+                )?;
+            }
+        } else {
+            // ── Verify deal_ata token balance ──
+            if total_refund > 0 {
+                require!(ctx.accounts.deal_ata.amount >= total_refund, EscrowError::InsufficientFunds);
+            }
 
-        // ── Disburse refunds via token CPIs ──
-        if buyer_refund > 0 {
-            deal.transfer_tokens_from_pda(
-                ctx.accounts.deal_ata.to_account_info(),
-                ctx.accounts.buyer_ata.to_account_info(),
-                deal.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                buyer_refund,
-                deal.bump,
-            )?;
-        }
-        if seller_refund > 0 {
-            deal.transfer_tokens_from_pda(
-                ctx.accounts.deal_ata.to_account_info(),
-                ctx.accounts.seller_ata.to_account_info(),
-                deal.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                seller_refund,
-                deal.bump,
-            )?;
+            // ── Disburse refunds via token CPIs ──
+            if buyer_refund > 0 {
+                deal.transfer_tokens_from_pda(
+                    ctx.accounts.deal_ata.to_account_info(),
+                    ctx.accounts.buyer_ata.to_account_info(),
+                    deal.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    buyer_refund,
+                    deal.bump,
+                )?;
+            }
+            if seller_refund > 0 {
+                deal.transfer_tokens_from_pda(
+                    ctx.accounts.deal_ata.to_account_info(),
+                    ctx.accounts.seller_ata.to_account_info(),
+                    deal.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    seller_refund,
+                    deal.bump,
+                )?;
+            }
         }
 
         deal.status = DealStatus::Cancelled;
@@ -1083,6 +1131,7 @@ pub mod escrow {
         // ── Pause guard ──
         require!(!ctx.accounts.config.paused, EscrowError::Paused);
 
+        let deal_info = ctx.accounts.deal.to_account_info();
         let deal = &mut ctx.accounts.deal;
 
         // ── State guards ──
@@ -1117,31 +1166,49 @@ pub mod escrow {
             .checked_add(seller_refund)
             .ok_or(EscrowError::ArithmeticOverflow)?;
 
-        // ── Verify deal_ata token balance ──
-        if total_refund > 0 {
-            require!(ctx.accounts.deal_ata.amount >= total_refund, EscrowError::InsufficientFunds);
-        }
+        if is_native_sol_mint(&deal.mint) {
+            assert_rent_safe(&deal_info, total_refund)?;
+            if buyer_refund > 0 {
+                transfer_lamports_from_pda(
+                    &deal_info,
+                    &ctx.accounts.buyer.to_account_info(),
+                    buyer_refund,
+                )?;
+            }
+            if seller_refund > 0 {
+                transfer_lamports_from_pda(
+                    &deal_info,
+                    &ctx.accounts.seller.to_account_info(),
+                    seller_refund,
+                )?;
+            }
+        } else {
+            // ── Verify deal_ata token balance ──
+            if total_refund > 0 {
+                require!(ctx.accounts.deal_ata.amount >= total_refund, EscrowError::InsufficientFunds);
+            }
 
-        // ── Disburse refunds via token CPIs ──
-        if buyer_refund > 0 {
-            deal.transfer_tokens_from_pda(
-                ctx.accounts.deal_ata.to_account_info(),
-                ctx.accounts.buyer_ata.to_account_info(),
-                deal.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                buyer_refund,
-                deal.bump,
-            )?;
-        }
-        if seller_refund > 0 {
-            deal.transfer_tokens_from_pda(
-                ctx.accounts.deal_ata.to_account_info(),
-                ctx.accounts.seller_ata.to_account_info(),
-                deal.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                seller_refund,
-                deal.bump,
-            )?;
+            // ── Disburse refunds via token CPIs ──
+            if buyer_refund > 0 {
+                deal.transfer_tokens_from_pda(
+                    ctx.accounts.deal_ata.to_account_info(),
+                    ctx.accounts.buyer_ata.to_account_info(),
+                    deal.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    buyer_refund,
+                    deal.bump,
+                )?;
+            }
+            if seller_refund > 0 {
+                deal.transfer_tokens_from_pda(
+                    ctx.accounts.deal_ata.to_account_info(),
+                    ctx.accounts.seller_ata.to_account_info(),
+                    deal.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    seller_refund,
+                    deal.bump,
+                )?;
+            }
         }
 
         deal.status = DealStatus::Refunded;
@@ -1188,8 +1255,13 @@ pub mod escrow {
         // ── Pause guard ──
         require!(!ctx.accounts.config.paused, EscrowError::Paused);
 
+        let deal_info = ctx.accounts.deal.to_account_info();
         let deal = &mut ctx.accounts.deal;
-        let current_balance = ctx.accounts.deal_ata.amount;
+        let current_balance = if is_native_sol_mint(&deal.mint) {
+            escrowed_native_lamports(&deal_info)?
+        } else {
+            ctx.accounts.deal_ata.amount
+        };
         let deposit_label: String;
 
         match deposit_type {

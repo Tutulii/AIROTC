@@ -19,7 +19,7 @@ import { vectorMemoryStore } from "./state/vectorMemoryStore";
 import { dealTracker } from "./state/dealTracker";
 import { analyzeMessage, NegotiationSignals } from "../core/middlemanBrain";
 import { dealPhaseManager } from "../core/dealPhaseManager";
-import { watchForDeposits } from "./listeners/depositWatcher";
+import { reconcileDepositWatcherFromHistory, watchForDeposits } from "./listeners/depositWatcher";
 import { startIntentListener, stopIntentListener } from "./listeners/intentListener";
 import { executeConfirmDeposit, getDealContext, executeFractionalSplit } from "./services/onChainExecutionService";
 import { startDealTimeoutWatcher, stopDealTimeoutWatcher } from "./services/dealTimeoutWatcher";
@@ -66,10 +66,12 @@ import { redactUrlSecret } from "./utils/redact";
 import { demoRuntimeListenersAllowed } from "./utils/demoMode";
 import { classifyDependencyError } from "./services/dependencyHealthService";
 import { isRetryableError } from "./utils/retry";
+import type { DepositReceivedEvent } from "./types/events";
 
 // ── Graceful shutdown ────────────────────────────────────────────────
 
 let isShuttingDown = false;
+const depositConfirmationQueues = new Map<string, Promise<void>>();
 
 function shouldKeepRunningAfterUnhandled(reason: unknown): boolean {
   if (process.env.EXIT_ON_UNHANDLED_REJECTION === "true") {
@@ -607,7 +609,7 @@ async function main(): Promise<void> {
 
   // ── Deposit Watcher Event (Option A — Autonomous Deposit Confirmation) ──
 
-  eventBus.subscribe("deposit_received", async (payload) => {
+  async function handleDepositReceived(payload: DepositReceivedEvent) {
     logger.info("deposit_event_received", {
       ticket_id: payload.ticket_id,
       deposit_type: payload.deposit_type,
@@ -680,6 +682,25 @@ async function main(): Promise<void> {
     } else {
       logger.error("deposit_confirm_failed", { ticket_id: payload.ticket_id }, new Error(result.error || "Unknown"));
     }
+  }
+
+  eventBus.subscribe("deposit_received", (payload) => {
+    const previous = depositConfirmationQueues.get(payload.ticket_id) || Promise.resolve();
+    const next = previous
+      .catch((e) => {
+        logger.warn("deposit_confirmation_previous_task_failed", {
+          ticket_id: payload.ticket_id,
+          error: e?.message || String(e),
+        });
+      })
+      .then(() => handleDepositReceived(payload))
+      .finally(() => {
+        if (depositConfirmationQueues.get(payload.ticket_id) === next) {
+          depositConfirmationQueues.delete(payload.ticket_id);
+        }
+      });
+
+    depositConfirmationQueues.set(payload.ticket_id, next);
   });
 
   // ── Deposit Polling Fallback Handler (Level 5 Autonomy) ──
@@ -688,10 +709,22 @@ async function main(): Promise<void> {
     try {
       const deal = await dealPhaseManager.getDeal(payload.ticketId);
       if (deal && deal.phase === "awaiting_deposits") {
+        const result = await reconcileDepositWatcherFromHistory(getConnection(), payload.ticketId, "heartbeat_fallback");
+        if (result.reconciled) {
+          logger.info("deposit_polling_fallback_reconciled", {
+            ticket_id: payload.ticketId,
+            reason: result.reason,
+            balance_lamports: result.currentBalanceLamports,
+            buyerDeposited: result.buyerDeposited,
+            sellerDeposited: result.sellerDeposited,
+            paymentDeposited: result.paymentDeposited,
+          });
+          return;
+        }
         logger.warn("deposit_polling_fallback_detected_balance_without_phase_transition", {
           ticket_id: payload.ticketId,
           phase: deal.phase,
-          reason: "polling fallback cannot prove buyer/seller/payment attribution",
+          reason: result.reason,
         });
       }
     } catch (e: any) {

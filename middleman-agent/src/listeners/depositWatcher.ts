@@ -116,6 +116,9 @@ export async function watchForDeposits(
   void pollOnChainDealState(connection, ticketId, expectations.get(ticketId)!).catch(e => {
     watcherLog.error("deposit_initial_poll_failed", { error: e.message });
   });
+  void reconcileDepositWatcherFromHistory(connection, ticketId, "startup").catch(e => {
+    watcherLog.error("deposit_initial_reconcile_failed", { error: e.message });
+  });
 
   let subscriptionId: number | undefined;
   if (process.env.AIROTC_ENABLE_DEPOSIT_WS_WATCHER === "true") {
@@ -235,6 +238,7 @@ async function identifyAndConfirmDeposit(
   expect: DepositExpectation,
   currentBalance: number,
   depositAmount: number,
+  pass = 0,
 ): Promise<void> {
   const DUST_TOLERANCE = 2000; // Allow max 2000 lamports drift for rent/fees
 
@@ -266,24 +270,6 @@ async function identifyAndConfirmDeposit(
   let processedAnyDeposit = false;
 
   for (const sigInfo of recentSuccessfulSigs) {
-    try {
-      const existingTx = await prisma.transaction.findFirst({
-        where: {
-          OR: [
-            { txSignature: sigInfo.signature },
-            { txSignature: { startsWith: `${sigInfo.signature}-` } },
-          ],
-        },
-      });
-      if (existingTx) {
-        logger.info("deposit_replay_prevented", { ticket_id: ticketId, signature: sigInfo.signature });
-        continue;
-      }
-    } catch (err: any) {
-      logger.error("deposit_db_check_failed", { ticket_id: ticketId, error: err.message });
-      continue;
-    }
-
     const tx = await connection.getTransaction(sigInfo.signature, { maxSupportedTransactionVersion: 0 });
     if (!tx || !tx.transaction.message.staticAccountKeys || !tx.meta) {
       logger.warn("deposit_verification_failed", {
@@ -328,6 +314,10 @@ async function identifyAndConfirmDeposit(
     });
 
     const depositTypes: DepositType[] = [];
+    const isGroupedBuyerTransfer = isClose(
+      txDepositAmount,
+      expect.expectedBuyerCollateral + expect.expectedPayment,
+    );
 
     if (!expect.buyerDeposited && isClose(txDepositAmount, expect.expectedBuyerCollateral)) {
       if (expectedBuyerWallet && senderPubkey !== expectedBuyerWallet) {
@@ -342,7 +332,7 @@ async function identifyAndConfirmDeposit(
       }
       depositTypes.push("buyer_collateral");
       expect.buyerDeposited = true;
-    } else if (!expect.buyerDeposited && !expect.paymentDeposited && isClose(txDepositAmount, expect.expectedBuyerCollateral + expect.expectedPayment)) {
+    } else if (!expect.buyerDeposited && !expect.paymentDeposited && isGroupedBuyerTransfer) {
       if (expectedBuyerWallet && senderPubkey !== expectedBuyerWallet) {
         logger.warn("deposit_direction_mismatch", {
           ticket_id: ticketId,
@@ -353,9 +343,12 @@ async function identifyAndConfirmDeposit(
         });
         continue;
       }
-      depositTypes.push("buyer_collateral", "buyer_payment");
+      depositTypes.push("buyer_collateral");
       expect.buyerDeposited = true;
-      expect.paymentDeposited = true;
+      if (expect.sellerDeposited) {
+        depositTypes.push("buyer_payment");
+        expect.paymentDeposited = true;
+      }
     } else if (!expect.sellerDeposited && isClose(txDepositAmount, expect.expectedSellerCollateral)) {
       if (expectedSellerWallet && senderPubkey !== expectedSellerWallet) {
         logger.warn("deposit_direction_mismatch", {
@@ -369,7 +362,12 @@ async function identifyAndConfirmDeposit(
       }
       depositTypes.push("seller_collateral");
       expect.sellerDeposited = true;
-    } else if (!expect.paymentDeposited && isClose(txDepositAmount, expect.expectedPayment)) {
+    } else if (
+      !expect.paymentDeposited
+      && expect.buyerDeposited
+      && expect.sellerDeposited
+      && (isClose(txDepositAmount, expect.expectedPayment) || isGroupedBuyerTransfer)
+    ) {
       if (expectedBuyerWallet && senderPubkey !== expectedBuyerWallet) {
         logger.warn("deposit_direction_mismatch", {
           ticket_id: ticketId,
@@ -442,6 +440,7 @@ async function identifyAndConfirmDeposit(
         if (deal) {
           // If grouped, append deposit_type to txSignature to bypass Prisma's strictly unique txSignature constraint
           const uniqueTxSignature = depositTypes.length > 1 
+            || isGroupedBuyerTransfer
             ? `${sigInfo.signature}-${depositType}` 
             : sigInfo.signature;
             
@@ -480,9 +479,100 @@ async function identifyAndConfirmDeposit(
     });
   }
 
+  if (
+    processedAnyDeposit
+    && pass < 2
+    && (expect.buyerDeposited || expect.sellerDeposited)
+    && !expect.paymentDeposited
+  ) {
+    await identifyAndConfirmDeposit(connection, ticketId, expect, currentBalance, depositAmount, pass + 1);
+  }
+
   if (expect.buyerDeposited && expect.sellerDeposited && expect.paymentDeposited) {
     stopWatching(ticketId);
   }
+}
+
+export async function reconcileDepositWatcherFromHistory(
+  connection: Connection,
+  ticketId: string,
+  reason = "manual",
+): Promise<{
+  reconciled: boolean;
+  reason: string;
+  currentBalanceLamports?: number;
+  buyerDeposited?: boolean;
+  sellerDeposited?: boolean;
+  paymentDeposited?: boolean;
+}> {
+  const expect = expectations.get(ticketId);
+  if (!expect) {
+    logger.warn("deposit_reconcile_skipped", { ticket_id: ticketId, reason: "no_active_expectation" });
+    return { reconciled: false, reason: "no_active_expectation" };
+  }
+
+  try {
+    await pollOnChainDealState(connection, ticketId, expect);
+  } catch (e: any) {
+    logger.debug("deposit_reconcile_program_state_poll_failed", {
+      ticket_id: ticketId,
+      reason,
+      error: e?.message || String(e),
+    });
+  }
+
+  if (expect.buyerDeposited && expect.sellerDeposited && expect.paymentDeposited) {
+    return {
+      reconciled: true,
+      reason: "program_state_complete",
+      buyerDeposited: true,
+      sellerDeposited: true,
+      paymentDeposited: true,
+    };
+  }
+
+  const pdaStr = expect.dealPda.toBase58();
+  const currentBalance = await connection.getBalance(expect.dealPda, "confirmed");
+  const previousBalance = lastKnownBalance.get(pdaStr) || 0;
+  lastKnownBalance.set(pdaStr, Math.max(previousBalance, currentBalance));
+
+  const before = {
+    buyerDeposited: expect.buyerDeposited,
+    sellerDeposited: expect.sellerDeposited,
+    paymentDeposited: expect.paymentDeposited,
+  };
+
+  await identifyAndConfirmDeposit(
+    connection,
+    ticketId,
+    expect,
+    currentBalance,
+    Math.max(0, currentBalance - previousBalance || currentBalance),
+  );
+
+  const reconciled =
+    before.buyerDeposited !== expect.buyerDeposited
+    || before.sellerDeposited !== expect.sellerDeposited
+    || before.paymentDeposited !== expect.paymentDeposited;
+
+  logger.info("deposit_reconcile_finished", {
+    ticket_id: ticketId,
+    reason,
+    reconciled,
+    balance_sol: currentBalance / LAMPORTS_PER_SOL,
+    buyerDeposited: expect.buyerDeposited,
+    sellerDeposited: expect.sellerDeposited,
+    paymentDeposited: expect.paymentDeposited,
+  });
+
+  return {
+    reconciled,
+    reason: reconciled ? "historical_signatures_processed" : "no_matching_deposits",
+    currentBalanceLamports: currentBalance,
+    buyerDeposited: expect.buyerDeposited,
+    sellerDeposited: expect.sellerDeposited,
+    paymentDeposited: expect.paymentDeposited,
+  };
 }
 
 export function stopWatching(ticketId: string): void {
