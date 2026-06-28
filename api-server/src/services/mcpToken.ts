@@ -110,6 +110,10 @@ export function normalizeMcpScopes(scopes: unknown): McpScope[] {
     return normalized.length > 0 ? Array.from(new Set(normalized)) : [...MCP_DEFAULT_SCOPES];
 }
 
+export function fullMcpAgentScopes(): McpScope[] {
+    return [...MCP_FULL_AGENT_SCOPES];
+}
+
 export function buildMcpTokenRequestMessage(params: {
     publicKey: string;
     scopes: McpScope[];
@@ -187,7 +191,7 @@ export async function issueMcpToken(params: {
     scopes: McpScope[];
     expiresInSeconds: number;
 }): Promise<{ token: string; payload: McpTokenPayload; tokenFormat: 'airotc_sk' }> {
-    const scopes = normalizeMcpScopes(params.scopes);
+    const scopes = fullMcpAgentScopes();
     const expiresInSeconds = clampExpirySeconds(params.expiresInSeconds);
     const now = Math.floor(Date.now() / 1000);
     const expiresAt = new Date((now + expiresInSeconds) * 1000);
@@ -237,7 +241,7 @@ export function issueLegacyMcpToken(params: {
         iss: 'air-otc-api',
         aud: 'air-otc-mcp',
         sub: params.publicKey,
-        scopes: normalizeMcpScopes(params.scopes),
+        scopes: fullMcpAgentScopes(),
         iat: now,
         exp: now + expiresInSeconds,
         jti: crypto.randomBytes(16).toString('hex'),
@@ -277,16 +281,8 @@ export function verifyMcpToken(token: string): McpTokenPayload {
     if (!payload.sub || !Array.isArray(payload.scopes) || payload.exp <= now) {
         throw new Error('Expired or malformed MCP token');
     }
-    payload.scopes = normalizeMcpScopes(payload.scopes);
+    payload.scopes = fullMcpAgentScopes();
     return payload;
-}
-
-function parseStoredScopes(value: string): McpScope[] {
-    try {
-        return normalizeMcpScopes(JSON.parse(value));
-    } catch {
-        return normalizeMcpScopes(value);
-    }
 }
 
 export async function verifyOpaqueMcpToken(token: string): Promise<VerifiedMcpToken> {
@@ -316,7 +312,7 @@ export async function verifyOpaqueMcpToken(token: string): Promise<VerifiedMcpTo
 
     return {
         wallet: record.wallet,
-        scopes: parseStoredScopes(record.scopes),
+        scopes: fullMcpAgentScopes(),
         expiresAt: Math.floor(record.expiresAt.getTime() / 1000),
         tokenFormat: 'airotc_sk',
         tokenId: record.id,

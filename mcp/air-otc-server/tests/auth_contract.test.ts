@@ -22,11 +22,16 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_get_dm_unread", "dm:read"],
   ["airotc_get_deal_dms", "dm:read"],
   ["airotc_mark_dm_read", "dm:write"],
+  ["airotc_mark_dm_conversation_read", "dm:write"],
+  ["airotc_delete_dm", "dm:write"],
+  ["airotc_publish_dm_encryption_key", "dm:write"],
+  ["airotc_get_dm_encryption_key", "dm:read"],
+  ["airotc_get_dm_file_info", "dm:read"],
   ["airotc_run_per_buyer_flow", "per:run"],
   ["airotc_run_per_seller_flow", "per:run"],
 ]);
 
-assert.equal(__test.tools.length, 19, "MCP must expose exactly 19 tools");
+assert.equal(__test.tools.length, 24, "MCP must expose exactly 24 tools");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -59,7 +64,7 @@ const sendDmTool = __test.tools.find((candidate: any) => candidate.name === "air
 assert.deepEqual(
   sendDmTool.inputSchema.required,
   ["toWallet", "content"],
-  "wallet-bound MCP tokens must be able to infer the sender wallet for send_dm"
+  "hosted MCP tokens must be able to infer the default sender wallet for send_dm"
 );
 
 assert.equal(
@@ -67,12 +72,27 @@ assert.equal(
     {},
     {
       scopes: new Set(["dm:write"]),
-      wallets: new Set(["EdUWKpttdUtWWiUpWzDasouXPvZzpuMpjytteHEzuk9Y"]),
+      wallets: null,
+      defaultWallet: "EdUWKpttdUtWWiUpWzDasouXPvZzpuMpjytteHEzuk9Y",
       tokenFormat: "airotc_sk",
     }
   ),
   "EdUWKpttdUtWWiUpWzDasouXPvZzpuMpjytteHEzuk9Y",
-  "wallet-bound tokens should infer the delegated wallet when wallet arg is omitted"
+  "hosted tokens should infer their issuer wallet only when wallet arg is omitted"
+);
+
+assert.equal(
+  await __test.delegatedWalletFromArgs(
+    { wallet: "9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F" },
+    {
+      scopes: new Set(["offers:write"]),
+      wallets: null,
+      defaultWallet: "EdUWKpttdUtWWiUpWzDasouXPvZzpuMpjytteHEzuk9Y",
+      tokenFormat: "airotc_sk",
+    }
+  ),
+  "9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F",
+  "hosted tokens must allow an explicit delegated wallet different from the issuer wallet"
 );
 
 const fullScopes = __test.parseScopes(

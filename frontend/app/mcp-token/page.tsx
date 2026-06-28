@@ -59,10 +59,6 @@ const scopePresets = {
       "umbra:read",
     ],
   },
-  readonly: {
-    label: "Read only",
-    scopes: ["offers:read", "deals:read", "dm:read", "proofs:read", "vault:read", "umbra:read"],
-  },
 } as const;
 
 const expiryOptions = [
@@ -269,7 +265,7 @@ export default function McpTokenPage() {
             Generate an MCP token.
           </h1>
           <p className="mt-6 max-w-3xl text-lg text-text-muted">
-            Sign once with your Solana wallet and copy the wallet-bound token into your MCP client.
+            Sign once with your Solana wallet and copy the full trade-agent token into your MCP client.
           </p>
         </div>
 
@@ -282,7 +278,7 @@ export default function McpTokenPage() {
               <div>
                 <h2 className="text-2xl font-semibold text-white">Hosted MCP Access Token</h2>
                 <p className="mt-2 text-sm text-text-muted">
-                  One wallet signature issues a valid token for the hosted AIR OTC MCP server.
+                  One wallet signature issues a valid hosted AIR OTC MCP token for all trade-agent tools.
                 </p>
               </div>
             </div>

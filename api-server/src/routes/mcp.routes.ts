@@ -4,9 +4,7 @@ import {
     buildMcpTokenRequestMessage,
     issueMcpToken,
     MCP_FULL_AGENT_SCOPES,
-    MCP_READ_ONLY_SCOPES,
     mcpTokenSigningSecret,
-    normalizeMcpScopes,
     verifyAnyMcpToken,
     verifyMcpTokenRequestSignature,
 } from '../services/mcpToken';
@@ -58,7 +56,6 @@ router.get('/config', (_req: Request, res: Response) => {
             defaultExpiresInSeconds: 7 * 24 * 60 * 60,
             scopePresets: {
                 trade: MCP_FULL_AGENT_SCOPES,
-                readonly: MCP_READ_ONLY_SCOPES,
             },
         },
     });
@@ -66,7 +63,7 @@ router.get('/config', (_req: Request, res: Response) => {
 
 router.post('/message', (req: Request, res: Response) => {
     const publicKey = String(req.body?.publicKey || '').trim();
-    const scopes = normalizeMcpScopes(req.body?.scopes);
+    const scopes = MCP_FULL_AGENT_SCOPES;
     const expiresInSeconds = clampExpiry(req.body?.expiresInSeconds);
     const timestamp = Date.now();
 
@@ -91,7 +88,7 @@ router.post('/token', async (req: Request, res: Response) => {
         const publicKey = String(req.body?.publicKey || '').trim();
         const signature = String(req.body?.signature || '').trim();
         const message = String(req.body?.message || '');
-        const scopes = normalizeMcpScopes(req.body?.scopes);
+        const scopes = MCP_FULL_AGENT_SCOPES;
         const expiresInSeconds = clampExpiry(req.body?.expiresInSeconds);
 
         if (!publicKey || !signature || !message) {
@@ -131,17 +128,12 @@ router.post('/verify', async (req: Request, res: Response) => {
     if (!requireInternalMcpAuth(req, res)) return;
     try {
         const token = String(req.body?.token || '').trim();
-        const wallet = typeof req.body?.wallet === 'string' ? req.body.wallet.trim() : '';
         if (!token) {
             res.status(400).json({ success: false, error: 'token is required' });
             return;
         }
 
         const verified = await verifyAnyMcpToken(token);
-        if (wallet && verified.wallet !== wallet) {
-            res.status(403).json({ success: false, error: 'mcp_wallet_mismatch' });
-            return;
-        }
 
         res.json({
             success: true,

@@ -64,6 +64,7 @@ type TokenRule = {
 type TokenAuth = {
   scopes: Set<Scope>;
   wallets: Set<string> | null;
+  defaultWallet?: string;
   tokenFormat?: "airotc_sk" | "mcp_v1" | "static";
 };
 
@@ -163,12 +164,6 @@ const config = {
     process.env.AIR_OTC_MCP_TOKEN ||
     "",
   mcpDelegationToken: process.env.AIR_OTC_MCP_DELEGATION_TOKEN || "",
-  allowedWallets: new Set(
-    (process.env.AIR_OTC_MCP_ALLOWED_WALLETS || "")
-      .split(",")
-      .map((wallet) => wallet.trim())
-      .filter(Boolean)
-  ),
   scopes: defaultScopes,
   tokenRules: parseTokenRules(defaultScopes),
   walletPrivateKey: process.env.AIR_OTC_WALLET_PRIVATE_KEY || "",
@@ -250,7 +245,7 @@ function verifyDynamicMcpToken(authToken?: string): TokenAuth | null {
   if (!isValidSolanaWallet(payload.sub)) return null;
   const scopes = parseScopes(payload.scopes, new Set());
   if (scopes.size === 0) return null;
-  return { scopes, wallets: new Set([payload.sub]), tokenFormat: "mcp_v1" };
+  return { scopes: new Set(defaultFullScopes), wallets: null, defaultWallet: payload.sub, tokenFormat: "mcp_v1" };
 }
 
 async function verifyOpaqueMcpToken(authToken?: string): Promise<TokenAuth | null> {
@@ -274,11 +269,10 @@ async function verifyOpaqueMcpToken(authToken?: string): Promise<TokenAuth | nul
     throw new Error(`mcp_auth_failed:${reason}:fingerprint=${tokenFingerprint(token)}`);
   }
   const data = parsed.data || parsed;
-  const scopes = parseScopes(data.scopes, new Set());
-  if (scopes.size === 0 || typeof data.wallet !== "string" || !isValidSolanaWallet(data.wallet)) {
+  if (typeof data.wallet !== "string" || !isValidSolanaWallet(data.wallet)) {
     throw new Error("mcp_auth_failed:malformed_verification_response");
   }
-  return { scopes, wallets: new Set([data.wallet]), tokenFormat: "airotc_sk" };
+  return { scopes: new Set(defaultFullScopes), wallets: null, defaultWallet: data.wallet, tokenFormat: "airotc_sk" };
 }
 
 async function assertDelegatedWalletAllowed(requestedWallet?: string, authToken?: string): Promise<void> {
@@ -286,11 +280,14 @@ async function assertDelegatedWalletAllowed(requestedWallet?: string, authToken?
     throw new Error("mcp_wallet_invalid");
   }
   const auth = await resolveTokenAuth(authToken);
+  if (auth?.tokenFormat === "airotc_sk" || auth?.tokenFormat === "mcp_v1") {
+    return;
+  }
   if (auth?.wallets?.has(requestedWallet)) {
     return;
   }
-  if (!config.allowedWallets.has(requestedWallet)) {
-    throw new Error(`mcp_wallet_not_allowlisted:${requestedWallet}`);
+  if (auth?.wallets && !auth.wallets.has(requestedWallet)) {
+    throw new Error(`mcp_token_wallet_mismatch:${requestedWallet}`);
   }
   if (!config.mcpDelegationToken) {
     throw new Error("mcp_delegation_token_not_configured");
@@ -300,15 +297,14 @@ async function assertDelegatedWalletAllowed(requestedWallet?: string, authToken?
 async function assertConfiguredWallet(requestedWallet?: string, authToken?: string): Promise<void> {
   if (!requestedWallet) return;
   const auth = await resolveTokenAuth(authToken);
-  if (config.allowedWallets.size > 0) {
-    await assertDelegatedWalletAllowed(requestedWallet, authToken);
-    if (auth?.wallets && !auth.wallets.has(requestedWallet)) {
-      throw new Error(`mcp_token_wallet_mismatch:${requestedWallet}`);
-    }
+  if (auth?.tokenFormat === "airotc_sk" || auth?.tokenFormat === "mcp_v1") {
     return;
   }
   if (auth?.wallets?.has(requestedWallet)) {
     return;
+  }
+  if (auth?.wallets && !auth.wallets.has(requestedWallet)) {
+    throw new Error(`mcp_token_wallet_mismatch:${requestedWallet}`);
   }
   const configuredWallet = walletAuth();
   if (configuredWallet && requestedWallet && requestedWallet !== configuredWallet.publicKey) {
@@ -363,6 +359,7 @@ async function requireScope(args: { authToken?: string }, scope: Scope): Promise
 }
 
 function singleWalletFromAuth(auth: TokenAuth): string | undefined {
+  if (auth.defaultWallet) return auth.defaultWallet;
   if (!auth.wallets || auth.wallets.size !== 1) return undefined;
   return Array.from(auth.wallets)[0];
 }
@@ -854,6 +851,139 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_mark_dm_conversation_read",
+    title: "Mark DM Conversation Read",
+    description: "Mark all direct messages from one peer wallet as read. Requires dm:write scope.",
+    scope: "dm:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        peerWallet: { type: "string" },
+      },
+      ["peerWallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "dm:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/dm/read-all/${encodeURIComponent(args.peerWallet)}`,
+          { method: "POST", body: JSON.stringify({}) },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_delete_dm",
+    title: "Delete DM",
+    description: "Delete a direct message sent by the calling wallet within the API delete window. Requires dm:write scope.",
+    scope: "dm:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        messageId: { type: "string" },
+      },
+      ["messageId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "dm:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/dm/${encodeURIComponent(args.messageId)}`,
+          { method: "DELETE" },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_publish_dm_encryption_key",
+    title: "Publish DM Encryption Key",
+    description: "Publish the calling agent's X25519/base58 public key so peers can send encrypted DMs. Requires dm:write scope.",
+    scope: "dm:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        encryptionPublicKey: { type: "string", minLength: 32, maxLength: 50 },
+      },
+      ["encryptionPublicKey"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "dm:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/dm/keys/publish",
+          {
+            method: "POST",
+            body: JSON.stringify({ encryptionPublicKey: args.encryptionPublicKey }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_get_dm_encryption_key",
+    title: "Get DM Encryption Key",
+    description: "Fetch a peer agent's published encryption public key before sending encrypted DMs. Requires dm:read scope.",
+    scope: "dm:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        targetWallet: { type: "string" },
+      },
+      ["targetWallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "dm:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/dm/keys/${encodeURIComponent(args.targetWallet)}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_get_dm_file_info",
+    title: "Get DM File Info",
+    description: "Read metadata for a DM file attachment without downloading file contents. Requires dm:read scope.",
+    scope: "dm:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        attachmentId: { type: "string" },
+      },
+      ["attachmentId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "dm:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/dm/files/${encodeURIComponent(args.attachmentId)}/info`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_get_deal_status",
     title: "Get Deal Status",
     description: "Read a deal/ticket status.",
@@ -1251,7 +1381,7 @@ async function startHttp(): Promise<void> {
       transports: ["stdio", "http"],
       delegatedWallets: {
         enabled: Boolean(config.mcpDelegationToken),
-        allowlisted: config.allowedWallets.size,
+        mode: "token_delegated",
         maxActiveSeats: Number(process.env.AIR_OTC_MCP_MAX_ACTIVE_SEATS || 0) || null,
       },
       auth: {

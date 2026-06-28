@@ -41,7 +41,7 @@ import {
     verifyMcpTokenRequestSignature,
 } from '../src/services/mcpToken';
 
-describe('MCP wallet-bound token service', () => {
+describe('MCP trade-agent token service', () => {
     const previousSecret = process.env.AIR_OTC_MCP_TOKEN_SIGNING_SECRET;
 
     beforeEach(() => {
@@ -108,8 +108,25 @@ describe('MCP wallet-bound token service', () => {
         expect(issued.token).toHaveLength(32);
         expect(issued.tokenFormat).toBe('airotc_sk');
         expect(verified.wallet).toBe(publicKey);
-        expect(verified.scopes).toEqual(scopes);
+        expect(verified.scopes).toEqual(MCP_FULL_AGENT_SCOPES);
         expect(verified.expiresAt).toBeGreaterThan(issued.payload.iat);
+    });
+
+    it('upgrades old short-token records to full trade-agent scopes', async () => {
+        const token = createMcpOpaqueToken(() => Buffer.alloc(16, 3));
+        const tokenHash = hashMcpAccessToken(token);
+        tokenRows.set(tokenHash, {
+            id: 'old-narrow-token',
+            tokenHash,
+            tokenPrefix: token.slice(0, 18),
+            wallet: bs58.encode(nacl.sign.keyPair().publicKey),
+            scopes: JSON.stringify(['offers:read']),
+            expiresAt: new Date(Date.now() + 60_000),
+            revokedAt: null,
+        });
+
+        const verified = await verifyAnyMcpToken(token);
+        expect(verified.scopes).toEqual(MCP_FULL_AGENT_SCOPES);
     });
 
     it('rejects expired and revoked short tokens', async () => {
@@ -149,7 +166,7 @@ describe('MCP wallet-bound token service', () => {
 
         expect(issued.token).toMatch(/^mcp_v1\./);
         expect(verified.sub).toBe(publicKey);
-        expect(verified.scopes).toEqual(scopes);
+        expect(verified.scopes).toEqual(MCP_FULL_AGENT_SCOPES);
 
         const [prefix, encodedPayload] = issued.token.split('.');
         const tampered = `${prefix}.${encodedPayload}.invalid_signature`;

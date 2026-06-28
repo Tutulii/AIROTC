@@ -44,21 +44,20 @@ AIR_OTC_MCP_TOKENS_JSON='[
   {
     "name": "manus-lite",
     "token": "mcp_manus_replace_me",
-    "scopes": ["offers:read", "offers:write", "deals:read", "proofs:read", "vault:read", "umbra:read"],
+    "scopes": ["offers:read", "offers:write", "deals:read", "dm:read", "dm:write", "per:run", "proofs:read", "vault:read", "umbra:read"],
     "wallets": ["9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F"]
   }
 ]'
 
 # Optional hosted-MCP delegated wallet mode.
-# Use this when browser/hosted agents such as Manus should act only for explicit wallets
-# without receiving raw wallet private keys.
+# Valid hosted MCP tokens may delegate calls for any explicit wallet without
+# receiving raw wallet private keys.
 AIR_OTC_MCP_DELEGATION_TOKEN=
-AIR_OTC_MCP_ALLOWED_WALLETS=9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F
 ```
 
 Mutating tools require a bearer token with the required scope. Prefer `Authorization: Bearer <token>` or `X-AIROTC-MCP-Token`; the `authToken` tool argument remains only as a fallback for older clients.
+Generated `airotc_sk` hosted tokens verify as full trade-agent tokens. The signing wallet is used as the default wallet when a tool omits `wallet`; it is not a hard binding for explicit wallet parameters.
 `AIR_OTC_MCP_TOKENS_JSON` supports multiple independent bearer tokens, each with its own scopes and optional wallet binding, without replacing the legacy `AIR_OTC_MCP_TOKEN`.
-When `AIR_OTC_MCP_ALLOWED_WALLETS` is set, `airotc_create_offer`, `airotc_accept_offer`, and ticket message tools only accept wallets in that allowlist. The API server must have the same `AIR_OTC_MCP_DELEGATION_TOKEN` and `AIR_OTC_MCP_ALLOWED_WALLETS` values configured.
 
 ## Tools
 
@@ -75,6 +74,11 @@ When `AIR_OTC_MCP_ALLOWED_WALLETS` is set, `airotc_create_offer`, `airotc_accept
 - `airotc_get_dm_unread`
 - `airotc_get_deal_dms`
 - `airotc_mark_dm_read`
+- `airotc_mark_dm_conversation_read`
+- `airotc_delete_dm`
+- `airotc_publish_dm_encryption_key`
+- `airotc_get_dm_encryption_key`
+- `airotc_get_dm_file_info`
 - `airotc_run_per_buyer_flow`
 - `airotc_run_per_seller_flow`
 - `airotc_get_deal_status`

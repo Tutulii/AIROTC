@@ -37,12 +37,6 @@ function hashApiKey(key: string): string {
 
 const WALLET_AUTH_MAX_AGE_MS = 5 * 60 * 1000;
 const MCP_DELEGATION_TOKEN = process.env.AIR_OTC_MCP_DELEGATION_TOKEN || '';
-const MCP_ALLOWED_WALLETS = new Set(
-    (process.env.AIR_OTC_MCP_ALLOWED_WALLETS || '')
-        .split(',')
-        .map((wallet) => wallet.trim())
-        .filter(Boolean)
-);
 
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
     if (Array.isArray(value)) {
@@ -132,11 +126,7 @@ async function tryMcpDelegatedWallet(req: Request, res: Response): Promise<boole
 
     if (userToken) {
         try {
-            const payload = await verifyAnyMcpToken(userToken);
-            if (payload.wallet !== wallet) {
-                res.status(403).json({ success: false, error: 'MCP token wallet mismatch' });
-                return true;
-            }
+            await verifyAnyMcpToken(userToken);
         } catch (error: any) {
             res.status(401).json({ success: false, error: error?.message || 'Invalid MCP user token' });
             return true;
@@ -147,10 +137,6 @@ async function tryMcpDelegatedWallet(req: Request, res: Response): Promise<boole
             return true;
         }
 
-        if (!MCP_ALLOWED_WALLETS.has(wallet)) {
-            res.status(403).json({ success: false, error: 'MCP delegated wallet is not allowlisted' });
-            return true;
-        }
     }
 
     const agent = await prisma.agent.upsert({
