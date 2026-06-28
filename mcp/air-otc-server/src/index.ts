@@ -362,6 +362,26 @@ async function requireScope(args: { authToken?: string }, scope: Scope): Promise
   return auth;
 }
 
+function singleWalletFromAuth(auth: TokenAuth): string | undefined {
+  if (!auth.wallets || auth.wallets.size !== 1) return undefined;
+  return Array.from(auth.wallets)[0];
+}
+
+async function delegatedWalletFromArgs(
+  args: { wallet?: string; authToken?: string },
+  auth: TokenAuth
+): Promise<string> {
+  const requestedWallet = typeof args.wallet === "string" ? args.wallet.trim() : "";
+  const wallet = requestedWallet || singleWalletFromAuth(auth);
+
+  if (!wallet) {
+    throw new Error("mcp_wallet_required");
+  }
+
+  await assertConfiguredWallet(wallet, args.authToken);
+  return wallet;
+}
+
 function textResult(data: unknown) {
   return {
     content: [
@@ -506,13 +526,13 @@ const tools: ToolDefinition[] = [
       ["wallet", "asset", "mode", "amount", "price", "collateral"]
     ),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson("/v1/offers", {
           method: "POST",
           body: JSON.stringify({
-            publicKey: args.wallet,
+            publicKey: wallet,
             asset: args.asset,
             mode: args.mode,
             amount: args.amount,
@@ -523,7 +543,7 @@ const tools: ToolDefinition[] = [
             rewardWallet: args.rewardWallet,
             fundingWallet: args.fundingWallet,
           }),
-        }, config.apiUrl, { delegatedWallet: args.wallet, authToken: args.authToken })
+        }, config.apiUrl, { delegatedWallet: wallet, authToken: args.authToken })
       );
     },
   },
@@ -544,18 +564,18 @@ const tools: ToolDefinition[] = [
       ["offerId", "wallet"]
     ),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(`/v1/offers/${encodeURIComponent(args.offerId)}/accept`, {
           method: "POST",
           body: JSON.stringify({
-            wallet: args.wallet,
+            wallet,
             settlementWallet: args.settlementWallet,
             rewardWallet: args.rewardWallet,
             fundingWallet: args.fundingWallet,
           }),
-        }, config.apiUrl, { delegatedWallet: args.wallet, authToken: args.authToken })
+        }, config.apiUrl, { delegatedWallet: wallet, authToken: args.authToken })
       );
     },
   },
@@ -575,8 +595,8 @@ const tools: ToolDefinition[] = [
       ["wallet"]
     ),
     handler: async (args) => {
-      await requireScope(args, "deals:read");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       const query = new URLSearchParams();
       if (args.status) query.set("status", args.status);
       if (args.activeOnly !== undefined) query.set("activeOnly", String(args.activeOnly));
@@ -585,7 +605,7 @@ const tools: ToolDefinition[] = [
           `/v1/tickets${query.size ? `?${query}` : ""}`,
           {},
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -604,14 +624,14 @@ const tools: ToolDefinition[] = [
       ["ticketId", "wallet"]
     ),
     handler: async (args) => {
-      await requireScope(args, "deals:read");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(
           `/v1/tickets/${encodeURIComponent(args.ticketId)}/messages`,
           {},
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -636,8 +656,8 @@ const tools: ToolDefinition[] = [
       ["ticketId", "wallet", "content"]
     ),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(
           `/v1/tickets/${encodeURIComponent(args.ticketId)}/messages`,
@@ -646,7 +666,7 @@ const tools: ToolDefinition[] = [
             body: JSON.stringify({ content: args.content }),
           },
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -673,11 +693,11 @@ const tools: ToolDefinition[] = [
         metadata: { type: "object", additionalProperties: true },
         expiresAt: { type: "string", description: "Optional ISO timestamp for expiring sensitive content." },
       },
-      ["wallet", "toWallet", "content"]
+      ["toWallet", "content"]
     ),
     handler: async (args) => {
-      await requireScope(args, "dm:write");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "dm:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(
           "/v1/dm/send",
@@ -694,7 +714,7 @@ const tools: ToolDefinition[] = [
             }),
           },
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -715,8 +735,8 @@ const tools: ToolDefinition[] = [
       ["wallet"]
     ),
     handler: async (args) => {
-      await requireScope(args, "dm:read");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "dm:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       const query = new URLSearchParams();
       if (args.page !== undefined) query.set("page", String(args.page));
       if (args.limit !== undefined) query.set("limit", String(args.limit));
@@ -726,7 +746,7 @@ const tools: ToolDefinition[] = [
           `/v1/dm/inbox${query.size ? `?${query}` : ""}`,
           {},
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -747,8 +767,8 @@ const tools: ToolDefinition[] = [
       ["wallet", "peerWallet"]
     ),
     handler: async (args) => {
-      await requireScope(args, "dm:read");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "dm:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       const query = new URLSearchParams();
       if (args.page !== undefined) query.set("page", String(args.page));
       if (args.limit !== undefined) query.set("limit", String(args.limit));
@@ -757,7 +777,7 @@ const tools: ToolDefinition[] = [
           `/v1/dm/conversation/${encodeURIComponent(args.peerWallet)}${query.size ? `?${query}` : ""}`,
           {},
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -769,14 +789,14 @@ const tools: ToolDefinition[] = [
     scope: "dm:read",
     inputSchema: objectSchema({ ...authSchema, wallet: { type: "string" } }, ["wallet"]),
     handler: async (args) => {
-      await requireScope(args, "dm:read");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "dm:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(
           "/v1/dm/unread",
           {},
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -795,14 +815,14 @@ const tools: ToolDefinition[] = [
       ["wallet", "ticketId"]
     ),
     handler: async (args) => {
-      await requireScope(args, "dm:read");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "dm:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(
           `/v1/dm/deal/${encodeURIComponent(args.ticketId)}`,
           {},
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -821,14 +841,14 @@ const tools: ToolDefinition[] = [
       ["wallet", "messageId"]
     ),
     handler: async (args) => {
-      await requireScope(args, "dm:write");
-      await assertConfiguredWallet(args.wallet, args.authToken);
+      const auth = await requireScope(args, "dm:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(
           `/v1/dm/read/${encodeURIComponent(args.messageId)}`,
           { method: "POST", body: JSON.stringify({}) },
           config.apiUrl,
-          { delegatedWallet: args.wallet, authToken: args.authToken }
+          { delegatedWallet: wallet, authToken: args.authToken }
         )
       );
     },
@@ -1258,6 +1278,7 @@ export const __test = {
   extractHttpAuthToken,
   mergeRequestAuth,
   parseScopes,
+  delegatedWalletFromArgs,
 };
 
 if (process.env.AIR_OTC_MCP_NO_AUTOSTART !== "1") {

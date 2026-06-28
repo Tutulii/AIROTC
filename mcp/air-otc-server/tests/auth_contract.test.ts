@@ -55,6 +55,26 @@ assert.equal(
   "HTTP header token must override truncated body authToken"
 );
 
+const sendDmTool = __test.tools.find((candidate: any) => candidate.name === "airotc_send_dm");
+assert.deepEqual(
+  sendDmTool.inputSchema.required,
+  ["toWallet", "content"],
+  "wallet-bound MCP tokens must be able to infer the sender wallet for send_dm"
+);
+
+assert.equal(
+  await __test.delegatedWalletFromArgs(
+    {},
+    {
+      scopes: new Set(["dm:write"]),
+      wallets: new Set(["EdUWKpttdUtWWiUpWzDasouXPvZzpuMpjytteHEzuk9Y"]),
+      tokenFormat: "airotc_sk",
+    }
+  ),
+  "EdUWKpttdUtWWiUpWzDasouXPvZzpuMpjytteHEzuk9Y",
+  "wallet-bound tokens should infer the delegated wallet when wallet arg is omitted"
+);
+
 const fullScopes = __test.parseScopes(
   "offers:read,offers:write,deals:read,dm:read,dm:write,per:run,proofs:read,vault:read,umbra:read",
   new Set()
