@@ -21,11 +21,13 @@ export class RpcManager {
   private readonly COOLDOWN_MS = 30_000;
 
   constructor() {
-    const primary = process.env.SOLANA_RPC_PRIMARY || process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
-    const backup1 = process.env.SOLANA_RPC_BACKUP_1 || "https://devnet.genesysgo.net/";
-    const backup2 = process.env.SOLANA_RPC_BACKUP_2 || "https://rpc.ankr.com/solana_devnet";
+    const primary = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC_PRIMARY || "https://api.devnet.solana.com";
+    const backups = [
+      process.env.SOLANA_RPC_BACKUP_1,
+      process.env.SOLANA_RPC_BACKUP_2,
+    ].filter((endpoint): endpoint is string => Boolean(endpoint?.trim()));
 
-    this.endpoints = [primary, backup1, backup2];
+    this.endpoints = [primary, ...backups];
     this.failureRecords = this.endpoints.map(() => ({ count: 0, windowStart: Date.now(), lastFailureTime: 0 }));
   }
 

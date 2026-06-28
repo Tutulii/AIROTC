@@ -42,6 +42,7 @@ describe("Solana startup connection failover", () => {
     connectionState.blockHeightEndpoints = [];
     process.env = {
       ...originalEnv,
+      SOLANA_RPC_URL: "",
       SOLANA_RPC_PRIMARY: "https://primary.example",
       SOLANA_RPC_BACKUP_1: "https://backup-one.example",
       SOLANA_RPC_BACKUP_2: "https://backup-two.example",
@@ -68,5 +69,26 @@ describe("Solana startup connection failover", () => {
       "https://backup-one.example",
     ]);
     expect(connectionState.blockHeightEndpoints).toEqual(["https://backup-one.example"]);
+  });
+
+  it("uses only the configured SOLANA_RPC_URL when backup RPC vars are absent", async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    delete process.env.SOLANA_RPC_URL;
+    delete process.env.SOLANA_RPC_PRIMARY;
+    delete process.env.SOLANA_RPC_BACKUP_1;
+    delete process.env.SOLANA_RPC_BACKUP_2;
+    process.env.SOLANA_RPC_URL = "https://only-rpc.example";
+
+    const { createVerifiedConnection } = await import("../src/solana/connection");
+
+    const result = await createVerifiedConnection();
+
+    expect(result.slot).toBe(123);
+    expect(result.blockHeight).toBe(456);
+    expect(connectionState.createdEndpoints).toEqual(["https://only-rpc.example"]);
+    expect(connectionState.slotEndpoints).toEqual(["https://only-rpc.example"]);
+    expect(connectionState.blockHeightEndpoints).toEqual(["https://only-rpc.example"]);
   });
 });
