@@ -1,16 +1,33 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { issueMcpToken, requestMcpTokenMessage, type McpTokenIssueResponse } from "@/lib/api";
+
+type SolanaPublicKeyLike = string | {
+  toBase58?: () => string;
+  toString?: () => string;
+};
+
+type SolanaConnectResponse =
+  | { publicKey?: SolanaPublicKeyLike }
+  | SolanaPublicKeyLike
+  | null
+  | undefined
+  | void;
+
+type SolanaSignMessageResponse =
+  | { signature?: Uint8Array | number[] }
+  | Uint8Array
+  | number[];
 
 type SolanaProvider = {
   isPhantom?: boolean;
   isSolflare?: boolean;
   isBitKeep?: boolean;
   isBitget?: boolean;
-  publicKey?: { toString(): string };
-  connect(options?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: { toString(): string } }>;
-  signMessage(message: Uint8Array, display?: string): Promise<{ signature: Uint8Array } | Uint8Array>;
+  publicKey?: SolanaPublicKeyLike;
+  connect(options?: { onlyIfTrusted?: boolean }): Promise<SolanaConnectResponse>;
+  signMessage?: (message: Uint8Array, display?: string) => Promise<SolanaSignMessageResponse>;
 };
 
 declare global {
@@ -84,6 +101,53 @@ function shortWallet(wallet: string): string {
   return wallet.length > 12 ? `${wallet.slice(0, 4)}...${wallet.slice(-4)}` : wallet;
 }
 
+function publicKeyToString(publicKey: SolanaPublicKeyLike | null | undefined): string | null {
+  if (!publicKey) return null;
+  if (typeof publicKey === "string") return publicKey.trim() || null;
+
+  if (typeof publicKey.toBase58 === "function") {
+    const value = publicKey.toBase58().trim();
+    if (value) return value;
+  }
+
+  if (typeof publicKey.toString === "function") {
+    const value = publicKey.toString().trim();
+    if (value && value !== "[object Object]") return value;
+  }
+
+  return null;
+}
+
+function connectedPublicKey(provider: SolanaProvider, response: SolanaConnectResponse): string | null {
+  const candidates: Array<SolanaPublicKeyLike | null | undefined> = [];
+
+  if (response && typeof response === "object" && "publicKey" in response) {
+    candidates.push(response.publicKey);
+  }
+  if (response && (typeof response === "string" || typeof response === "object")) {
+    candidates.push(response as SolanaPublicKeyLike);
+  }
+  candidates.push(provider.publicKey);
+
+  for (const candidate of candidates) {
+    const value = publicKeyToString(candidate);
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function signatureToBytes(signed: SolanaSignMessageResponse): Uint8Array {
+  const signature = signed instanceof Uint8Array || Array.isArray(signed)
+    ? signed
+    : signed.signature;
+
+  if (signature instanceof Uint8Array) return signature;
+  if (Array.isArray(signature)) return Uint8Array.from(signature);
+
+  throw new Error("Wallet did not return a valid message signature.");
+}
+
 function detectedProviders(): Array<{ id: string; label: string; provider: SolanaProvider }> {
   if (typeof window === "undefined") return [];
   const candidates: Array<{ id: string; label: string; provider?: SolanaProvider }> = [
@@ -103,7 +167,7 @@ function detectedProviders(): Array<{ id: string; label: string; provider: Solan
 }
 
 export default function McpTokenPage() {
-  const providers = useMemo(() => detectedProviders(), []);
+  const [providers, setProviders] = useState(() => detectedProviders());
   const [providerId, setProviderId] = useState(providers[0]?.id || "");
   const [wallet, setWallet] = useState("");
   const [scopePreset, setScopePreset] = useState<keyof typeof scopePresets>("trade");
@@ -116,12 +180,43 @@ export default function McpTokenPage() {
   const selectedProvider = providers.find((provider) => provider.id === providerId)?.provider;
   const scopes = scopePresets[scopePreset].scopes;
 
+  useEffect(() => {
+    const refreshProviders = () => setProviders(detectedProviders());
+    const timers = [100, 500, 1000, 2000].map((delay) => window.setTimeout(refreshProviders, delay));
+    window.addEventListener("load", refreshProviders);
+    window.addEventListener("wallet-standard:register-wallet", refreshProviders);
+    refreshProviders();
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      window.removeEventListener("load", refreshProviders);
+      window.removeEventListener("wallet-standard:register-wallet", refreshProviders);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!providers.length) {
+      setProviderId("");
+      setWallet("");
+      return;
+    }
+
+    if (!providerId || !providers.some((provider) => provider.id === providerId)) {
+      setProviderId(providers[0].id);
+      setWallet("");
+      setIssued(null);
+    }
+  }, [providerId, providers]);
+
   async function connectWallet(): Promise<{ provider: SolanaProvider; publicKey: string }> {
     if (!selectedProvider) {
       throw new Error("Open this page in a browser with Phantom, Solflare, or Bitget installed.");
     }
     const response = await selectedProvider.connect();
-    const publicKey = response.publicKey.toString();
+    const publicKey = connectedPublicKey(selectedProvider, response);
+    if (!publicKey) {
+      throw new Error("Wallet connected, but did not expose a public key. Unlock the wallet and try again.");
+    }
     setWallet(publicKey);
     return { provider: selectedProvider, publicKey };
   }
@@ -140,8 +235,11 @@ export default function McpTokenPage() {
         expiresInSeconds,
       });
       const encoded = new TextEncoder().encode(tokenMessage.message);
+      if (!provider.signMessage) {
+        throw new Error("Selected wallet does not support message signing.");
+      }
       const signed = await provider.signMessage(encoded, "utf8");
-      const signatureBytes = signed instanceof Uint8Array ? signed : signed.signature;
+      const signatureBytes = signatureToBytes(signed);
       const token = await issueMcpToken({
         publicKey,
         message: tokenMessage.message,
