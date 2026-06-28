@@ -155,7 +155,7 @@ async function runTests() {
 
   const r14 = await dealPhaseManager.handleAction("RELEASE_FUNDS", "T_FLOW", "Buyer");
   assert("Release succeeds", r14.success);
-  assert("Phase → completed", dealPhaseManager.getPhase("T_FLOW") === "completed");
+  assert("Phase → awaiting_release", dealPhaseManager.getPhase("T_FLOW") === "awaiting_release");
 
   // ==========================================
   // TEST 4: Permission & Phase Guards

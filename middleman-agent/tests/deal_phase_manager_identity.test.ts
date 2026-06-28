@@ -105,7 +105,8 @@ describe("dealPhaseManager identity authorization", () => {
 
     expect(result.success).toBe(true);
     expect(result.on_chain_action).toBe("release_funds");
-    expect(dealPhaseManager.getPhase(ticketId)).toBe("completed");
+    expect(result.new_phase).toBe("awaiting_release");
+    expect(dealPhaseManager.getPhase(ticketId)).toBe("awaiting_release");
   });
 
   it("rejects a seller agent id attempting buyer-only release", async () => {

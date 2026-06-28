@@ -200,6 +200,45 @@ function instructionHasArg(program: Program, instructionName: string, argName: s
   return (instruction.args ?? []).some((arg: any) => normalizeIdlName(arg.name) === target);
 }
 
+function createAtaIdempotentIx(
+  payer: PublicKey,
+  ata: PublicKey,
+  owner: PublicKey,
+  mint: PublicKey,
+): TransactionInstruction {
+  return createAssociatedTokenAccountIdempotentInstruction(
+    payer,
+    ata,
+    owner,
+    mint,
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  );
+}
+
+function buildTokenEscrowAccounts(ctx: DealContext, mint: PublicKey) {
+  return {
+    dealAta: getAssociatedTokenAddressSync(mint, ctx.dealPda, true),
+    buyerAta: getAssociatedTokenAddressSync(mint, ctx.buyer, true),
+    sellerAta: getAssociatedTokenAddressSync(mint, ctx.seller, true),
+    feeAta: getAssociatedTokenAddressSync(mint, ctx.middleman, true),
+  };
+}
+
+function buildReleaseAtaPreInstructions(
+  payer: PublicKey,
+  ctx: DealContext,
+  mint: PublicKey,
+  accounts: ReturnType<typeof buildTokenEscrowAccounts>,
+): TransactionInstruction[] {
+  return [
+    createAtaIdempotentIx(payer, accounts.dealAta, ctx.dealPda, mint),
+    createAtaIdempotentIx(payer, accounts.buyerAta, ctx.buyer, mint),
+    createAtaIdempotentIx(payer, accounts.sellerAta, ctx.seller, mint),
+    createAtaIdempotentIx(payer, accounts.feeAta, ctx.middleman, mint),
+  ];
+}
+
 // ==========================================
 // WALLET RESOLUTION REMOVED
 // Identities must be fetched rigorously via DB Agent.id
@@ -654,30 +693,28 @@ export async function executeReleaseFunds(ticketId: string): Promise<ExecutionRe
 
     const tx = await withRetry(
       async () => {
-        const { program } = getAnchorProgram();
+        const { program, wallet } = getAnchorProgram();
         const preInstructions = [
           await getPriorityFeeIx((program.provider as any).connection),
-          ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 })
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })
         ];
 
         const supportsTokenEscrowAbi = instructionHasAccount(program, "release_funds", "deal_ata");
         let methodBuilder;
         if (supportsTokenEscrowAbi) {
           const mint = ctx.tokenMint || NATIVE_MINT;
-          const dealAta = getAssociatedTokenAddressSync(mint, ctx.dealPda, true);
-          const buyerAta = getAssociatedTokenAddressSync(mint, ctx.buyer, true);
-          const sellerAta = getAssociatedTokenAddressSync(mint, ctx.seller, true);
-          const feeAta = getAssociatedTokenAddressSync(mint, ctx.middleman, true);
+          const tokenAccounts = buildTokenEscrowAccounts(ctx, mint);
+          preInstructions.push(...buildReleaseAtaPreInstructions(wallet.publicKey, ctx, mint, tokenAccounts));
           methodBuilder = (program.methods as any).releaseFunds().accounts({
             deal: ctx.dealPda,
             middleman: ctx.middleman,
             buyer: ctx.buyer,
             seller: ctx.seller,
             feeReceiver: ctx.middleman,
-            dealAta,
-            buyerAta,
-            sellerAta,
-            feeAta,
+            dealAta: tokenAccounts.dealAta,
+            buyerAta: tokenAccounts.buyerAta,
+            sellerAta: tokenAccounts.sellerAta,
+            feeAta: tokenAccounts.feeAta,
             config: ctx.configPda,
             systemProgram: SystemProgram.programId,
             tokenProgram: TOKEN_PROGRAM_ID,
@@ -1295,7 +1332,15 @@ export async function executeReleasePhase(ticketId: string): Promise<ExecutionRe
   }
 
   const closeResult = await executeCloseDeal(ticketId);
-  return closeResult;
+  if (!closeResult.success) {
+    logger.warn("close_after_release_failed", {
+      ticket_id: ticketId,
+      error: closeResult.error,
+      release_tx: releaseResult.tx,
+    });
+  }
+
+  return releaseResult;
 }
 
 /** Backward-compatible entry point */

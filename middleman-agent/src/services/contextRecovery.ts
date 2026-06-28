@@ -17,6 +17,7 @@ import { dealContexts, DealContext } from "./onChainExecutionService";
 import { dealPhaseManager } from "../../core/dealPhaseManager";
 import { watchForDeposits } from "../listeners/depositWatcher";
 import { getConnection } from "../solana/connection";
+import { executeRelease } from "./executionService";
 
 async function healTerminalPhaseStatesFromDealStatus(): Promise<number> {
     const phaseStates = await prisma.dealPhaseState.findMany({
@@ -40,7 +41,6 @@ async function healTerminalPhaseStatesFromDealStatus(): Promise<number> {
         cancelled: "cancelled",
         refunded: "refunded",
         disputed: "disputed",
-        failed: "disputed",
     };
 
     const deals = await prisma.deal.findMany({
@@ -70,6 +70,86 @@ async function healTerminalPhaseStatesFromDealStatus(): Promise<number> {
     }
 
     return healed;
+}
+
+function hasBuyerReleaseAuthorization(deal: ReturnType<typeof dealPhaseManager.listActiveDeals>[number]): boolean {
+    return deal.history.some((step) => (
+        step.action === "RELEASE_FUNDS"
+        && (step.from === "delivery" || step.from === "awaiting_release")
+        && (step.to === "awaiting_release" || step.to === "completed")
+        && step.triggered_by === deal.buyer
+    ));
+}
+
+function hasReleaseTransition(historyJson: string | null): boolean {
+    try {
+        const history = JSON.parse(historyJson || "[]");
+        return Array.isArray(history) && history.some((step: any) => step?.action === "RELEASE_FUNDS");
+    } catch {
+        return false;
+    }
+}
+
+async function recoverPrematureCompletedReleaseStates(): Promise<number> {
+    const recentThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = await prisma.dealPhaseState.findMany({
+        where: {
+            phase: "completed",
+            updatedAt: { gt: recentThreshold },
+            escrowPda: { not: null },
+        },
+        select: {
+            ticketId: true,
+            historyJson: true,
+        },
+    });
+
+    let recovered = 0;
+
+    for (const row of rows) {
+        if (!hasReleaseTransition(row.historyJson)) {
+            continue;
+        }
+
+        const deal = await dealPhaseManager.getDealWithFallback(row.ticketId);
+        if (deal?.phase === "delivery" || deal?.phase === "awaiting_release") {
+            recovered++;
+            logger.warn("premature_completed_release_recovered", {
+                ticket_id: row.ticketId,
+                phase: deal.phase,
+                escrow_pda: deal.escrow_pda,
+            });
+        }
+    }
+
+    return recovered;
+}
+
+function retryAuthorizedReleaseRecoveries(): number {
+    const activeDeals = dealPhaseManager.listActiveDeals();
+    let queued = 0;
+
+    for (const deal of activeDeals) {
+        if (deal.phase !== "delivery" && deal.phase !== "awaiting_release") {
+            continue;
+        }
+
+        if (!hasBuyerReleaseAuthorization(deal)) {
+            continue;
+        }
+
+        queued++;
+        logger.info("authorized_release_recovery_queued", {
+            ticket_id: deal.ticket_id,
+            phase: deal.phase,
+        });
+
+        executeRelease(deal.ticket_id).catch((error: any) => {
+            logger.error("authorized_release_recovery_failed", { ticket_id: deal.ticket_id }, error);
+        });
+    }
+
+    return queued;
 }
 
 /**
@@ -136,7 +216,10 @@ export async function recoverInFlightDeals(): Promise<void> {
         const phaseRecoveredCount = await dealPhaseManager.recoverAllDeals();
         logger.info("phase_state_recovery_finished", { recovered: phaseRecoveredCount });
 
-        // ── STEP 4: Re-activate deposit watchers for deposit-ready deals ──
+        // ── STEP 4: Recover old false-completed release rows if payout is still locked on-chain ──
+        const prematureReleaseRecoveredCount = await recoverPrematureCompletedReleaseStates();
+
+        // ── STEP 5: Re-activate deposit watchers for deposit-ready deals ──
         const activeDeals = dealPhaseManager.listActiveDeals();
         let watcherCount = 0;
 
@@ -176,10 +259,15 @@ export async function recoverInFlightDeals(): Promise<void> {
             }
         }
 
+        // ── STEP 6: Retry buyer-authorized releases that failed after delivery confirmation ──
+        const releaseRecoveryCount = retryAuthorizedReleaseRecoveries();
+
         logger.info("startup_recovery_complete", {
             deal_contexts: contextRecoveredCount,
             phase_states: phaseRecoveredCount,
+            premature_completed_releases: prematureReleaseRecoveredCount,
             deposit_watchers: watcherCount,
+            authorized_release_recoveries: releaseRecoveryCount,
         });
 
     } catch (error) {

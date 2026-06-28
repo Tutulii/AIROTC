@@ -23,7 +23,7 @@ import {
   dealCreatedMessage,
   depositInstructionMessage,
   depositsReceivedMessage,
-  fundsReleasedMessage,
+  releaseQueuedMessage,
   disputeOpenedMessage,
   dealCancelledMessage,
   statusMessage,
@@ -476,13 +476,15 @@ class DealPhaseManager {
       };
     }
 
-    this.transition(deal, "completed", sender, "RELEASE_FUNDS");
-    logger.info("funds_released", { ticket_id: deal.ticket_id, released_by: sender });
+    if (deal.phase !== "awaiting_release") {
+      this.transition(deal, "awaiting_release", sender, "RELEASE_FUNDS");
+    }
+    logger.info("release_authorized", { ticket_id: deal.ticket_id, released_by: sender });
 
     return {
       success: true,
-      response: await fundsReleasedMessage(deal.ticket_id, deal.terms),
-      new_phase: "completed",
+      response: await releaseQueuedMessage(deal.ticket_id, deal.terms),
+      new_phase: "awaiting_release",
       on_chain_action: "release_funds",
     };
   }

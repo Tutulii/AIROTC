@@ -178,6 +178,17 @@ PAYOUTS: Seller receives ${terms.price} (payment) + ${terms.collateral_seller} (
   return generateConversationalResponse(ticket_id, "completed", rawData);
 }
 
+export async function releaseQueuedMessage(
+  ticket_id: string,
+  terms: DealTerms
+): Promise<MiddlemanMessage> {
+  const rawData = `ACTION: Buyer release confirmation accepted.
+SYSTEM: Escrow release transaction is being submitted on-chain now.
+PENDING PAYOUTS: Seller receives ${terms.price} (payment) + ${terms.collateral_seller} (collateral refund). Buyer receives ${terms.collateral_buyer} (collateral refund).
+INSTRUCTION: Do not mark this deal completed until the release_funds transaction confirms.`;
+  return generateConversationalResponse(ticket_id, "awaiting_release", rawData);
+}
+
 export async function disputeOpenedMessage(
   ticket_id: string,
   sender: string
