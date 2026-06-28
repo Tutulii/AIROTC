@@ -89,6 +89,58 @@ describe('PER ticket redaction', () => {
         expect(prismaMock.message.create).not.toHaveBeenCalled();
     });
 
+    it('allows ticket messages after negotiation while delivery/release is still active', async () => {
+        const createdAt = new Date('2026-06-29T00:00:00.000Z');
+        prismaMock.ticket.findUnique.mockResolvedValue({
+            buyer: 'buyer-wallet',
+            seller: 'seller-wallet',
+            status: 'agreed',
+            rollupMode: 'NONE',
+        });
+        prismaMock.message.create.mockResolvedValue({
+            id: 'message-1',
+            ticketId: 'ticket-1',
+            sender: 'buyer-wallet',
+            content: '@middleman release funds',
+            createdAt,
+        });
+
+        const { createMessageService } = await import('../src/services/ticket.service');
+        const message = await createMessageService('ticket-1', 'buyer-wallet', '@middleman release funds');
+
+        expect(message).toEqual({
+            id: 'message-1',
+            ticketId: 'ticket-1',
+            sender: 'buyer-wallet',
+            content: '@middleman release funds',
+            createdAt,
+        });
+        expect(prismaMock.message.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                ticketId: 'ticket-1',
+                sender: 'buyer-wallet',
+                content: '@middleman release funds',
+            }),
+        }));
+    });
+
+    it('blocks ticket messages after the ticket reaches a terminal status', async () => {
+        prismaMock.ticket.findUnique.mockResolvedValue({
+            buyer: 'buyer-wallet',
+            seller: 'seller-wallet',
+            status: 'completed',
+            rollupMode: 'NONE',
+        });
+
+        const { createMessageService } = await import('../src/services/ticket.service');
+
+        await expect(
+            createMessageService('ticket-1', 'buyer-wallet', '@middleman release funds')
+        ).rejects.toThrow('TICKET_NOT_ACTIVE');
+
+        expect(prismaMock.message.create).not.toHaveBeenCalled();
+    });
+
     it('keeps ER matched ticket terms visible', async () => {
         prismaMock.ticket.findUnique.mockResolvedValue({
             id: 'ticket-2',

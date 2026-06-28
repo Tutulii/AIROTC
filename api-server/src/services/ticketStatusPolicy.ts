@@ -1,5 +1,5 @@
 export const SUCCESSFUL_TICKET_STATUSES = ['completed'] as const;
-export const TERMINAL_TICKET_STATUSES = ['completed', 'cancelled', 'disputed'] as const;
+export const TERMINAL_TICKET_STATUSES = ['completed', 'cancelled', 'disputed', 'refunded'] as const;
 export const IN_PROGRESS_TICKET_STATUSES = ['negotiating', 'agreed'] as const;
 
 export function isSuccessfulTicketStatus(status: string): boolean {

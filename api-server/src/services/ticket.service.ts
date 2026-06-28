@@ -3,7 +3,7 @@ import { prisma } from '../lib/prisma';
 import { isUUID, assertParticipant } from '../utils/validators';
 import { getIO } from '../ws/socket';
 import { webhookNewMessage } from './webhook.service';
-import { TERMINAL_TICKET_STATUSES } from './ticketStatusPolicy';
+import { TERMINAL_TICKET_STATUSES, isTerminalTicketStatus } from './ticketStatusPolicy';
 
 function looksLikeSensitivePerTerms(content: string): boolean {
     const normalized = content.toLowerCase();
@@ -291,7 +291,7 @@ export const createMessageService = async (ticketId: string, wallet: string, con
         throw new Error('TICKET_NOT_FOUND');
     }
 
-    if (ticket.status !== 'negotiating') {
+    if (isTerminalTicketStatus(ticket.status)) {
         throw new Error('TICKET_NOT_ACTIVE');
     }
 

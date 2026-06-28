@@ -190,7 +190,7 @@ router.get('/v1/tickets/:id', authenticateSolana, getTicket);
  *     summary: Send a message in a negotiation ticket
  *     description: |
  *       Send a negotiation message within a ticket. Only participants can send messages.
- *       The ticket must be in "negotiating" status. Messages are broadcast via WebSocket in real-time.
+ *       The ticket must be non-terminal. Messages are broadcast via WebSocket in real-time.
  *     security:
  *       - walletAuth: []
  *     parameters:
