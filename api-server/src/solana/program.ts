@@ -7,7 +7,16 @@ import * as path from 'path';
 const EscrowIDL = JSON.parse(fs.readFileSync(path.join(__dirname, 'idl', 'escrow.json'), 'utf-8'));
 
 export const ESCROW_PROGRAM_ID = new PublicKey(process.env.ESCROW_PROGRAM_ID || 'Hp6RbB21KrKQEaKvqAZPLHYYVDFKNJaiRtzE1494dpmx');
-export const CONNECTION = new Connection(process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
+
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
+const SOLANA_WS_URL = process.env.SOLANA_WS_URL?.trim();
+
+export const CONNECTION = new Connection(
+    SOLANA_RPC_URL,
+    SOLANA_WS_URL
+        ? { commitment: 'confirmed', wsEndpoint: SOLANA_WS_URL }
+        : 'confirmed',
+);
 
 let programInstance: Program | null = null;
 
