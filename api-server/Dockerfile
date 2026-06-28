@@ -22,4 +22,4 @@ EXPOSE 3000
 
 # Apply committed migrations first. Fall back to a non-destructive schema sync
 # for legacy Railway databases that were originally bootstrapped with db push.
-CMD ["sh", "-c", "npx prisma migrate deploy || npx prisma db push; npx ts-node src/server.ts"]
+CMD ["sh", "-c", "(npx prisma migrate deploy || npx prisma db push) && npx ts-node src/server.ts"]
