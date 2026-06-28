@@ -225,9 +225,7 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
         payment_locked:
             publicPhase === 'delivery' ||
             publicPhase === 'awaiting_buyer_release_confirmation' ||
-            publicPhase === 'seller_dispute_window' ||
-            publicPhase === 'settled' ||
-            publicPhase === 'completed',
+            publicPhase === 'seller_dispute_window',
         terms: legacyDeal?.terms || null,
         history: legacyDeal?.history?.slice(-5) || [],
     };

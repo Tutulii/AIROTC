@@ -164,11 +164,12 @@ async function readOnChainDealSnapshot(escrowPda: string | null): Promise<OnChai
     const { program } = getAnchorProgram();
     const account = await (program.account as any).deal.fetch(new PublicKey(escrowPda));
     const status = Object.keys(account.status || {})[0];
+    const terminalStatus = status === "completed" || status === "refunded" || status === "cancelled";
     return {
       phase: mapOnChainStatusToPhase(status),
       buyerDeposited: Boolean(account.buyerCollateralLocked),
       sellerDeposited: Boolean(account.sellerCollateralLocked),
-      paymentLocked: Boolean(account.paymentLocked),
+      paymentLocked: terminalStatus ? false : Boolean(account.paymentLocked),
     };
   } catch (error: any) {
     logger.warn("deal_phase_onchain_reconcile_failed", {
