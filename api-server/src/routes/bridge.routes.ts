@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma';
 import { requireInternalBridgeAuth } from '../middleware/internalBridgeAuth';
 import { SUCCESSFUL_TICKET_STATUSES } from '../services/ticketStatusPolicy';
 import { calculateVisibleReputation } from '../utils/reputation';
+import { getIO } from '../ws/socket';
+import { webhooks } from '../services/webhookDelivery';
 
 const router = Router();
 
@@ -40,6 +42,142 @@ function parseTicketStatus(value: unknown): string {
 }
 
 type ReputationOutcome = 'success' | 'cancelled' | 'disputed';
+
+type TicketUpdateMetadata = {
+    phase?: string;
+    fromPhase?: string;
+    source?: string;
+    pipelineStatus?: string;
+    expiresAt?: string;
+    msRemaining?: number;
+    warningThresholdMs?: number;
+};
+
+function parseOptionalString(value: unknown): string | undefined {
+    return isNonEmptyString(value) ? value.trim() : undefined;
+}
+
+function parseOptionalNumber(value: unknown): number | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function emitTicketUpdate(
+    ticket: { id: string; buyer: string; seller: string; status: string },
+    previousStatus: string,
+    metadata: TicketUpdateMetadata,
+): void {
+    const payload = {
+        ticketId: ticket.id,
+        status: ticket.status,
+        previousStatus,
+        phase: metadata.phase ?? ticket.status,
+        fromPhase: metadata.fromPhase ?? previousStatus,
+        source: metadata.source ?? 'bridge',
+        pipelineStatus: metadata.pipelineStatus,
+        expiresAt: metadata.expiresAt,
+        msRemaining: metadata.msRemaining,
+        warningThresholdMs: metadata.warningThresholdMs,
+        buyer: ticket.buyer,
+        seller: ticket.seller,
+        timestamp: new Date().toISOString(),
+    };
+
+    try {
+        const io = getIO();
+        io.to(`ticket:${ticket.id}`).emit('deal_phase_changed', payload);
+        io.to(`ticket:${ticket.id}`).emit('ticket_status_changed', payload);
+        io.to(`agent:${ticket.buyer}`).emit('deal_phase_changed', payload);
+        io.to(`agent:${ticket.seller}`).emit('deal_phase_changed', payload);
+        if (metadata.source === 'deal_expiring') {
+            io.to(`ticket:${ticket.id}`).emit('deal_expiring', payload);
+            io.to(`agent:${ticket.buyer}`).emit('deal_expiring', payload);
+            io.to(`agent:${ticket.seller}`).emit('deal_expiring', payload);
+        }
+    } catch (error: any) {
+        logger.warn('bridge_ws_emit_failed', {
+            ticketId: ticket.id,
+            error: error?.message || 'unknown',
+        });
+    }
+}
+
+function notifyTicketUpdate(
+    ticket: { id: string; buyer: string; seller: string; status: string },
+    previousStatus: string,
+    metadata: TicketUpdateMetadata,
+): void {
+    const phase = metadata.phase ?? ticket.status;
+    const data = {
+        status: ticket.status,
+        previousStatus,
+        phase,
+        fromPhase: metadata.fromPhase ?? previousStatus,
+        source: metadata.source ?? 'bridge',
+        pipelineStatus: metadata.pipelineStatus,
+        expiresAt: metadata.expiresAt,
+        msRemaining: metadata.msRemaining,
+        warningThresholdMs: metadata.warningThresholdMs,
+    };
+
+    if (metadata.source === 'deal_expiring') {
+        webhooks.dealExpiring(ticket.id, ticket.buyer, ticket.seller, data)
+            .catch((error: any) => logger.warn('bridge_expiring_webhook_failed', {
+                ticketId: ticket.id,
+                error: error?.message || 'unknown',
+            }));
+        return;
+    }
+
+    webhooks.phaseChanged(ticket.id, ticket.buyer, ticket.seller, data)
+        .catch((error: any) => logger.warn('bridge_phase_webhook_failed', {
+            ticketId: ticket.id,
+            error: error?.message || 'unknown',
+        }));
+
+    if (phase === 'escrow_created') {
+        webhooks.escrowCreated(ticket.id, ticket.buyer, ticket.seller, data)
+            .catch((error: any) => logger.warn('bridge_escrow_webhook_failed', {
+                ticketId: ticket.id,
+                error: error?.message || 'unknown',
+            }));
+    }
+
+    if (phase === 'delivery' || (data.fromPhase === 'awaiting_deposits' && ticket.status === 'agreed')) {
+        webhooks.depositReceived(ticket.id, ticket.buyer, ticket.seller, {
+            ...data,
+            allDepositsConfirmed: true,
+        }).catch((error: any) => logger.warn('bridge_deposit_webhook_failed', {
+            ticketId: ticket.id,
+            error: error?.message || 'unknown',
+        }));
+    }
+
+    if (phase === 'awaiting_release') {
+        webhooks.deliveryConfirmed(ticket.id, ticket.buyer, ticket.seller, data)
+            .catch((error: any) => logger.warn('bridge_delivery_webhook_failed', {
+                ticketId: ticket.id,
+                error: error?.message || 'unknown',
+            }));
+    }
+
+    if (ticket.status === 'completed' || phase === 'completed' || phase === 'settled') {
+        webhooks.dealCompleted(ticket.id, ticket.buyer, ticket.seller, data)
+            .catch((error: any) => logger.warn('bridge_completed_webhook_failed', {
+                ticketId: ticket.id,
+                error: error?.message || 'unknown',
+            }));
+    }
+
+    if (ticket.status === 'cancelled') {
+        webhooks.dealCancelled(ticket.id, ticket.buyer, ticket.seller, phase)
+            .catch((error: any) => logger.warn('bridge_cancelled_webhook_failed', {
+                ticketId: ticket.id,
+                error: error?.message || 'unknown',
+            }));
+    }
+}
 
 async function updateAgentReputationFromBridge(wallets: string[], outcome: ReputationOutcome): Promise<void> {
     const uniqueWallets = [...new Set(wallets.filter((wallet) => wallet !== 'pending'))];
@@ -214,11 +352,24 @@ router.patch('/ticket/:id', async (req: Request, res: Response): Promise<void> =
     try {
         const id = req.params.id as string;
         const parsedStatus = parseTicketStatus(req.body?.status);
+        const metadata: TicketUpdateMetadata = {
+            phase: parseOptionalString(req.body?.phase),
+            fromPhase: parseOptionalString(req.body?.fromPhase),
+            source: parseOptionalString(req.body?.source),
+            pipelineStatus: parseOptionalString(req.body?.pipelineStatus),
+            expiresAt: parseOptionalString(req.body?.expiresAt),
+            msRemaining: parseOptionalNumber(req.body?.msRemaining),
+            warningThresholdMs: parseOptionalNumber(req.body?.warningThresholdMs),
+        };
 
         const ticket = await prisma.ticket.update({
             where: { id },
             data: { status: parsedStatus },
         });
+
+        const previousStatus = metadata.fromPhase ?? parseOptionalString(req.body?.previousStatus) ?? ticket.status;
+        emitTicketUpdate(ticket, previousStatus, metadata);
+        notifyTicketUpdate(ticket, previousStatus, metadata);
 
         const dealId = ticket.offerId;
         const alreadyProcessed = await prisma.dealReputationProcessing.findUnique({

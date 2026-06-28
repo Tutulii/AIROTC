@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
-import { AgentOTCConfig, OfferCreationParams, OfferData, RegistrationResult, AgentProfile, WebhookConfig, QuickBuyOptions, QuickBuyResult, DealPhase, AutoApprovalPolicy, WaitForMatchedDealOptions } from './types';
+import { AgentOTCConfig, OfferCreationParams, OfferData, RegistrationResult, AgentProfile, WebhookConfig, QuickBuyOptions, QuickBuyResult, DealPhase, AutoApprovalPolicy, WaitForMatchedDealOptions, WebhookEventName } from './types';
 import { ApiClient } from './api';
 import { WsManager } from './ws';
 import { Deal } from './deal';
@@ -335,8 +335,10 @@ export class AgentOTC extends EventEmitter {
             message: string;
             signature: string;
             publicKey: string;
+        }, options?: {
+            events?: WebhookEventName[] | null;
         }): Promise<WebhookConfig> => {
-            return this.api.configureWebhook(webhookUrl, signaturePayload);
+            return this.api.configureWebhook(webhookUrl, signaturePayload, options);
         }
     };
 

@@ -170,7 +170,11 @@ export async function syncObservatoryTicketStatus(
         return;
     }
 
-    await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, { status });
+    await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, {
+        status,
+        phase: status,
+        source: "manual_status_sync",
+    });
 }
 
 /**
@@ -289,7 +293,12 @@ export function initObservatoryBridge(): void {
         if (!mapped) return;
 
         const newStatus = mapPhaseToObservatoryStatus(event.to_phase);
-        await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, { status: newStatus });
+        await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, {
+            status: newStatus,
+            phase: event.to_phase,
+            fromPhase: event.from_phase,
+            source: "phase_changed",
+        });
 
         logger.info("observatory_bridge_phase_synced", {
             middleman_ticket: event.ticket_id,
@@ -304,12 +313,37 @@ export function initObservatoryBridge(): void {
         if (!mapped) return;
 
         const newStatus = mapDealExecutionStatusToObservatoryStatus(payload.status);
-        await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, { status: newStatus });
+        await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, {
+            status: newStatus,
+            phase: payload.status,
+            source: "deal_executed",
+        });
 
         logger.info("observatory_bridge_deal_synced", {
             middleman_ticket: payload.ticket_id,
             deal_status: payload.status,
             observatory_status: newStatus,
+        });
+    });
+
+    eventBus.subscribe("deal_expiring", async (payload) => {
+        const mapped = await ensureTicketSynced(payload.ticket_id);
+        if (!mapped) return;
+
+        const status = mapPhaseToObservatoryStatus(payload.phase);
+        await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, {
+            status,
+            phase: payload.phase,
+            source: "deal_expiring",
+            expiresAt: payload.expires_at,
+            msRemaining: payload.ms_remaining,
+            warningThresholdMs: payload.warning_threshold_ms,
+        });
+
+        logger.info("observatory_bridge_expiring_synced", {
+            middleman_ticket: payload.ticket_id,
+            phase: payload.phase,
+            ms_remaining: payload.ms_remaining,
         });
     });
 
@@ -322,7 +356,12 @@ export function initObservatoryBridge(): void {
         const mapped = await ensureTicketSynced(payload.ticketId);
         if (!mapped) return;
 
-        await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, { status: newStatus });
+        await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, {
+            status: newStatus,
+            phase: payload.stage,
+            source: "deal_pipeline_stage_changed",
+            pipelineStatus: payload.status,
+        });
 
         logger.info("observatory_bridge_pipeline_synced", {
             middleman_ticket: payload.ticketId,

@@ -254,4 +254,40 @@ describe('Signed internal bridge routes', () => {
             data: { dealId: 'offer-1_completed' },
         });
     });
+
+    it('accepts deal expiring bridge warnings without terminal reputation processing', async () => {
+        prismaMock.ticket.update.mockResolvedValue({
+            id: 'ticket-1',
+            offerId: 'offer-1',
+            buyer: 'buyer-wallet',
+            seller: 'seller-wallet',
+            status: 'negotiating',
+        });
+
+        const { signRequest } = await import('../src/services/hmacSigner');
+        const bridgeRoutes = (await import('../src/routes/bridge.routes')).default;
+
+        const app = express();
+        app.use(express.json());
+        app.use('/v1/bridge', bridgeRoutes);
+
+        const payload = {
+            status: 'negotiating',
+            phase: 'awaiting_deposits',
+            source: 'deal_expiring',
+            expiresAt: '2026-06-29T00:05:00.000Z',
+            msRemaining: 300000,
+            warningThresholdMs: 300000,
+        };
+        const body = JSON.stringify(payload);
+        const signed = signRequest('PATCH', '/v1/bridge/ticket/ticket-1', body);
+        const response = await sendJson(app, 'PATCH', '/v1/bridge/ticket/ticket-1', payload, {
+            'X-Bridge-Signature': signed.signature,
+            'X-Bridge-Timestamp': signed.timestamp,
+        });
+
+        expect(response.status).toBe(200);
+        expect(prismaMock.agent.update).not.toHaveBeenCalled();
+        expect(prismaMock.dealReputationProcessing.create).not.toHaveBeenCalled();
+    });
 });

@@ -286,7 +286,7 @@ describe("PER marketplace offer flow", () => {
         where: expect.objectContaining({
           OR: [{ buyer: "buyer-wallet" }, { seller: "buyer-wallet" }],
           status: {
-            notIn: ["completed", "cancelled", "disputed"],
+            notIn: ["completed", "cancelled", "disputed", "refunded"],
           },
         }),
       })

@@ -18,6 +18,7 @@ export const initializeWebSocket = (server: HttpServer): Server => {
 
     io.on('connection', (socket: Socket) => {
         const wallet = socket.data.wallet;
+        socket.join(`agent:${wallet}`);
         logger.info("info", { detail: `[WS] Connected: ${wallet} (Socket ID: ${socket.id})` });
 
         socket.on('join_ticket', (payload) => handleJoinTicket(socket, payload));

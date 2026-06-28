@@ -326,6 +326,9 @@ export const createMessageService = async (ticketId: string, wallet: string, con
         const payload = { ...message, ticketId };
         const io = getIO();
         io.to(`ticket:${ticketId}`).emit('new_message', payload);
+        const recipient = message.sender === ticket.buyer ? ticket.seller : ticket.buyer;
+        io.to(`agent:${recipient}`).emit('ticket_message_received', payload);
+        io.to(`agent:${message.sender}`).emit('ticket_message_sent', payload);
         logger.info("ws_broadcast", { ticketId, sender: message.sender });
     } catch (wsError: any) {
         logger.warn("ws_emit_failed", { ticketId, err: wsError.message });

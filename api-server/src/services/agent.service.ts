@@ -4,6 +4,13 @@ import bs58 from 'bs58';
 import { PublicKey } from '@solana/web3.js';
 import { generateApiKey } from '../middleware/auth';
 import { calculateVisibleReputation, getTier } from '../utils/reputation';
+import {
+    isValidWebhookUrl,
+    normalizeWebhookEvents,
+    parseStoredWebhookEvents,
+    serializeWebhookEvents,
+    type WebhookEvent,
+} from './webhookDelivery';
 
 export const registerAgentService = async (wallet: string) => {
     // Strict Input Validation guaranteeing string mapping against PublicKey bounds
@@ -125,7 +132,11 @@ export const getAgentProfile = async (wallet: string) => {
     return response;
 };
 
-export const updateWebhookConfig = async (wallet: string, webhookUrl: string | null) => {
+export const updateWebhookConfig = async (
+    wallet: string,
+    webhookUrl: string | null,
+    webhookEvents?: unknown,
+) => {
     // 1. Validate wallet
     try {
         new PublicKey(wallet);
@@ -137,16 +148,20 @@ export const updateWebhookConfig = async (wallet: string, webhookUrl: string | n
 
     // 2. Validate URL if provided
     if (webhookUrl !== null) {
-        try {
-            const parsed = new URL(webhookUrl);
-            if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-                throw new Error();
-            }
-        } catch {
+        if (!isValidWebhookUrl(webhookUrl)) {
             const err = new Error('Invalid webhook URL. Must be a valid HTTP/HTTPS URL.');
             err.name = '400';
             throw err;
         }
+    }
+
+    let normalizedEvents: WebhookEvent[] | null | undefined;
+    try {
+        normalizedEvents = normalizeWebhookEvents(webhookEvents);
+    } catch (error: any) {
+        const err = new Error(error.message);
+        err.name = '400';
+        throw err;
     }
 
     // 3. Find agent
@@ -160,8 +175,9 @@ export const updateWebhookConfig = async (wallet: string, webhookUrl: string | n
     // 4. Generate secret on first setup, preserve on updates, clear on removal
     let webhookSecret = agent.webhookSecret;
     if (webhookUrl === null) {
-        // Removing webhook — clear both
+        // Removing webhook — clear endpoint, secret, and custom event preferences.
         webhookSecret = null;
+        normalizedEvents = null;
     } else if (!webhookSecret) {
         // First time — generate a random 32-byte hex secret
         const crypto = await import('crypto');
@@ -174,15 +190,25 @@ export const updateWebhookConfig = async (wallet: string, webhookUrl: string | n
         data: {
             webhookUrl,
             webhookSecret,
+            webhookEvents: normalizedEvents === undefined
+                ? agent.webhookEvents
+                : serializeWebhookEvents(normalizedEvents),
         },
     });
 
-    logger.info("info", { detail: `[WEBHOOK CONFIG] Wallet: ${wallet} | URL: ${webhookUrl ?? 'REMOVED'}` });
+    const enabledEvents = webhookUrl
+        ? parseStoredWebhookEvents(normalizedEvents === undefined ? agent.webhookEvents : serializeWebhookEvents(normalizedEvents))
+        : [];
+
+    logger.info("info", {
+        detail: `[WEBHOOK CONFIG] Wallet: ${wallet} | URL: ${webhookUrl ?? 'REMOVED'} | Events: ${enabledEvents.length}`,
+    });
 
     return {
         wallet,
         webhookUrl,
         webhookSecret: webhookUrl ? webhookSecret : null, // Only reveal secret when setting URL
         configured: webhookUrl !== null,
+        events: enabledEvents,
     };
 };

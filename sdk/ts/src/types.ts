@@ -299,7 +299,22 @@ export interface WebhookConfig {
     /** HMAC-SHA256 secret for verifying inbound webhook payloads. Only shown when setting a URL. */
     webhookSecret: string | null;
     configured: boolean;
+    events: WebhookEventName[];
 }
+
+export type WebhookEventName =
+    | 'deal.matched'
+    | 'deal.expiring'
+    | 'deal.message'
+    | 'dm.received'
+    | 'deal.phase_changed'
+    | 'deal.escrow_created'
+    | 'deal.deposit_received'
+    | 'deal.delivery_confirmed'
+    | 'deal.completed'
+    | 'deal.cancelled'
+    | 'deal.refunded'
+    | 'reputation.update';
 
 // ─── ZK Privacy Mode ───
 

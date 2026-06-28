@@ -52,7 +52,7 @@ export const updateWebhookHandler = async (req: Request, res: Response): Promise
             return;
         }
 
-        const { webhookUrl } = req.body;
+        const { webhookUrl, events, webhookEvents } = req.body;
 
         // Allow null to remove webhook, otherwise must be string
         if (webhookUrl !== null && webhookUrl !== undefined && typeof webhookUrl !== 'string') {
@@ -60,7 +60,7 @@ export const updateWebhookHandler = async (req: Request, res: Response): Promise
             return;
         }
 
-        const result = await updateWebhookConfig(wallet, webhookUrl ?? null);
+        const result = await updateWebhookConfig(wallet, webhookUrl ?? null, events ?? webhookEvents);
         res.status(200).json({ success: true, ...result });
     } catch (e: any) {
         if (e.name === '400') {

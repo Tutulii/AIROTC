@@ -22,6 +22,8 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authenticateSolana } from '../middleware/auth';
 import { logger } from '../lib/logger';
+import { getIO } from '../ws/socket';
+import { webhooks } from '../services/webhookDelivery';
 
 const router = Router();
 
@@ -119,6 +121,45 @@ router.post('/v1/dm/send', authenticateSolana, async (req: Request, res: Respons
                 metadata: typeof metadata === 'object' ? JSON.stringify(metadata) : metadata || null,
                 expiresAt: parsedExpiry || null,
             },
+        });
+
+        const livePayload = {
+            id: message.id,
+            fromWallet: message.fromWallet,
+            toWallet: message.toWallet,
+            content: message.content,
+            contentType: message.contentType,
+            ticketId: message.ticketId,
+            encrypted: message.encrypted,
+            metadata: message.metadata,
+            expiresAt: message.expiresAt,
+            createdAt: message.createdAt,
+        };
+
+        try {
+            const io = getIO();
+            io.to(`agent:${toWallet}`).emit('dm_received', livePayload);
+            io.to(`agent:${fromWallet}`).emit('dm_sent', livePayload);
+            if (message.ticketId) {
+                io.to(`ticket:${message.ticketId}`).emit('deal_dm_received', livePayload);
+            }
+            logger.info('dm_ws_broadcast', {
+                from: fromWallet.substring(0, 8),
+                to: toWallet.substring(0, 8),
+                ticketId: message.ticketId || null,
+            });
+        } catch (wsError: any) {
+            logger.warn('dm_ws_emit_failed', {
+                messageId: message.id,
+                error: wsError?.message || 'unknown',
+            });
+        }
+
+        webhooks.dmReceived(toWallet, message).catch((error: any) => {
+            logger.warn('dm_webhook_failed', {
+                messageId: message.id,
+                error: error?.message || 'unknown',
+            });
         });
 
         logger.info('dm_sent', {
@@ -516,4 +557,3 @@ router.get('/v1/dm/keys/:wallet', authenticateSolana, async (req: Request, res: 
 });
 
 export default router;
-

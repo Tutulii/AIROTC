@@ -13,6 +13,7 @@ const DDL_STATEMENTS = [
     `ALTER TABLE "Ticket" ADD COLUMN IF NOT EXISTS "rollupMode" TEXT;`,
     `UPDATE "Ticket" SET "rollupMode" = 'ER' WHERE "rollupMode" IS NULL;`,
     `ALTER TABLE "Ticket" ALTER COLUMN "rollupMode" SET DEFAULT 'ER';`,
+    `ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "webhookEvents" TEXT;`,
 ];
 
 export async function ensureApiSchema(
@@ -25,13 +26,14 @@ export async function ensureApiSchema(
         }
 
         logger.info('api_schema_ready', {
-            tables: ['Offer', 'Ticket'],
+            tables: ['Offer', 'Ticket', 'Agent'],
             columns: [
                 'Offer.creatorSettlementWallet',
                 'Offer.creatorRewardWallet',
                 'Offer.creatorFundingWallet',
                 'Offer.rollupMode',
                 'Ticket.rollupMode',
+                'Agent.webhookEvents',
             ],
             mode: 'startup_self_heal',
         });

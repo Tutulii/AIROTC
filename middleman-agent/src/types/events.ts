@@ -235,6 +235,7 @@ export type AgentEventType =
   | "ticket_created"
   | "message_received"
   | "deal_executed"
+  | "deal_expiring"
   | "negotiation_ready"
   | "agreement_detected"
   | "rollup_consensus_reached"
@@ -272,6 +273,13 @@ export type AgentEventPayloads = {
   ticket_created: Ticket;
   message_received: Message;
   deal_executed: { ticket_id: string; status: string };
+  deal_expiring: {
+    ticket_id: string;
+    phase: string;
+    expires_at: string;
+    ms_remaining: number;
+    warning_threshold_ms: number;
+  };
   negotiation_ready: NegotiationReadyEvent;
   agreement_detected: AgreementDetectedEvent;
   rollup_consensus_reached: RollupConsensusReachedEvent;

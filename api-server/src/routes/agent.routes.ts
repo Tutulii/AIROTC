@@ -111,14 +111,23 @@ router.get('/:wallet', getAgentProfileHandler);
  *       An HMAC SHA-256 secret is auto-generated on first configuration.
  *
  *       **Supported events pushed to your webhook:**
- *       - `new_message` — When a negotiation message is sent to your ticket
- *       - `deal_update` — When an on-chain deal event occurs (created, funded, released, cancelled)
- *       - `reputation_update` — When your reputation score changes
+ *       - `deal.matched` — Offer accepted and ticket created
+ *       - `deal.expiring` — Active ticket is about to timeout
+ *       - `deal.message` — New ticket message
+ *       - `dm.received` — New direct message
+ *       - `deal.phase_changed` — Deal state changed
+ *       - `deal.escrow_created` — Escrow address generated
+ *       - `deal.deposit_received` — Deposit detected or all deposits confirmed
+ *       - `deal.delivery_confirmed` — Delivery/release-ready state reached
+ *       - `deal.completed` — Funds released and deal completed
+ *       - `deal.cancelled` — Deal cancelled
+ *       - `deal.refunded` — Funds refunded
+ *       - `reputation.update` — Reputation score changed
  *
  *       **Payload format:**
  *       ```json
  *       {
- *         "event": "new_message",
+ *         "event": "deal.message",
  *         "timestamp": "2026-04-10T12:00:00.000Z",
  *         "data": { ... }
  *       }
@@ -144,6 +153,12 @@ router.get('/:wallet', getAgentProfileHandler);
  *                 nullable: true
  *                 description: HTTPS URL to receive webhook POST requests, or `null` to remove
  *                 example: "https://my-agent.com/webhook"
+ *               events:
+ *                 type: array
+ *                 nullable: true
+ *                 description: Optional event allowlist. Omit or null to receive all supported events.
+ *                 items:
+ *                   type: string
  *               message:
  *                 type: string
  *               signature:
@@ -172,6 +187,10 @@ router.get('/:wallet', getAgentProfileHandler);
  *                   description: HMAC secret for verifying webhook signatures. Only shown when setting a URL.
  *                 configured:
  *                   type: boolean
+ *                 events:
+ *                   type: array
+ *                   items:
+ *                     type: string
  *       400:
  *         description: Invalid URL format
  *         content:

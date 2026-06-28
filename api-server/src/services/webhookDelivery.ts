@@ -1,155 +1,286 @@
-import { logger } from '../lib/logger';
-/**
- * Webhook Delivery Service
- * 
- * Sends push notifications to agents when deal events happen.
- * Agents configure their webhookUrl + webhookSecret during registration.
- * 
- * Events:
- *   - deal.matched       → Offer accepted, ticket created
- *   - deal.message       → New message in negotiation
- *   - deal.escrow_created → Both agreed, escrow on-chain
- *   - deal.deposit_received → SOL deposit detected
- *   - deal.delivery_confirmed → Seller delivered
- *   - deal.completed     → Funds released, deal done
- *   - deal.cancelled     → Deal cancelled or timed out
- *   - deal.refunded      → Funds refunded after timeout
- *
- * Security: Each webhook is HMAC-SHA256 signed with the agent's webhookSecret.
- * The receiving agent verifies: X-Webhook-Signature header.
- */
-
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
+import { logger } from '../lib/logger';
+
+export const WEBHOOK_EVENTS = [
+    'deal.matched',
+    'deal.expiring',
+    'deal.message',
+    'dm.received',
+    'deal.phase_changed',
+    'deal.escrow_created',
+    'deal.deposit_received',
+    'deal.delivery_confirmed',
+    'deal.completed',
+    'deal.cancelled',
+    'deal.refunded',
+    'reputation.update',
+] as const;
+
+export type WebhookEvent = typeof WEBHOOK_EVENTS[number];
+
+export const DEFAULT_WEBHOOK_EVENTS: WebhookEvent[] = [...WEBHOOK_EVENTS];
 
 interface WebhookPayload {
-    event: string;
-    ticketId: string;
+    event: WebhookEvent;
+    ticketId?: string;
     timestamp: string;
-    data: Record<string, any>;
+    data: Record<string, unknown>;
 }
 
-/**
- * Send a webhook to a specific agent wallet.
- */
-async function sendToAgent(wallet: string, payload: WebhookPayload): Promise<boolean> {
+const TIMEOUT_MS = 5_000;
+const RETRY_DELAYS_MS = [0, 500, 1_500];
+const EVENT_SET = new Set<string>(WEBHOOK_EVENTS);
+
+export function normalizeWebhookEvents(events: unknown): WebhookEvent[] | null {
+    if (events === undefined || events === null) {
+        return null;
+    }
+
+    if (!Array.isArray(events)) {
+        throw new Error('webhookEvents must be an array of supported event names');
+    }
+
+    const normalized = events.map((event) => {
+        if (typeof event !== 'string') {
+            throw new Error('webhookEvents must contain only strings');
+        }
+        return event.trim();
+    }).filter(Boolean);
+
+    for (const event of normalized) {
+        if (!EVENT_SET.has(event)) {
+            throw new Error(`Unsupported webhook event: ${event}`);
+        }
+    }
+
+    return [...new Set(normalized)] as WebhookEvent[];
+}
+
+export function parseStoredWebhookEvents(value: string | null | undefined): WebhookEvent[] {
+    if (!value) return DEFAULT_WEBHOOK_EVENTS;
+
     try {
-        const agent = await prisma.agent.findUnique({
-            where: { wallet },
-            select: { webhookUrl: true, webhookSecret: true },
-        });
+        return normalizeWebhookEvents(JSON.parse(value)) ?? DEFAULT_WEBHOOK_EVENTS;
+    } catch {
+        logger.warn('webhook_events_parse_failed', { value });
+        return DEFAULT_WEBHOOK_EVENTS;
+    }
+}
 
-        if (!agent?.webhookUrl) return false;
+export function serializeWebhookEvents(events: WebhookEvent[] | null): string | null {
+    return events === null ? null : JSON.stringify(events);
+}
 
-        const body = JSON.stringify(payload);
+export function webhookEventEnabled(storedEvents: string | null | undefined, event: WebhookEvent): boolean {
+    return parseStoredWebhookEvents(storedEvents).includes(event);
+}
 
-        // Sign the payload with the agent's webhook secret
-        const signature = agent.webhookSecret
-            ? crypto.createHmac('sha256', agent.webhookSecret).update(body).digest('hex')
-            : '';
+export function isValidWebhookUrl(url: string): boolean {
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
 
-        const response = await fetch(agent.webhookUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Webhook-Event': payload.event,
-                'X-Webhook-Signature': signature,
-                'X-Webhook-Timestamp': payload.timestamp,
-                'User-Agent': 'MeridianOTC-Webhook/1.0',
-            },
-            body,
-            signal: AbortSignal.timeout(10000), // 10 second timeout
-        });
-
-        if (!response.ok) {
-            logger.warn("warning", { detail: `[WEBHOOK] Failed for ${wallet}: ${response.status} ${response.statusText}` });
+        const hostname = parsed.hostname.toLowerCase();
+        if (
+            hostname === 'localhost' ||
+            hostname === '127.0.0.1' ||
+            hostname === '0.0.0.0' ||
+            hostname === '::1' ||
+            hostname.startsWith('10.') ||
+            hostname.startsWith('192.168.') ||
+            /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname) ||
+            hostname.startsWith('169.254.')
+        ) {
             return false;
         }
 
-        logger.info(`[WEBHOOK] Delivered ${payload.event} to ${wallet.slice(0, 8)}...`);
         return true;
-    } catch (err: any) {
-        logger.warn("warning", { detail: `[WEBHOOK] Error sending to ${wallet.slice(0, 8)}...: ${err.message}` });
+    } catch {
         return false;
     }
 }
 
-/**
- * Send a webhook event to both parties of a deal.
- */
-export async function notifyDealParties(
-    ticketId: string,
-    buyerWallet: string,
-    sellerWallet: string,
-    event: string,
-    data: Record<string, any> = {}
-): Promise<void> {
-    const payload: WebhookPayload = {
+function signPayload(payloadJson: string, secret: string | null): string {
+    if (!secret) return '';
+    return crypto.createHmac('sha256', secret).update(payloadJson, 'utf8').digest('hex');
+}
+
+async function sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function deliverWebhook(url: string, secret: string | null, payload: WebhookPayload): Promise<boolean> {
+    const body = JSON.stringify(payload);
+    const signature = signPayload(body, secret);
+
+    for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
+        const delay = RETRY_DELAYS_MS[attempt] ?? 0;
+        if (delay > 0) await sleep(delay);
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'AIR-OTC-Webhook/1.0',
+                    'X-Webhook-Event': payload.event,
+                    'X-Webhook-Signature': signature,
+                    'X-Webhook-Timestamp': payload.timestamp,
+                    'x-webhook-event': payload.event,
+                    'x-webhook-signature': signature,
+                    'x-webhook-timestamp': payload.timestamp,
+                },
+                body,
+                signal: AbortSignal.timeout(TIMEOUT_MS),
+            });
+
+            if (response.ok) {
+                logger.info('webhook_delivered', {
+                    event: payload.event,
+                    status: response.status,
+                    attempt: attempt + 1,
+                });
+                return true;
+            }
+
+            logger.warn('webhook_delivery_non_2xx', {
+                event: payload.event,
+                status: response.status,
+                attempt: attempt + 1,
+            });
+        } catch (error: any) {
+            logger.warn('webhook_delivery_failed', {
+                event: payload.event,
+                attempt: attempt + 1,
+                error: error?.message || 'unknown',
+            });
+        }
+    }
+
+    return false;
+}
+
+export async function sendToAgent(
+    wallet: string,
+    event: WebhookEvent,
+    data: Record<string, unknown> = {},
+    ticketId?: string,
+): Promise<boolean> {
+    const agent = await prisma.agent.findUnique({
+        where: { wallet },
+        select: {
+            webhookUrl: true,
+            webhookSecret: true,
+            webhookEvents: true,
+        },
+    });
+
+    if (!agent?.webhookUrl) return false;
+    if (!webhookEventEnabled(agent.webhookEvents, event)) return false;
+
+    if (!isValidWebhookUrl(agent.webhookUrl)) {
+        logger.warn('webhook_invalid_url_skipped', { wallet, event, url: agent.webhookUrl });
+        return false;
+    }
+
+    return deliverWebhook(agent.webhookUrl, agent.webhookSecret, {
         event,
         ticketId,
         timestamp: new Date().toISOString(),
         data,
-    };
-
-    // Send to both parties in parallel — non-blocking, fire-and-forget
-    await Promise.allSettled([
-        sendToAgent(buyerWallet, payload),
-        sendToAgent(sellerWallet, payload),
-    ]);
+    });
 }
 
-/**
- * Send a webhook event to a single agent.
- */
 export async function notifyAgent(
     wallet: string,
-    event: string,
-    data: Record<string, any> = {}
+    event: WebhookEvent,
+    data: Record<string, unknown> = {},
+    ticketId?: string,
 ): Promise<void> {
-    const payload: WebhookPayload = {
-        event,
-        ticketId: data.ticketId || '',
-        timestamp: new Date().toISOString(),
-        data,
-    };
-
-    await sendToAgent(wallet, payload);
+    await sendToAgent(wallet, event, data, ticketId);
 }
 
-/**
- * Convenience methods for specific deal events.
- */
+export async function notifyAgents(
+    wallets: string[],
+    event: WebhookEvent,
+    data: Record<string, unknown> = {},
+    ticketId?: string,
+): Promise<void> {
+    const uniqueWallets = [...new Set(wallets.filter(Boolean))];
+    await Promise.allSettled(uniqueWallets.map((wallet) => sendToAgent(wallet, event, data, ticketId)));
+}
+
+export async function notifyDealParties(
+    ticketId: string,
+    buyerWallet: string,
+    sellerWallet: string,
+    event: WebhookEvent,
+    data: Record<string, unknown> = {},
+): Promise<void> {
+    await notifyAgents([buyerWallet, sellerWallet], event, data, ticketId);
+}
+
 export const webhooks = {
     dealMatched: (ticketId: string, buyer: string, seller: string, offer: any) =>
         notifyDealParties(ticketId, buyer, seller, 'deal.matched', {
+            offerId: offer.id,
             asset: offer.asset,
             price: offer.price,
             collateral: offer.collateral,
         }),
 
+    dealExpiring: (ticketId: string, buyer: string, seller: string, data: Record<string, unknown>) =>
+        notifyDealParties(ticketId, buyer, seller, 'deal.expiring', data),
+
     newMessage: (ticketId: string, buyer: string, seller: string, message: any) =>
         notifyDealParties(ticketId, buyer, seller, 'deal.message', {
+            messageId: message.id,
             sender: message.sender,
             preview: message.content?.substring(0, 100),
         }),
 
-    escrowCreated: (ticketId: string, buyer: string, seller: string, terms: any) =>
-        notifyDealParties(ticketId, buyer, seller, 'deal.escrow_created', {
-            terms,
-        }),
+    ticketMessage: (ticketId: string, recipient: string, message: any) =>
+        notifyAgent(recipient, 'deal.message', {
+            messageId: message.id,
+            sender: message.sender,
+            preview: message.content?.substring(0, 100),
+        }, ticketId),
 
-    depositReceived: (ticketId: string, buyer: string, seller: string, deposit: any) =>
-        notifyDealParties(ticketId, buyer, seller, 'deal.deposit_received', {
-            from: deposit.from,
-            amount: deposit.amount,
-        }),
+    dmReceived: (recipient: string, message: any) =>
+        notifyAgent(recipient, 'dm.received', {
+            messageId: message.id,
+            fromWallet: message.fromWallet,
+            contentType: message.contentType,
+            ticketId: message.ticketId,
+            encrypted: message.encrypted,
+        }, message.ticketId || undefined),
 
-    dealCompleted: (ticketId: string, buyer: string, seller: string) =>
-        notifyDealParties(ticketId, buyer, seller, 'deal.completed', {}),
+    phaseChanged: (
+        ticketId: string,
+        buyer: string,
+        seller: string,
+        phase: Record<string, unknown>,
+    ) => notifyDealParties(ticketId, buyer, seller, 'deal.phase_changed', phase),
+
+    escrowCreated: (ticketId: string, buyer: string, seller: string, terms: Record<string, unknown>) =>
+        notifyDealParties(ticketId, buyer, seller, 'deal.escrow_created', terms),
+
+    depositReceived: (ticketId: string, buyer: string, seller: string, deposit: Record<string, unknown>) =>
+        notifyDealParties(ticketId, buyer, seller, 'deal.deposit_received', deposit),
+
+    deliveryConfirmed: (ticketId: string, buyer: string, seller: string, delivery: Record<string, unknown>) =>
+        notifyDealParties(ticketId, buyer, seller, 'deal.delivery_confirmed', delivery),
+
+    dealCompleted: (ticketId: string, buyer: string, seller: string, data: Record<string, unknown> = {}) =>
+        notifyDealParties(ticketId, buyer, seller, 'deal.completed', data),
 
     dealCancelled: (ticketId: string, buyer: string, seller: string, reason: string) =>
         notifyDealParties(ticketId, buyer, seller, 'deal.cancelled', { reason }),
 
     dealRefunded: (ticketId: string, buyer: string, seller: string) =>
         notifyDealParties(ticketId, buyer, seller, 'deal.refunded', {}),
+
+    reputationUpdate: (wallet: string, data: Record<string, unknown>) =>
+        notifyAgent(wallet, 'reputation.update', data),
 };

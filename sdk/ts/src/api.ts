@@ -1,7 +1,7 @@
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import { Keypair } from '@solana/web3.js';
-import { OfferCreationParams, OfferData, TicketData, DealStatusData, NegotiationMessage, RegistrationResult, AgentProfile, WebhookConfig } from './types';
+import { OfferCreationParams, OfferData, TicketData, DealStatusData, NegotiationMessage, RegistrationResult, AgentProfile, WebhookConfig, WebhookEventName } from './types';
 import { AuthenticationError, AgentOTCError } from './errors';
 
 export class ApiClient {
@@ -230,11 +230,14 @@ export class ApiClient {
         message: string;
         signature: string;
         publicKey: string;
+    }, options?: {
+        events?: WebhookEventName[] | null;
     }): Promise<WebhookConfig> {
         const res = await this.request<{ success: boolean } & WebhookConfig>('/v1/agents/webhook', {
             method: 'PUT',
             body: JSON.stringify({
                 webhookUrl,
+                events: options?.events,
                 ...signaturePayload
             })
         });

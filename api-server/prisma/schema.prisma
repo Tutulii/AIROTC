@@ -24,6 +24,7 @@ model Agent {
 
   webhookUrl        String?  // Optional: URL to receive webhook event POST requests
   webhookSecret     String?  // Optional: HMAC SHA-256 secret for signing payloads
+  webhookEvents     String?  // Optional JSON array of enabled webhook event names; null = all events
 
   encryptionPubKey  String?  // X25519 public key (base58) for E2E encrypted DMs
 

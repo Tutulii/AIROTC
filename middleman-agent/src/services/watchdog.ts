@@ -17,12 +17,15 @@ import { rpcManager } from "../utils/rpcManager";
 import { circuitBreaker } from "../utils/circuitBreaker";
 import { prisma } from "../lib/prisma";
 import { SYSTEM_PAUSED } from "../api/health";
+import { eventBus } from "./eventBus";
 
 const MAX_DEAL_LIFETIME_MS = 30 * 60 * 1000; // Same as onChainExecutionService
+const EXPIRING_WARNING_MS = 5 * 60 * 1000;
 const MAX_ACTIONS_PER_WINDOW = 10;
 const ANTI_OSCILLATION_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
 let actionTimestamps: number[] = [];
+const expiringWarningsSent = new Set<string>();
 
 function isThrottled(): boolean {
     const now = Date.now();
@@ -74,9 +77,50 @@ export async function watchdogTick(): Promise<void> {
             // The health endpoint will report "down"
         }
 
-        // ── CHECK 3: Force-expire stuck deals past TTL ──
+        // ── CHECK 3: Warn agents before TTL, then force-expire stuck deals past TTL ──
         try {
             const ttlThreshold = new Date(Date.now() - MAX_DEAL_LIFETIME_MS);
+            const warningThreshold = new Date(Date.now() - (MAX_DEAL_LIFETIME_MS - EXPIRING_WARNING_MS));
+
+            const expiringDeals = await prisma.dealPhaseState.findMany({
+                where: {
+                    phase: { notIn: ["completed", "cancelled", "refunded"] },
+                    createdAt: {
+                        lt: warningThreshold,
+                        gte: ttlThreshold,
+                    },
+                },
+            });
+
+            for (const deal of expiringDeals) {
+                if (deal.ticketId.startsWith("TCK-TEST") || deal.ticketId.startsWith("SOUL-SIM")) {
+                    continue;
+                }
+
+                const expiresAt = new Date(deal.createdAt.getTime() + MAX_DEAL_LIFETIME_MS);
+                const msRemaining = Math.max(0, expiresAt.getTime() - Date.now());
+                const warningKey = `${deal.ticketId}:${expiresAt.toISOString()}`;
+                if (expiringWarningsSent.has(warningKey)) {
+                    continue;
+                }
+
+                expiringWarningsSent.add(warningKey);
+                eventBus.publish("deal_expiring", {
+                    ticket_id: deal.ticketId,
+                    phase: deal.phase,
+                    expires_at: expiresAt.toISOString(),
+                    ms_remaining: msRemaining,
+                    warning_threshold_ms: EXPIRING_WARNING_MS,
+                });
+
+                logger.warn("watchdog_deal_expiring", {
+                    ticket_id: deal.ticketId,
+                    phase: deal.phase,
+                    expires_at: expiresAt.toISOString(),
+                    ms_remaining: msRemaining,
+                });
+            }
+
             const stuckDeals = await prisma.dealPhaseState.findMany({
                 where: {
                     phase: { notIn: ["completed", "cancelled", "refunded"] },
@@ -95,6 +139,11 @@ export async function watchdogTick(): Promise<void> {
                     where: { ticketId: deal.ticketId },
                     data: { phase: "cancelled" },
                 });
+                for (const key of [...expiringWarningsSent]) {
+                    if (key.startsWith(`${deal.ticketId}:`)) {
+                        expiringWarningsSent.delete(key);
+                    }
+                }
                 recordAction();
             }
         } catch (e: any) {
