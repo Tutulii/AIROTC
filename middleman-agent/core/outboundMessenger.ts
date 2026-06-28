@@ -133,10 +133,15 @@ export async function dealCreatedMessage(
   terms: DealTerms,
   escrowPda?: string
 ): Promise<MiddlemanMessage> {
-  const pdaInfo = escrowPda ? `\nEscrow PDA: \`${escrowPda}\`` : "";
-  const rawData = `ACTION: Deal created on-chain.${pdaInfo}
+  const rawData = escrowPda
+    ? `ACTION: Deal created on-chain.
+Escrow PDA: \`${escrowPda}\`
 TERMS: Price=${terms.price} SOL, Buyer Collateral=${terms.collateral_buyer} SOL, Seller Collateral=${terms.collateral_seller} SOL.
-INSTRUCTION: Both parties must send their deposits to the escrow now. Buyer total is ${terms.price + terms.collateral_buyer} SOL.`;
+INSTRUCTION: Both parties must send their deposits to the escrow now. Buyer total is ${terms.price + terms.collateral_buyer} SOL.`
+    : `ACTION: Escrow creation requested.
+STATUS: Waiting for the on-chain escrow PDA before deposits can begin.
+TERMS: Price=${terms.price} SOL, Buyer Collateral=${terms.collateral_buyer} SOL, Seller Collateral=${terms.collateral_seller} SOL.
+INSTRUCTION: Do not send funds yet. Do not use personal wallets. Wait until Meridian publishes the escrow address.`;
   return generateConversationalResponse(ticket_id, "escrow_created", rawData);
 }
 
@@ -145,11 +150,14 @@ export async function depositInstructionMessage(
   terms: DealTerms,
   escrowPda?: string
 ): Promise<MiddlemanMessage> {
-  const pdaLine = escrowPda
-    ? `\nESCROW ADDRESS: \`${escrowPda}\`\nSend your SOL directly to this address as a plain transfer.`
-    : "";
-  const rawData = `ACTION: Awaiting Deposits.${pdaLine}
-INSTRUCTION: Buyer needs to send ${terms.collateral_buyer} SOL (collateral) first. Seller needs to send ${terms.collateral_seller} SOL (collateral). After both collaterals confirmed, buyer sends ${terms.price} SOL (payment). Middleman will detect each deposit automatically and confirm on-chain.`;
+  const rawData = escrowPda
+    ? `ACTION: Awaiting Deposits.
+ESCROW ADDRESS: \`${escrowPda}\`
+Send your SOL directly to this address as a plain transfer.
+INSTRUCTION: Buyer needs to send ${terms.collateral_buyer} SOL (collateral) first. Seller needs to send ${terms.collateral_seller} SOL (collateral). After both collaterals confirmed, buyer sends ${terms.price} SOL (payment). Middleman will detect each deposit automatically and confirm on-chain.`
+    : `ACTION: Deposit instructions blocked.
+STATUS: No escrow address is available yet.
+INSTRUCTION: Do not send funds. Do not send to a personal wallet. Wait for the on-chain escrow address.`;
   return generateConversationalResponse(ticket_id, "awaiting_deposits", rawData);
 }
 

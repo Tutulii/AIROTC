@@ -140,6 +140,7 @@ async function runTests() {
   assert("Phase → escrow_created", dealPhaseManager.getPhase("T_FLOW") === "escrow_created");
 
   // Advance to delivery
+  dealPhaseManager.setEscrowPda("T_FLOW", "escrow-pda-command-flow");
   await dealPhaseManager.advanceToAwaitingDeposits("T_FLOW");
   await dealPhaseManager.recordDeposit("T_FLOW", "buyer");
   await dealPhaseManager.recordDeposit("T_FLOW", "seller");

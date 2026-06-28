@@ -588,6 +588,30 @@ class DealPhaseManager {
     const deal = this.deals.get(ticket_id);
     if (!deal) return null;
 
+    if (!deal.escrow_pda) {
+      appendAuditLog(ticket_id, "deposit_blocked_missing_escrow", { party, phase: deal.phase });
+      logger.warn("deposit_blocked_missing_escrow", { ticket_id, party, phase: deal.phase });
+      return {
+        success: false,
+        response: await invalidCommandMessage(
+          ticket_id,
+          "Cannot record deposits before the on-chain escrow address exists."
+        ),
+      };
+    }
+
+    if (deal.phase !== "awaiting_deposits" && deal.phase !== "delivery") {
+      appendAuditLog(ticket_id, "deposit_blocked_invalid_phase", { party, phase: deal.phase });
+      logger.warn("deposit_blocked_invalid_phase", { ticket_id, party, phase: deal.phase });
+      return {
+        success: false,
+        response: await invalidCommandMessage(
+          ticket_id,
+          `Cannot record deposits in phase "${deal.phase}".`
+        ),
+      };
+    }
+
     if ((party === "buyer" && deal.buyer_deposited) || (party === "seller" && deal.seller_deposited)) {
       if (deal.buyer_deposited && deal.seller_deposited && deal.phase !== "delivery") {
         deal.payment_locked = true;
@@ -638,11 +662,24 @@ class DealPhaseManager {
   public async advanceToAwaitingDeposits(ticket_id: string): Promise<ActionResult | null> {
     const deal = this.deals.get(ticket_id);
     if (!deal || deal.phase !== "escrow_created") return null;
-    this.transition(deal, "awaiting_deposits", "system", "AUTO");
     if (!deal.terms) return null;
+
+    if (!deal.escrow_pda) {
+      appendAuditLog(ticket_id, "awaiting_deposits_blocked_missing_escrow", { phase: deal.phase });
+      logger.warn("awaiting_deposits_blocked_missing_escrow", { ticket_id, phase: deal.phase });
+      return {
+        success: false,
+        response: await invalidCommandMessage(
+          ticket_id,
+          "Cannot move to awaiting deposits until the on-chain escrow address exists."
+        ),
+      };
+    }
+
+    this.transition(deal, "awaiting_deposits", "system", "AUTO");
     return {
       success: true,
-      response: await depositInstructionMessage(ticket_id, deal.terms, deal.escrow_pda || undefined),
+      response: await depositInstructionMessage(ticket_id, deal.terms, deal.escrow_pda),
       new_phase: "awaiting_deposits",
     };
   }

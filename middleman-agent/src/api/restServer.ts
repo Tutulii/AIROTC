@@ -36,6 +36,8 @@ import { ticketStore } from '../state/ticketStore';
 import { settlementTargetStore } from '../state/settlementTargetStore';
 import { rewardTargetStore } from '../state/rewardTargetStore';
 import { getAgentDWallet, isConfidentialEscrowReady } from '../services/confidentialExecutionService';
+import { executeDeal, executeRelease } from '../services/executionService';
+import { executeCancelDeal, executeFractionalSplit } from '../services/onChainExecutionService';
 import { loadConfig } from '../config';
 import { registerObservatoryTicketMapping } from '../services/observatoryBridge';
 import { pipelineStateStore } from '../state/pipelineStateStore';
@@ -66,6 +68,41 @@ const localDemoOffers = new Map<string, LocalDemoOffer>();
 
 function isPerStrictOpaqueModeEnabled(): boolean {
     return (process.env.PER_STRICT_OPAQUE_MODE || "true").toLowerCase() !== "false";
+}
+
+type OnChainActionResult = {
+    success?: boolean;
+    on_chain_action?: string;
+    splitRatios?: { buyerRefundPercent: number; sellerReleasePercent: number };
+};
+
+function scheduleOnChainAction(ticketId: string, result: OnChainActionResult): void {
+    if (!result.success || !result.on_chain_action) {
+        return;
+    }
+
+    logger.info("rest_on_chain_action_check", {
+        ticketId,
+        on_chain_action: result.on_chain_action,
+    });
+
+    if (result.on_chain_action === "create_deal") {
+        executeDeal(ticketId).catch((err: any) => {
+            logger.error("rest_execution_unhandled_failure", { ticketId }, err);
+        });
+    } else if (result.on_chain_action === "release_funds") {
+        executeRelease(ticketId).catch((err: any) => {
+            logger.error("rest_release_unhandled_failure", { ticketId }, err);
+        });
+    } else if (result.on_chain_action === "fractional_split_funds") {
+        executeFractionalSplit(ticketId, result.splitRatios).catch((err: any) => {
+            logger.error("rest_fractional_split_unhandled_failure", { ticketId }, err);
+        });
+    } else if (result.on_chain_action === "cancel_deal") {
+        executeCancelDeal(ticketId).catch((err: any) => {
+            logger.error("rest_cancel_unhandled_failure", { ticketId }, err);
+        });
+    }
 }
 
 function validateSettlementWallet(value: unknown, label: string): string | null {
@@ -1044,7 +1081,8 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             // Step 5: Feed through the brain (same as WS pipeline)
             const decision = await analyzeMessage(content, agentId, ticketId, signals);
 
-            // PRE-BRAIN: Always detect deposit/release signals first to prevent stalls
+            // Observe deposit/delivery/release phrases, but never treat chat text as
+            // chain truth. Escrow/deposit state must come from the execution pipeline.
             const deal = await dealPhaseManager.getDealWithFallback(ticketId);
             const lowerContent = content.toLowerCase();
             const isDepositSignal = lowerContent.includes("deposited") || lowerContent.includes("deposit") || lowerContent.includes("sent collateral");
@@ -1052,39 +1090,44 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             const isReleaseSignal = lowerContent.includes("release funds") || lowerContent.includes("received my items") || lowerContent.includes("i received");
 
             if (deal && isDepositSignal && (deal.phase === "escrow_created" || deal.phase === "awaiting_deposits")) {
-                const party = senderWallet === deal.buyer ? "buyer" : "seller";
-                if (deal.phase === "escrow_created") {
-                    await dealPhaseManager.advanceToAwaitingDeposits(ticketId);
-                }
-                const depositResult = await dealPhaseManager.recordDeposit(ticketId, party);
-                logger.info("auto_deposit_recorded", { ticketId, party, phase: deal.phase, advancedTo: depositResult?.new_phase });
-
                 res.json({
-                    response: depositResult?.new_phase === "delivery"
-                        ? `Both deposits confirmed. Moving to delivery phase. Seller, please deliver the item now.`
-                        : `${party} deposit confirmed. Waiting for counterparty deposit.`,
-                    action: "RECORD_DEPOSIT",
-                    phase: depositResult?.new_phase || "awaiting_deposits",
+                    response: deal.escrow_pda
+                        ? `Deposit noted, but not marked complete from chat. Meridian will confirm only after the on-chain watcher sees funds arrive at escrow ${deal.escrow_pda}.`
+                        : "Escrow is not ready. Do not send funds to a personal wallet. Wait for Meridian to publish the on-chain escrow address.",
+                    action: "OBSERVE",
+                    phase: deal.phase,
+                    escrow_pda: deal.escrow_pda || null,
                 });
             } else if (deal && isDeliverySignal && (deal.phase === "delivery" || deal.phase === "awaiting_deposits")) {
-                // Seller delivering item — advance to delivery if needed
                 if (deal.phase === "awaiting_deposits") {
-                    // Force both deposits as confirmed for demo mode
-                    if (!deal.buyer_deposited) await dealPhaseManager.recordDeposit(ticketId, "buyer");
-                    if (!deal.seller_deposited) await dealPhaseManager.recordDeposit(ticketId, "seller");
+                    res.json({
+                        response: "Delivery noted, but this deal is still waiting for verified escrow deposits. Seller should deliver only after the escrow watcher confirms both deposits.",
+                        action: "OBSERVE",
+                        phase: "awaiting_deposits",
+                        escrow_pda: deal.escrow_pda || null,
+                    });
+                } else {
+                    res.json({
+                        response: "Item delivery noted. Buyer, please confirm receipt by saying '@middleman release funds'.",
+                        action: "OBSERVE",
+                        phase: "delivery",
+                    });
                 }
-                res.json({
-                    response: "Item delivery noted. Buyer, please confirm receipt by saying '@middleman release funds'.",
-                    action: "OBSERVE",
-                    phase: "delivery",
-                });
             } else if (deal && isReleaseSignal && (deal.phase === "delivery" || deal.phase === "awaiting_deposits" || deal.phase === "awaiting_release")) {
-                // Force both deposits if needed
-                if (!deal.buyer_deposited) await dealPhaseManager.recordDeposit(ticketId, "buyer");
-                if (!deal.seller_deposited) await dealPhaseManager.recordDeposit(ticketId, "seller");
+                if (deal.phase === "awaiting_deposits") {
+                    res.json({
+                        response: "Cannot release funds before verified deposits and delivery. Meridian is still waiting for the escrow watcher to confirm both sides funded the deal.",
+                        action: "OBSERVE",
+                        phase: "awaiting_deposits",
+                        escrow_pda: deal.escrow_pda || null,
+                    });
+                    logger.info("release_observed_before_deposits", { ticketId, senderWallet });
+                    return;
+                }
 
                 const releaseResult = await dealPhaseManager.handleAction("RELEASE_FUNDS", ticketId, senderWallet);
                 logger.info("release_attempted", { ticketId, success: releaseResult.success, phase: releaseResult.new_phase });
+                scheduleOnChainAction(ticketId, releaseResult);
 
                 res.json({
                     response: releaseResult.success
@@ -1103,13 +1146,12 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                     decision.reasoning
                 );
 
-                // Auto-advance: after CREATE_ESCROW, immediately move to awaiting_deposits
-                if (decision.action === "CREATE_ESCROW" && result.new_phase === "escrow_created") {
-                    const advanceResult = await dealPhaseManager.advanceToAwaitingDeposits(ticketId);
-                    if (advanceResult) {
-                        logger.info("auto_advanced_to_awaiting_deposits", { ticketId });
-                    }
+                if (result.success && decision.action === "CREATE_ESCROW" && decision.terms) {
+                    await ticketStore.recordNegotiatedTerms(ticketId, decision.terms).catch((err: any) => {
+                        logger.error("rest_record_negotiated_terms_failed", { ticketId }, err);
+                    });
                 }
+                scheduleOnChainAction(ticketId, result);
 
                 res.json({
                     response: soulEngine.wrapMessage(result.response.content, result.response.phase),

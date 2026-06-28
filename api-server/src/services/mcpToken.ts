@@ -6,6 +6,8 @@ export type McpScope =
     | 'offers:read'
     | 'offers:write'
     | 'deals:read'
+    | 'dm:read'
+    | 'dm:write'
     | 'per:run'
     | 'proofs:read'
     | 'vault:read'
@@ -26,6 +28,8 @@ export const MCP_DEFAULT_SCOPES: McpScope[] = [
     'offers:read',
     'offers:write',
     'deals:read',
+    'dm:read',
+    'dm:write',
     'proofs:read',
     'vault:read',
     'umbra:read',
@@ -35,6 +39,8 @@ const VALID_SCOPES = new Set<McpScope>([
     'offers:read',
     'offers:write',
     'deals:read',
+    'dm:read',
+    'dm:write',
     'per:run',
     'proofs:read',
     'vault:read',

@@ -14,6 +14,8 @@ type Scope =
   | "offers:read"
   | "offers:write"
   | "deals:read"
+  | "dm:read"
+  | "dm:write"
   | "per:run"
   | "proofs:read"
   | "vault:read"
@@ -79,6 +81,8 @@ const validScopes = new Set<Scope>([
   "offers:read",
   "offers:write",
   "deals:read",
+  "dm:read",
+  "dm:write",
   "per:run",
   "proofs:read",
   "vault:read",
@@ -130,7 +134,7 @@ function parseTokenRules(fallbackScopes: Set<Scope>): TokenRule[] {
 }
 
 const defaultScopes = parseScopes(
-  process.env.AIR_OTC_MCP_SCOPES || "offers:read,deals:read,proofs:read,vault:read,umbra:read",
+  process.env.AIR_OTC_MCP_SCOPES || "offers:read,deals:read,dm:read,proofs:read,vault:read,umbra:read",
   new Set(validScopes)
 );
 
@@ -578,6 +582,188 @@ const tools: ToolDefinition[] = [
             method: "POST",
             body: JSON.stringify({ content: args.content }),
           },
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_send_dm",
+    title: "Send Direct Message",
+    description:
+      "Send a private agent-to-agent direct message outside ticket chat, optionally linked to a ticket for delivery context. Requires dm:write scope.",
+    scope: "dm:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string", description: "Sender wallet." },
+        toWallet: { type: "string", description: "Recipient wallet." },
+        content: { type: "string", minLength: 1, maxLength: 10000 },
+        contentType: {
+          type: "string",
+          enum: ["text", "api_key", "url", "file_link", "credentials"],
+          default: "text",
+        },
+        ticketId: { type: "string" },
+        encrypted: { type: "boolean", default: false },
+        metadata: { type: "object", additionalProperties: true },
+        expiresAt: { type: "string", description: "Optional ISO timestamp for expiring sensitive content." },
+      },
+      ["wallet", "toWallet", "content"]
+    ),
+    handler: async (args) => {
+      requireScope(args, "dm:write");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      return toolOutput(
+        await httpJson(
+          "/v1/dm/send",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              toWallet: args.toWallet,
+              content: args.content,
+              contentType: args.contentType || "text",
+              ticketId: args.ticketId,
+              encrypted: args.encrypted === true,
+              metadata: args.metadata,
+              expiresAt: args.expiresAt,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_list_dm_inbox",
+    title: "List DM Inbox",
+    description: "List direct messages received by a wallet. Requires dm:read scope.",
+    scope: "dm:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        page: { type: "number", minimum: 1, default: 1 },
+        limit: { type: "number", minimum: 1, maximum: 50, default: 20 },
+        unread: { type: "boolean", default: false },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      requireScope(args, "dm:read");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      const query = new URLSearchParams();
+      if (args.page !== undefined) query.set("page", String(args.page));
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      if (args.unread !== undefined) query.set("unread", String(args.unread));
+      return toolOutput(
+        await httpJson(
+          `/v1/dm/inbox${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_get_dm_conversation",
+    title: "Get DM Conversation",
+    description: "Read the full direct-message conversation between this wallet and another wallet. Requires dm:read scope.",
+    scope: "dm:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        peerWallet: { type: "string" },
+        page: { type: "number", minimum: 1, default: 1 },
+        limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+      },
+      ["wallet", "peerWallet"]
+    ),
+    handler: async (args) => {
+      requireScope(args, "dm:read");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      const query = new URLSearchParams();
+      if (args.page !== undefined) query.set("page", String(args.page));
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/dm/conversation/${encodeURIComponent(args.peerWallet)}${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_get_dm_unread",
+    title: "Get DM Unread Count",
+    description: "Get unread direct-message counts for a wallet. Requires dm:read scope.",
+    scope: "dm:read",
+    inputSchema: objectSchema({ ...authSchema, wallet: { type: "string" } }, ["wallet"]),
+    handler: async (args) => {
+      requireScope(args, "dm:read");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      return toolOutput(
+        await httpJson(
+          "/v1/dm/unread",
+          {},
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_get_deal_dms",
+    title: "Get Deal Direct Messages",
+    description: "Read DMs linked to a specific ticket/deal for the calling wallet. Requires dm:read scope.",
+    scope: "dm:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        ticketId: { type: "string" },
+      },
+      ["wallet", "ticketId"]
+    ),
+    handler: async (args) => {
+      requireScope(args, "dm:read");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      return toolOutput(
+        await httpJson(
+          `/v1/dm/deal/${encodeURIComponent(args.ticketId)}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: args.wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_mark_dm_read",
+    title: "Mark DM Read",
+    description: "Mark one direct message as read. Requires dm:write scope.",
+    scope: "dm:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        messageId: { type: "string" },
+      },
+      ["wallet", "messageId"]
+    ),
+    handler: async (args) => {
+      requireScope(args, "dm:write");
+      assertConfiguredWallet(args.wallet, args.authToken);
+      return toolOutput(
+        await httpJson(
+          `/v1/dm/read/${encodeURIComponent(args.messageId)}`,
+          { method: "POST", body: JSON.stringify({}) },
           config.apiUrl,
           { delegatedWallet: args.wallet, authToken: args.authToken }
         )

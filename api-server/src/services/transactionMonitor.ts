@@ -20,6 +20,9 @@ import { SUCCESSFUL_TICKET_STATUSES } from './ticketStatusPolicy';
 
 const MONITOR_INTERVAL_MS = parseInt(process.env.MONITOR_INTERVAL_MS || '60000', 10);  // 1 min
 const STALE_DEAL_THRESHOLD_MS = parseInt(process.env.STALE_DEAL_THRESHOLD_MS || '3600000', 10); // 1 hour
+const STALE_NEGOTIATION_CANCEL_MS = parseInt(process.env.STALE_NEGOTIATION_CANCEL_MS || '86400000', 10); // 24 hours
+const STALE_NEGOTIATION_AUTO_CANCEL =
+    (process.env.STALE_NEGOTIATION_AUTO_CANCEL || 'true').toLowerCase() !== 'false';
 const SETTLEMENT_RATE_ALERT = parseFloat(process.env.SETTLEMENT_RATE_ALERT || '0.7'); // 70%
 
 // ═══════════════════════════════════════════════════════
@@ -47,6 +50,61 @@ let latestMetrics: MetricsSnapshot | null = null;
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
 const startTime = Date.now();
 
+export async function cancelStaleNegotiationTickets(now: number = Date.now()): Promise<number> {
+    if (!STALE_NEGOTIATION_AUTO_CANCEL || STALE_NEGOTIATION_CANCEL_MS <= 0) {
+        return 0;
+    }
+
+    const cutoff = new Date(now - STALE_NEGOTIATION_CANCEL_MS);
+    const candidates = await prisma.ticket.findMany({
+        where: {
+            status: 'negotiating',
+            createdAt: { lt: cutoff },
+        },
+        select: {
+            id: true,
+            offerId: true,
+            createdAt: true,
+            messages: {
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+                select: { createdAt: true },
+            },
+        },
+    });
+
+    let cancelled = 0;
+    for (const ticket of candidates) {
+        const lastActivity = ticket.messages[0]?.createdAt || ticket.createdAt;
+        if (lastActivity >= cutoff) {
+            continue;
+        }
+
+        const [ticketUpdate] = await prisma.$transaction([
+            prisma.ticket.updateMany({
+                where: { id: ticket.id, status: 'negotiating' },
+                data: { status: 'cancelled' },
+            }),
+            prisma.offer.updateMany({
+                where: { id: ticket.offerId, status: 'matched' },
+                data: { status: 'cancelled' },
+            }),
+        ]);
+
+        if (ticketUpdate.count > 0) {
+            cancelled += ticketUpdate.count;
+            logger.warn('stale_negotiation_auto_cancelled', {
+                ticketId: ticket.id,
+                offerId: ticket.offerId,
+                lastActivity: lastActivity.toISOString(),
+                cutoff: cutoff.toISOString(),
+            });
+        }
+    }
+
+    return cancelled;
+}
+
 // ═══════════════════════════════════════════════════════
 // CORE SWEEP
 // ═══════════════════════════════════════════════════════
@@ -56,6 +114,8 @@ async function sweep(): Promise<MetricsSnapshot> {
     const alerts: MetricsSnapshot['alerts'] = [];
 
     try {
+        const autoCancelledStaleDeals = await cancelStaleNegotiationTickets(now);
+
         // ── Parallel DB queries ──
         const [
             activeDeals,
@@ -91,6 +151,16 @@ async function sweep(): Promise<MetricsSnapshot> {
             const msg = `${staleDeals} deal(s) stuck in negotiating for > ${STALE_DEAL_THRESHOLD_MS / 60000}min`;
             alerts.push({ severity: 'warning', message: msg, timestamp: now });
             logger.warn('stale_deals_detected', { staleDeals, severity: 'warning' as AlertSeverity });
+        }
+
+        if (autoCancelledStaleDeals > 0) {
+            const msg = `${autoCancelledStaleDeals} stale negotiation ticket(s) auto-cancelled after ${STALE_NEGOTIATION_CANCEL_MS / 60000}min without activity`;
+            alerts.push({ severity: 'warning', message: msg, timestamp: now });
+            logger.warn('stale_negotiations_auto_cancelled', {
+                count: autoCancelledStaleDeals,
+                timeout_ms: STALE_NEGOTIATION_CANCEL_MS,
+                severity: 'warning' as AlertSeverity,
+            });
         }
 
         // ── Alert: Low settlement rate ──
