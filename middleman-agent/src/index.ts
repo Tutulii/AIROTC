@@ -187,12 +187,28 @@ async function heartbeatLoop(
     if (tickCount.value % 30 === 0) {
       try {
         const awaitingDeals = dealPhaseManager.listActiveDeals()
-          .filter(d => d.phase === "awaiting_deposits" && d.escrow_pda && d.terms);
+          .filter(d => (d.phase === "awaiting_deposits" || d.phase === "escrow_created") && d.escrow_pda && d.terms);
         for (const deal of awaitingDeals) {
           const expectedTotal = Math.floor(
             ((deal.terms!.collateral_buyer || 0) + (deal.terms!.collateral_seller || 0) + (deal.terms!.price || 0)) * LAMPORTS_PER_SOL
           );
           const connection = getConnection();
+          if (deal.phase === "escrow_created") {
+            const ctx = getDealContext(deal.ticket_id);
+            if (ctx) {
+              await dealPhaseManager.advanceToAwaitingDeposits(deal.ticket_id);
+              await watchForDeposits(
+                connection,
+                deal.ticket_id,
+                ctx.dealPda,
+                Math.floor((deal.terms!.collateral_buyer || 0) * LAMPORTS_PER_SOL),
+                Math.floor((deal.terms!.collateral_seller || 0) * LAMPORTS_PER_SOL),
+                Math.floor((deal.terms!.price || 0) * LAMPORTS_PER_SOL),
+              );
+            } else {
+              logger.warn("deposit_polling_watcher_attach_skipped_no_context", { ticket_id: deal.ticket_id });
+            }
+          }
           pollDepositsForActiveDeal(
             connection, deal.ticket_id, new PublicKey(deal.escrow_pda!), expectedTotal
           ).then(detected => {

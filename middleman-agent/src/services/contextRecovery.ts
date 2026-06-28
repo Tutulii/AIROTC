@@ -136,16 +136,23 @@ export async function recoverInFlightDeals(): Promise<void> {
         const phaseRecoveredCount = await dealPhaseManager.recoverAllDeals();
         logger.info("phase_state_recovery_finished", { recovered: phaseRecoveredCount });
 
-        // ── STEP 4: Re-activate deposit watchers for deals in awaiting_deposits ──
+        // ── STEP 4: Re-activate deposit watchers for deposit-ready deals ──
         const activeDeals = dealPhaseManager.listActiveDeals();
         let watcherCount = 0;
 
         for (const deal of activeDeals) {
-            if (deal.phase === "awaiting_deposits" && deal.escrow_pda && deal.terms) {
+            if ((deal.phase === "awaiting_deposits" || deal.phase === "escrow_created") && deal.escrow_pda && deal.terms) {
                 // Find matching execution context for the PDA
                 const ctx = dealContexts[deal.ticket_id];
                 if (ctx) {
                     try {
+                        if (deal.phase === "escrow_created") {
+                            await dealPhaseManager.advanceToAwaitingDeposits(deal.ticket_id);
+                            logger.info("deposit_watcher_recovery_advanced_to_awaiting", {
+                                ticket_id: deal.ticket_id,
+                                escrow_pda: deal.escrow_pda,
+                            });
+                        }
                         const connection = getConnection();
                         await watchForDeposits(
                             connection,
