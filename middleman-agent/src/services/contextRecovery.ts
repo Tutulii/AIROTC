@@ -72,6 +72,20 @@ async function healTerminalPhaseStatesFromDealStatus(): Promise<number> {
     return healed;
 }
 
+async function clearTerminalPaymentLocks(): Promise<number> {
+    const result = await prisma.dealPhaseState.updateMany({
+        where: {
+            phase: { in: ["completed", "cancelled", "refunded"] },
+            paymentLocked: true,
+        },
+        data: {
+            paymentLocked: false,
+        },
+    });
+
+    return result.count;
+}
+
 function hasBuyerReleaseAuthorization(deal: ReturnType<typeof dealPhaseManager.listActiveDeals>[number]): boolean {
     return deal.history.some((step) => (
         step.action === "RELEASE_FUNDS"
@@ -212,6 +226,13 @@ export async function recoverInFlightDeals(): Promise<void> {
             });
         }
 
+        const clearedTerminalLocksCount = await clearTerminalPaymentLocks();
+        if (clearedTerminalLocksCount > 0) {
+            logger.info("terminal_payment_locks_cleared", {
+                cleared: clearedTerminalLocksCount,
+            });
+        }
+
         // ── STEP 3: Restore DealPhaseState (state machine) ──
         const phaseRecoveredCount = await dealPhaseManager.recoverAllDeals();
         logger.info("phase_state_recovery_finished", { recovered: phaseRecoveredCount });
@@ -265,6 +286,7 @@ export async function recoverInFlightDeals(): Promise<void> {
         logger.info("startup_recovery_complete", {
             deal_contexts: contextRecoveredCount,
             phase_states: phaseRecoveredCount,
+            terminal_payment_locks_cleared: clearedTerminalLocksCount,
             premature_completed_releases: prematureReleaseRecoveredCount,
             deposit_watchers: watcherCount,
             authorized_release_recoveries: releaseRecoveryCount,

@@ -822,7 +822,12 @@ class DealPhaseManager {
       return;
     }
 
+    if (targetPhase === "completed" || targetPhase === "cancelled" || targetPhase === "refunded") {
+      deal.payment_locked = false;
+    }
+
     if (deal.phase === targetPhase) {
+      await this.persistDeal(deal);
       return;
     }
 
