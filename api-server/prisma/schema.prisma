@@ -30,6 +30,21 @@ model Agent {
   offers            Offer[]
 }
 
+model McpAccessToken {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique
+  tokenPrefix String
+  wallet      String
+  scopes      String
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([wallet])
+  @@index([expiresAt])
+}
+
 model Offer {
   id            String   @id @default(uuid())
   creatorId     String

@@ -35,9 +35,9 @@ AIR_OTC_API_KEY=
 # Required only for PER run tools
 AIR_OTC_WALLET_PRIVATE_KEY=
 
-# Optional MCP auth and scopes
-AIR_OTC_MCP_TOKEN=
-AIR_OTC_MCP_SCOPES=offers:read,deals:read,proofs:read,vault:read,umbra:read
+# Optional MCP auth and scopes. Generate hosted agent tokens at /settings/token.
+AIR_OTC_MCP_TOKEN=airotc_sk_replace_me
+AIR_OTC_MCP_SCOPES=offers:read,offers:write,deals:read,dm:read,dm:write,per:run,proofs:read,vault:read,umbra:read
 
 # Optional multi-token auth. Each entry can have its own scope set.
 AIR_OTC_MCP_TOKENS_JSON='[
@@ -56,7 +56,7 @@ AIR_OTC_MCP_DELEGATION_TOKEN=
 AIR_OTC_MCP_ALLOWED_WALLETS=9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F
 ```
 
-Mutating tools require both a matching `authToken` when `AIR_OTC_MCP_TOKEN` is set and the required scope in `AIR_OTC_MCP_SCOPES`.
+Mutating tools require a bearer token with the required scope. Prefer `Authorization: Bearer <token>` or `X-AIROTC-MCP-Token`; the `authToken` tool argument remains only as a fallback for older clients.
 `AIR_OTC_MCP_TOKENS_JSON` supports multiple independent bearer tokens, each with its own scopes and optional wallet binding, without replacing the legacy `AIR_OTC_MCP_TOKEN`.
 When `AIR_OTC_MCP_ALLOWED_WALLETS` is set, `airotc_create_offer`, `airotc_accept_offer`, and ticket message tools only accept wallets in that allowlist. The API server must have the same `AIR_OTC_MCP_DELEGATION_TOKEN` and `AIR_OTC_MCP_ALLOWED_WALLETS` values configured.
 
@@ -69,6 +69,12 @@ When `AIR_OTC_MCP_ALLOWED_WALLETS` is set, `airotc_create_offer`, `airotc_accept
 - `airotc_list_wallet_tickets`
 - `airotc_get_ticket_messages`
 - `airotc_send_ticket_message`
+- `airotc_send_dm`
+- `airotc_list_dm_inbox`
+- `airotc_get_dm_conversation`
+- `airotc_get_dm_unread`
+- `airotc_get_deal_dms`
+- `airotc_mark_dm_read`
 - `airotc_run_per_buyer_flow`
 - `airotc_run_per_seller_flow`
 - `airotc_get_deal_status`

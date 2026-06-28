@@ -64,6 +64,11 @@ type TokenRule = {
 type TokenAuth = {
   scopes: Set<Scope>;
   wallets: Set<string> | null;
+  tokenFormat?: "airotc_sk" | "mcp_v1" | "static";
+};
+
+type RequestContext = {
+  authToken?: string;
 };
 
 type McpTokenPayload = {
@@ -89,9 +94,12 @@ const validScopes = new Set<Scope>([
   "umbra:read",
 ]);
 
+const defaultFullScopes = new Set<Scope>(validScopes);
+const MCP_SHORT_TOKEN_PREFIX = "airotc_sk_";
+
 function parseScopes(value: string | string[] | undefined, fallback: Set<Scope>): Set<Scope> {
   if (!value) return new Set(fallback);
-  const items = Array.isArray(value) ? value : value.split(",");
+  const items = Array.isArray(value) ? value : value.split(/[\s,]+/);
   const parsed = items
     .map((scope) => scope.trim())
     .filter((scope): scope is Scope => validScopes.has(scope as Scope));
@@ -134,8 +142,9 @@ function parseTokenRules(fallbackScopes: Set<Scope>): TokenRule[] {
 }
 
 const defaultScopes = parseScopes(
-  process.env.AIR_OTC_MCP_SCOPES || "offers:read,deals:read,dm:read,proofs:read,vault:read,umbra:read",
-  new Set(validScopes)
+  process.env.AIR_OTC_MCP_SCOPES ||
+    "offers:read,offers:write,deals:read,dm:read,dm:write,per:run,proofs:read,vault:read,umbra:read",
+  defaultFullScopes
 );
 
 const config = {
@@ -206,10 +215,21 @@ function safeEqual(a: string, b: string): boolean {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
+function normalizeAuthToken(authToken?: string): string | undefined {
+  const trimmed = authToken?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.toLowerCase().startsWith("bearer ") ? trimmed.slice(7).trim() : trimmed;
+}
+
+function tokenFingerprint(authToken: string): string {
+  return crypto.createHash("sha256").update(authToken).digest("hex").slice(0, 12);
+}
+
 function verifyDynamicMcpToken(authToken?: string): TokenAuth | null {
-  if (!authToken?.startsWith("mcp_v1.")) return null;
+  const token = normalizeAuthToken(authToken);
+  if (!token?.startsWith("mcp_v1.")) return null;
   if (!config.mcpTokenSigningSecret || config.mcpTokenSigningSecret.length < 16) return null;
-  const parts = authToken.split(".");
+  const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [, encodedPayload, signature] = parts;
   const expected = crypto
@@ -217,7 +237,12 @@ function verifyDynamicMcpToken(authToken?: string): TokenAuth | null {
     .update(encodedPayload)
     .digest("base64url");
   if (!safeEqual(signature, expected)) return null;
-  const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as McpTokenPayload;
+  let payload: McpTokenPayload;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as McpTokenPayload;
+  } catch {
+    return null;
+  }
   const now = Math.floor(Date.now() / 1000);
   if (payload.v !== 1 || payload.iss !== "air-otc-api" || payload.aud !== "air-otc-mcp" || payload.exp <= now) {
     return null;
@@ -225,15 +250,43 @@ function verifyDynamicMcpToken(authToken?: string): TokenAuth | null {
   if (!isValidSolanaWallet(payload.sub)) return null;
   const scopes = parseScopes(payload.scopes, new Set());
   if (scopes.size === 0) return null;
-  return { scopes, wallets: new Set([payload.sub]) };
+  return { scopes, wallets: new Set([payload.sub]), tokenFormat: "mcp_v1" };
 }
 
-function assertDelegatedWalletAllowed(requestedWallet?: string, authToken?: string): asserts requestedWallet is string {
+async function verifyOpaqueMcpToken(authToken?: string): Promise<TokenAuth | null> {
+  const token = normalizeAuthToken(authToken);
+  if (!token?.startsWith(MCP_SHORT_TOKEN_PREFIX)) return null;
+  if (!config.mcpDelegationToken) {
+    throw new Error("mcp_delegation_token_not_configured");
+  }
+  const response = await fetch(`${config.apiUrl}/v1/mcp/verify`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${config.mcpDelegationToken}`,
+    },
+    body: JSON.stringify({ token }),
+  });
+  const bodyText = await response.text();
+  const parsed = bodyText ? JSON.parse(bodyText) : {};
+  if (!response.ok || parsed?.success === false) {
+    const reason = parsed?.error || response.statusText || "invalid";
+    throw new Error(`mcp_auth_failed:${reason}:fingerprint=${tokenFingerprint(token)}`);
+  }
+  const data = parsed.data || parsed;
+  const scopes = parseScopes(data.scopes, new Set());
+  if (scopes.size === 0 || typeof data.wallet !== "string" || !isValidSolanaWallet(data.wallet)) {
+    throw new Error("mcp_auth_failed:malformed_verification_response");
+  }
+  return { scopes, wallets: new Set([data.wallet]), tokenFormat: "airotc_sk" };
+}
+
+async function assertDelegatedWalletAllowed(requestedWallet?: string, authToken?: string): Promise<void> {
   if (!requestedWallet || !isValidSolanaWallet(requestedWallet)) {
     throw new Error("mcp_wallet_invalid");
   }
-  const dynamicAuth = verifyDynamicMcpToken(authToken);
-  if (dynamicAuth?.wallets?.has(requestedWallet)) {
+  const auth = await resolveTokenAuth(authToken);
+  if (auth?.wallets?.has(requestedWallet)) {
     return;
   }
   if (!config.allowedWallets.has(requestedWallet)) {
@@ -244,11 +297,11 @@ function assertDelegatedWalletAllowed(requestedWallet?: string, authToken?: stri
   }
 }
 
-function assertConfiguredWallet(requestedWallet?: string, authToken?: string): void {
+async function assertConfiguredWallet(requestedWallet?: string, authToken?: string): Promise<void> {
   if (!requestedWallet) return;
-  const auth = resolveTokenAuth(authToken);
+  const auth = await resolveTokenAuth(authToken);
   if (config.allowedWallets.size > 0) {
-    assertDelegatedWalletAllowed(requestedWallet, authToken);
+    await assertDelegatedWalletAllowed(requestedWallet, authToken);
     if (auth?.wallets && !auth.wallets.has(requestedWallet)) {
       throw new Error(`mcp_token_wallet_mismatch:${requestedWallet}`);
     }
@@ -266,7 +319,8 @@ function assertConfiguredWallet(requestedWallet?: string, authToken?: string): v
 const authSchema = {
   authToken: {
     type: "string",
-    description: "MCP bearer token. Required when AIR_OTC_MCP_TOKEN is set.",
+    description:
+      "MCP bearer token. Prefer Authorization: Bearer or X-AIROTC-MCP-Token headers; this body field remains as a fallback.",
   },
 };
 
@@ -279,25 +333,33 @@ function objectSchema(properties: Record<string, any>, required: string[] = []):
   };
 }
 
-function resolveTokenAuth(authToken?: string): TokenAuth | null {
-  const dynamicAuth = verifyDynamicMcpToken(authToken);
+async function resolveTokenAuth(authToken?: string): Promise<TokenAuth | null> {
+  const token = normalizeAuthToken(authToken);
+  const dynamicAuth = verifyDynamicMcpToken(token);
   if (dynamicAuth) return dynamicAuth;
-  const hasAnyToken = Boolean(config.mcpToken) || config.tokenRules.length > 0;
+  const opaqueAuth = await verifyOpaqueMcpToken(token);
+  if (opaqueAuth) return opaqueAuth;
+  const hasAnyToken =
+    Boolean(config.mcpToken) ||
+    config.tokenRules.length > 0 ||
+    Boolean(config.mcpDelegationToken) ||
+    Boolean(config.mcpTokenSigningSecret);
   if (!hasAnyToken) return { scopes: config.scopes, wallets: null };
-  if (!authToken) return null;
-  if (config.mcpToken && authToken === config.mcpToken) return { scopes: config.scopes, wallets: null };
-  const rule = config.tokenRules.find((candidate) => candidate.token === authToken);
-  return rule ? { scopes: rule.scopes, wallets: rule.wallets } : null;
+  if (!token) return null;
+  if (config.mcpToken && token === config.mcpToken) return { scopes: config.scopes, wallets: null, tokenFormat: "static" };
+  const rule = config.tokenRules.find((candidate) => candidate.token === token);
+  return rule ? { scopes: rule.scopes, wallets: rule.wallets, tokenFormat: "static" } : null;
 }
 
-function requireScope(args: { authToken?: string }, scope: Scope): void {
-  const auth = resolveTokenAuth(args.authToken);
+async function requireScope(args: { authToken?: string }, scope: Scope): Promise<TokenAuth> {
+  const auth = await resolveTokenAuth(args.authToken);
   if (!auth) {
     throw new Error(`mcp_auth_failed:${scope}`);
   }
   if (!auth.scopes.has(scope)) {
     throw new Error(`mcp_scope_missing:${scope}`);
   }
+  return auth;
 }
 
 function textResult(data: unknown) {
@@ -320,9 +382,10 @@ async function httpJson(
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json");
   if (options.delegatedWallet && baseUrl === config.apiUrl) {
-    assertDelegatedWalletAllowed(options.delegatedWallet, options.authToken);
-    if (options.authToken?.startsWith("mcp_v1.")) {
-      headers.set("x-airotc-mcp-user-token", options.authToken);
+    await assertDelegatedWalletAllowed(options.delegatedWallet, options.authToken);
+    const normalizedToken = normalizeAuthToken(options.authToken);
+    if (normalizedToken?.startsWith("mcp_v1.") || normalizedToken?.startsWith(MCP_SHORT_TOKEN_PREFIX)) {
+      headers.set("x-airotc-mcp-user-token", normalizedToken);
     } else {
       headers.set("x-airotc-mcp-delegation-token", config.mcpDelegationToken);
     }
@@ -413,7 +476,7 @@ const tools: ToolDefinition[] = [
       status: { type: "string" },
     }),
     handler: async (args) => {
-      requireScope(args, "offers:read");
+      await requireScope(args, "offers:read");
       const query = new URLSearchParams();
       if (args.asset) query.set("asset", args.asset);
       if (args.mode) query.set("mode", args.mode);
@@ -443,8 +506,8 @@ const tools: ToolDefinition[] = [
       ["wallet", "asset", "mode", "amount", "price", "collateral"]
     ),
     handler: async (args) => {
-      requireScope(args, "offers:write");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "offers:write");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson("/v1/offers", {
           method: "POST",
@@ -481,8 +544,8 @@ const tools: ToolDefinition[] = [
       ["offerId", "wallet"]
     ),
     handler: async (args) => {
-      requireScope(args, "offers:write");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "offers:write");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson(`/v1/offers/${encodeURIComponent(args.offerId)}/accept`, {
           method: "POST",
@@ -512,8 +575,8 @@ const tools: ToolDefinition[] = [
       ["wallet"]
     ),
     handler: async (args) => {
-      requireScope(args, "deals:read");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "deals:read");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       const query = new URLSearchParams();
       if (args.status) query.set("status", args.status);
       if (args.activeOnly !== undefined) query.set("activeOnly", String(args.activeOnly));
@@ -541,8 +604,8 @@ const tools: ToolDefinition[] = [
       ["ticketId", "wallet"]
     ),
     handler: async (args) => {
-      requireScope(args, "deals:read");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "deals:read");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson(
           `/v1/tickets/${encodeURIComponent(args.ticketId)}/messages`,
@@ -573,8 +636,8 @@ const tools: ToolDefinition[] = [
       ["ticketId", "wallet", "content"]
     ),
     handler: async (args) => {
-      requireScope(args, "offers:write");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "offers:write");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson(
           `/v1/tickets/${encodeURIComponent(args.ticketId)}/messages`,
@@ -613,8 +676,8 @@ const tools: ToolDefinition[] = [
       ["wallet", "toWallet", "content"]
     ),
     handler: async (args) => {
-      requireScope(args, "dm:write");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "dm:write");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson(
           "/v1/dm/send",
@@ -652,8 +715,8 @@ const tools: ToolDefinition[] = [
       ["wallet"]
     ),
     handler: async (args) => {
-      requireScope(args, "dm:read");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "dm:read");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       const query = new URLSearchParams();
       if (args.page !== undefined) query.set("page", String(args.page));
       if (args.limit !== undefined) query.set("limit", String(args.limit));
@@ -684,8 +747,8 @@ const tools: ToolDefinition[] = [
       ["wallet", "peerWallet"]
     ),
     handler: async (args) => {
-      requireScope(args, "dm:read");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "dm:read");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       const query = new URLSearchParams();
       if (args.page !== undefined) query.set("page", String(args.page));
       if (args.limit !== undefined) query.set("limit", String(args.limit));
@@ -706,8 +769,8 @@ const tools: ToolDefinition[] = [
     scope: "dm:read",
     inputSchema: objectSchema({ ...authSchema, wallet: { type: "string" } }, ["wallet"]),
     handler: async (args) => {
-      requireScope(args, "dm:read");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "dm:read");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson(
           "/v1/dm/unread",
@@ -732,8 +795,8 @@ const tools: ToolDefinition[] = [
       ["wallet", "ticketId"]
     ),
     handler: async (args) => {
-      requireScope(args, "dm:read");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "dm:read");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson(
           `/v1/dm/deal/${encodeURIComponent(args.ticketId)}`,
@@ -758,8 +821,8 @@ const tools: ToolDefinition[] = [
       ["wallet", "messageId"]
     ),
     handler: async (args) => {
-      requireScope(args, "dm:write");
-      assertConfiguredWallet(args.wallet, args.authToken);
+      await requireScope(args, "dm:write");
+      await assertConfiguredWallet(args.wallet, args.authToken);
       return toolOutput(
         await httpJson(
           `/v1/dm/read/${encodeURIComponent(args.messageId)}`,
@@ -777,7 +840,7 @@ const tools: ToolDefinition[] = [
     scope: "deals:read",
     inputSchema: objectSchema({ ...authSchema, ticketId: { type: "string" } }, ["ticketId"]),
     handler: async (args) => {
-      requireScope(args, "deals:read");
+      await requireScope(args, "deals:read");
       return toolOutput(
         await bestEffort("middleman_status", () =>
           httpJson(`/v1/deals/${encodeURIComponent(args.ticketId)}/status`, {}, config.middlemanUrl)
@@ -792,7 +855,7 @@ const tools: ToolDefinition[] = [
     scope: "proofs:read",
     inputSchema: objectSchema({ ...authSchema, ticketId: { type: "string" } }, ["ticketId"]),
     handler: async (args) => {
-      requireScope(args, "proofs:read");
+      await requireScope(args, "proofs:read");
       const ticketId = encodeURIComponent(args.ticketId);
       return toolOutput({
         ticketId: args.ticketId,
@@ -812,7 +875,7 @@ const tools: ToolDefinition[] = [
     scope: "vault:read",
     inputSchema: objectSchema({ ...authSchema }),
     handler: async (args) => {
-      requireScope(args, "vault:read");
+      await requireScope(args, "vault:read");
       return toolOutput({
         confidential: await bestEffort("confidential_status", () =>
           httpJson("/v1/confidential/status", {}, config.middlemanUrl)
@@ -828,7 +891,7 @@ const tools: ToolDefinition[] = [
     scope: "umbra:read",
     inputSchema: objectSchema({ ...authSchema, ticketId: { type: "string" } }, ["ticketId"]),
     handler: async (args) => {
-      requireScope(args, "umbra:read");
+      await requireScope(args, "umbra:read");
       const ticketId = encodeURIComponent(args.ticketId);
       return toolOutput({
         ticketId: args.ticketId,
@@ -854,7 +917,7 @@ const tools: ToolDefinition[] = [
       ["offerId", "terms"]
     ),
     handler: async (args) => {
-      requireScope(args, "per:run");
+      await requireScope(args, "per:run");
       const client = await createSdkClient();
       try {
         return toolOutput(
@@ -885,7 +948,7 @@ const tools: ToolDefinition[] = [
       ["offer", "terms", "deliveryContent"]
     ),
     handler: async (args) => {
-      requireScope(args, "per:run");
+      await requireScope(args, "per:run");
       const client = await createSdkClient();
       try {
         return toolOutput(
@@ -943,7 +1006,12 @@ function listTools() {
   };
 }
 
-async function callTool(params: any) {
+function mergeRequestAuth(args: Record<string, any>, context: RequestContext): Record<string, any> {
+  if (!context.authToken) return args;
+  return { ...args, authToken: context.authToken };
+}
+
+async function callTool(params: any, context: RequestContext = {}) {
   const parsed = z
     .object({
       name: z.string(),
@@ -954,7 +1022,7 @@ async function callTool(params: any) {
   if (!tool) {
     throw new Error(`unknown_tool:${parsed.name}`);
   }
-  return await tool.handler(parsed.arguments || {});
+  return await tool.handler(mergeRequestAuth(parsed.arguments || {}, context));
 }
 
 async function readResource(params: any) {
@@ -1018,7 +1086,11 @@ async function readResource(params: any) {
   throw new Error(`unknown_resource:${uri}`);
 }
 
-async function dispatch(method: string, params: any): Promise<any> {
+async function dispatch(method: string, params: any, context: RequestContext = {}): Promise<any> {
+  const directTool = tools.find((candidate) => candidate.name === method);
+  if (directTool) {
+    return await directTool.handler(mergeRequestAuth(params || {}, context));
+  }
   switch (method) {
     case "initialize":
       return {
@@ -1037,7 +1109,7 @@ async function dispatch(method: string, params: any): Promise<any> {
     case "tools/list":
       return listTools();
     case "tools/call":
-      return await callTool(params);
+      return await callTool(params, context);
     case "resources/list":
       return {
         resources: staticResources.map(({ uri, name, title, description, mimeType }) => ({
@@ -1061,7 +1133,7 @@ async function dispatch(method: string, params: any): Promise<any> {
   }
 }
 
-async function handleJsonRpc(request: JsonRpcRequest): Promise<any | null> {
+async function handleJsonRpc(request: JsonRpcRequest, context: RequestContext = {}): Promise<any | null> {
   if (!request.id && request.id !== 0) {
     return null;
   }
@@ -1076,7 +1148,7 @@ async function handleJsonRpc(request: JsonRpcRequest): Promise<any | null> {
     return {
       jsonrpc: "2.0",
       id: request.id,
-      result: await dispatch(request.method, request.params),
+        result: await dispatch(request.method, request.params, context),
     };
   } catch (error: any) {
     return {
@@ -1120,12 +1192,24 @@ async function startStdio(): Promise<void> {
   });
 }
 
+function extractHttpAuthToken(req: express.Request): string | undefined {
+  const authorization = req.headers.authorization;
+  if (typeof authorization === "string" && authorization.toLowerCase().startsWith("bearer ")) {
+    return normalizeAuthToken(authorization);
+  }
+  const header = req.headers["x-airotc-mcp-token"];
+  const value = Array.isArray(header) ? header[0] : header;
+  return typeof value === "string" ? normalizeAuthToken(value) : undefined;
+}
+
 async function startHttp(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.post("/mcp", async (req, res) => {
+    const headerToken = extractHttpAuthToken(req);
+    const context: RequestContext = headerToken ? { authToken: headerToken } : {};
     if (Array.isArray(req.body)) {
-      const responses = (await Promise.all(req.body.map((entry) => handleJsonRpc(entry)))).filter(Boolean);
+      const responses = (await Promise.all(req.body.map((entry) => handleJsonRpc(entry, context)))).filter(Boolean);
       if (responses.length === 0) {
         res.status(202).end();
         return;
@@ -1133,7 +1217,7 @@ async function startHttp(): Promise<void> {
       res.json(responses);
       return;
     }
-    const response = await handleJsonRpc(req.body);
+    const response = await handleJsonRpc(req.body, context);
     if (!response) {
       res.status(202).end();
       return;
@@ -1167,8 +1251,19 @@ async function startHttp(): Promise<void> {
   });
 }
 
-if (process.argv.includes("--http")) {
-  await startHttp();
-} else {
-  await startStdio();
+export const __test = {
+  tools,
+  staticResources,
+  resourceTemplates,
+  extractHttpAuthToken,
+  mergeRequestAuth,
+  parseScopes,
+};
+
+if (process.env.AIR_OTC_MCP_NO_AUTOSTART !== "1") {
+  if (process.argv.includes("--http")) {
+    await startHttp();
+  } else {
+    await startStdio();
+  }
 }

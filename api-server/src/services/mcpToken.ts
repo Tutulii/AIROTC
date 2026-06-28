@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import bs58 from 'bs58';
 import nacl from 'tweetnacl';
+import { prisma } from '../lib/prisma';
 
 export type McpScope =
     | 'offers:read'
@@ -24,18 +25,17 @@ export interface McpTokenPayload {
     jti: string;
 }
 
-export const MCP_DEFAULT_SCOPES: McpScope[] = [
-    'offers:read',
-    'offers:write',
-    'deals:read',
-    'dm:read',
-    'dm:write',
-    'proofs:read',
-    'vault:read',
-    'umbra:read',
-];
+export type McpTokenFormat = 'airotc_sk' | 'mcp_v1';
 
-const VALID_SCOPES = new Set<McpScope>([
+export interface VerifiedMcpToken {
+    wallet: string;
+    scopes: McpScope[];
+    expiresAt: number;
+    tokenFormat: McpTokenFormat;
+    tokenId?: string;
+}
+
+export const MCP_FULL_AGENT_SCOPES: McpScope[] = [
     'offers:read',
     'offers:write',
     'deals:read',
@@ -45,8 +45,21 @@ const VALID_SCOPES = new Set<McpScope>([
     'proofs:read',
     'vault:read',
     'umbra:read',
-]);
+];
 
+export const MCP_READ_ONLY_SCOPES: McpScope[] = [
+    'offers:read',
+    'deals:read',
+    'dm:read',
+    'proofs:read',
+    'vault:read',
+    'umbra:read',
+];
+
+export const MCP_DEFAULT_SCOPES = MCP_FULL_AGENT_SCOPES;
+export const MCP_SHORT_TOKEN_PREFIX = 'airotc_sk_';
+
+const VALID_SCOPES = new Set<McpScope>(MCP_FULL_AGENT_SCOPES);
 const MAX_EXPIRY_SECONDS = 30 * 24 * 60 * 60;
 const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000;
 
@@ -77,11 +90,20 @@ function safeEqual(a: string, b: string): boolean {
     return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
+function clampExpirySeconds(value: number): number {
+    return Math.min(Math.max(Math.floor(value), 60), MAX_EXPIRY_SECONDS);
+}
+
+function parseScopeItems(scopes: string | string[]): string[] {
+    if (Array.isArray(scopes)) return scopes;
+    return scopes.split(/[\s,]+/);
+}
+
 export function normalizeMcpScopes(scopes: unknown): McpScope[] {
-    if (!Array.isArray(scopes)) {
+    if (!Array.isArray(scopes) && typeof scopes !== 'string') {
         return [...MCP_DEFAULT_SCOPES];
     }
-    const normalized = scopes
+    const normalized = parseScopeItems(scopes)
         .filter((scope): scope is string => typeof scope === 'string')
         .map((scope) => scope.trim())
         .filter((scope): scope is McpScope => VALID_SCOPES.has(scope as McpScope));
@@ -152,27 +174,70 @@ export function verifyMcpTokenRequestSignature(params: {
     }
 }
 
-export function issueMcpToken(params: {
+export function createMcpOpaqueToken(randomBytes: (size: number) => Buffer = crypto.randomBytes): string {
+    return `${MCP_SHORT_TOKEN_PREFIX}${randomBytes(16).toString('base64url')}`;
+}
+
+export function hashMcpAccessToken(token: string): string {
+    return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+export async function issueMcpToken(params: {
     publicKey: string;
     scopes: McpScope[];
     expiresInSeconds: number;
-}): { token: string; payload: McpTokenPayload } {
+}): Promise<{ token: string; payload: McpTokenPayload; tokenFormat: 'airotc_sk' }> {
+    const scopes = normalizeMcpScopes(params.scopes);
+    const expiresInSeconds = clampExpirySeconds(params.expiresInSeconds);
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = new Date((now + expiresInSeconds) * 1000);
+    const token = createMcpOpaqueToken();
+    const tokenHash = hashMcpAccessToken(token);
+
+    const record = await prisma.mcpAccessToken.create({
+        data: {
+            tokenHash,
+            tokenPrefix: token.slice(0, 18),
+            wallet: params.publicKey,
+            scopes: JSON.stringify(scopes),
+            expiresAt,
+        },
+    });
+
+    return {
+        token,
+        tokenFormat: 'airotc_sk',
+        payload: {
+            v: 1,
+            iss: 'air-otc-api',
+            aud: 'air-otc-mcp',
+            sub: params.publicKey,
+            scopes,
+            iat: now,
+            exp: Math.floor(expiresAt.getTime() / 1000),
+            jti: record.id,
+        },
+    };
+}
+
+export function issueLegacyMcpToken(params: {
+    publicKey: string;
+    scopes: McpScope[];
+    expiresInSeconds: number;
+}): { token: string; payload: McpTokenPayload; tokenFormat: 'mcp_v1' } {
     const secret = mcpTokenSigningSecret();
     if (!secret || secret.length < 16) {
         throw new Error('MCP token signing secret is not configured');
     }
 
-    const expiresInSeconds = Math.min(
-        Math.max(Math.floor(params.expiresInSeconds), 60),
-        MAX_EXPIRY_SECONDS,
-    );
+    const expiresInSeconds = clampExpirySeconds(params.expiresInSeconds);
     const now = Math.floor(Date.now() / 1000);
     const payload: McpTokenPayload = {
         v: 1,
         iss: 'air-otc-api',
         aud: 'air-otc-mcp',
         sub: params.publicKey,
-        scopes: params.scopes,
+        scopes: normalizeMcpScopes(params.scopes),
         iat: now,
         exp: now + expiresInSeconds,
         jti: crypto.randomBytes(16).toString('hex'),
@@ -183,6 +248,7 @@ export function issueMcpToken(params: {
     return {
         token: `mcp_v1.${encodedPayload}.${signature}`,
         payload,
+        tokenFormat: 'mcp_v1',
     };
 }
 
@@ -213,4 +279,60 @@ export function verifyMcpToken(token: string): McpTokenPayload {
     }
     payload.scopes = normalizeMcpScopes(payload.scopes);
     return payload;
+}
+
+function parseStoredScopes(value: string): McpScope[] {
+    try {
+        return normalizeMcpScopes(JSON.parse(value));
+    } catch {
+        return normalizeMcpScopes(value);
+    }
+}
+
+export async function verifyOpaqueMcpToken(token: string): Promise<VerifiedMcpToken> {
+    if (!token.startsWith(MCP_SHORT_TOKEN_PREFIX)) {
+        throw new Error('Invalid MCP token format');
+    }
+
+    const tokenHash = hashMcpAccessToken(token);
+    const record = await prisma.mcpAccessToken.findUnique({ where: { tokenHash } });
+    if (!record) {
+        throw new Error('Invalid MCP token');
+    }
+    if (record.revokedAt) {
+        throw new Error('MCP token revoked');
+    }
+    const now = new Date();
+    if (record.expiresAt <= now) {
+        throw new Error('MCP token expired');
+    }
+
+    await prisma.mcpAccessToken
+        .update({
+            where: { id: record.id },
+            data: { lastUsedAt: now },
+        })
+        .catch(() => undefined);
+
+    return {
+        wallet: record.wallet,
+        scopes: parseStoredScopes(record.scopes),
+        expiresAt: Math.floor(record.expiresAt.getTime() / 1000),
+        tokenFormat: 'airotc_sk',
+        tokenId: record.id,
+    };
+}
+
+export async function verifyAnyMcpToken(token: string): Promise<VerifiedMcpToken> {
+    if (token.startsWith(MCP_SHORT_TOKEN_PREFIX)) {
+        return verifyOpaqueMcpToken(token);
+    }
+    const payload = verifyMcpToken(token);
+    return {
+        wallet: payload.sub,
+        scopes: payload.scopes,
+        expiresAt: payload.exp,
+        tokenFormat: 'mcp_v1',
+        tokenId: payload.jti,
+    };
 }

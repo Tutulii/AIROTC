@@ -98,7 +98,7 @@ export interface McpTokenIssueResponse {
   scopes: string[];
   issuedAt: number;
   expiresAt: number;
-  tokenFormat: "mcp_v1";
+  tokenFormat: "airotc_sk" | "mcp_v1";
 }
 
 export interface OffersResponse {

@@ -20,5 +20,6 @@ ENV PRISMA_HIDE_UPDATE_MESSAGE="true"
 
 EXPOSE 3000
 
-# Start with prisma db push to ensure schema is synced, then start app
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npx ts-node src/server.ts"]
+# Apply committed migrations first. Fall back to a non-destructive schema sync
+# for legacy Railway databases that were originally bootstrapped with db push.
+CMD ["sh", "-c", "npx prisma migrate deploy || npx prisma db push; npx ts-node src/server.ts"]

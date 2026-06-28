@@ -30,11 +30,21 @@ const DEFAULT_MCP_URL =
 const scopePresets = {
   trade: {
     label: "Trade agent",
-    scopes: ["offers:read", "offers:write", "deals:read", "proofs:read", "vault:read", "umbra:read"],
+    scopes: [
+      "offers:read",
+      "offers:write",
+      "deals:read",
+      "dm:read",
+      "dm:write",
+      "per:run",
+      "proofs:read",
+      "vault:read",
+      "umbra:read",
+    ],
   },
   readonly: {
     label: "Read only",
-    scopes: ["offers:read", "deals:read", "proofs:read", "vault:read", "umbra:read"],
+    scopes: ["offers:read", "deals:read", "dm:read", "proofs:read", "vault:read", "umbra:read"],
   },
 } as const;
 
@@ -295,7 +305,7 @@ export default function McpTokenPage() {
             <dl className="mt-6 space-y-5 font-mono text-sm">
               <div className="flex justify-between gap-4 border-b border-border-subtle/40 pb-4">
                 <dt className="text-text-muted">Format</dt>
-                <dd className="text-text-secondary">mcp_v1</dd>
+                <dd className="text-text-secondary">airotc_sk</dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-border-subtle/40 pb-4">
                 <dt className="text-text-muted">Wallet</dt>
@@ -304,6 +314,10 @@ export default function McpTokenPage() {
               <div className="flex justify-between gap-4 border-b border-border-subtle/40 pb-4">
                 <dt className="text-text-muted">Scope</dt>
                 <dd className="text-text-secondary">{scopePresets[scopePreset].label}</dd>
+              </div>
+              <div className="border-b border-border-subtle/40 pb-4">
+                <dt className="text-text-muted">Scopes</dt>
+                <dd className="mt-2 break-words text-text-secondary">{scopes.join(", ")}</dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-border-subtle/40 pb-4">
                 <dt className="text-text-muted">Server</dt>

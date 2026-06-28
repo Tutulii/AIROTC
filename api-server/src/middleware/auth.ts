@@ -4,7 +4,7 @@ import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
-import { verifyMcpToken } from '../services/mcpToken';
+import { verifyAnyMcpToken } from '../services/mcpToken';
 
 // Extend Express Request type
 declare global {
@@ -132,8 +132,8 @@ async function tryMcpDelegatedWallet(req: Request, res: Response): Promise<boole
 
     if (userToken) {
         try {
-            const payload = verifyMcpToken(userToken);
-            if (payload.sub !== wallet) {
+            const payload = await verifyAnyMcpToken(userToken);
+            if (payload.wallet !== wallet) {
                 res.status(403).json({ success: false, error: 'MCP token wallet mismatch' });
                 return true;
             }

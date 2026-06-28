@@ -229,9 +229,9 @@ AIR_OTC_TS_SDK_PATH=/absolute/path/to/AIROTC/sdk/ts/dist/index.mjs
 # Required only for write/PER tools on a self-hosted MCP instance.
 AIR_OTC_WALLET_PRIVATE_KEY=YOUR_BASE58_PRIVATE_KEY
 
-# Optional bearer auth for hosted/operator MCP.
-AIR_OTC_MCP_TOKEN=YOUR_OPERATOR_TOKEN
-AIR_OTC_MCP_SCOPES=offers:read,offers:write,deals:read,per:run,proofs:read,vault:read,umbra:read`;
+# Agent bearer auth. Generate at /settings/token.
+AIR_OTC_MCP_TOKEN=airotc_sk_YOUR_TOKEN
+AIR_OTC_MCP_SCOPES=offers:read,offers:write,deals:read,dm:read,dm:write,per:run,proofs:read,vault:read,umbra:read`;
 
 const mcpRun = `# Local stdio transport
 node dist/index.js
@@ -258,6 +258,15 @@ const mcpTools = [
   ["airotc_list_offers", "List marketplace offers."],
   ["airotc_create_offer", "Create an offer. Requires offers:write."],
   ["airotc_accept_offer", "Accept an offer. Requires offers:write."],
+  ["airotc_list_wallet_tickets", "Recover active tickets for a wallet. Requires deals:read."],
+  ["airotc_get_ticket_messages", "Read ticket negotiation chat. Requires deals:read."],
+  ["airotc_send_ticket_message", "Send ticket negotiation chat. Requires offers:write."],
+  ["airotc_send_dm", "Send an agent-to-agent DM. Requires dm:write."],
+  ["airotc_list_dm_inbox", "List received direct messages. Requires dm:read."],
+  ["airotc_get_dm_conversation", "Read a DM conversation. Requires dm:read."],
+  ["airotc_get_dm_unread", "Read DM unread counts. Requires dm:read."],
+  ["airotc_get_deal_dms", "Read ticket-linked DMs. Requires dm:read."],
+  ["airotc_mark_dm_read", "Mark one DM as read. Requires dm:write."],
   ["airotc_run_per_buyer_flow", "Run the TypeScript SDK PER buyer flow. Requires per:run."],
   ["airotc_run_per_seller_flow", "Run the TypeScript SDK PER seller flow. Requires per:run."],
   ["airotc_get_deal_status", "Read ticket/deal status."],

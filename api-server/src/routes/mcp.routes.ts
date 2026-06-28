@@ -1,9 +1,13 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import {
     buildMcpTokenRequestMessage,
     issueMcpToken,
+    MCP_FULL_AGENT_SCOPES,
+    MCP_READ_ONLY_SCOPES,
     mcpTokenSigningSecret,
     normalizeMcpScopes,
+    verifyAnyMcpToken,
     verifyMcpTokenRequestSignature,
 } from '../services/mcpToken';
 
@@ -17,14 +21,45 @@ function clampExpiry(value: unknown): number {
     return Math.min(Math.max(Math.floor(parsed), 60), 30 * 24 * 60 * 60);
 }
 
+function safeEqual(a: string, b: string): boolean {
+    const left = Buffer.from(a);
+    const right = Buffer.from(b);
+    return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function bearerToken(req: Request): string {
+    const authorization = String(req.headers.authorization || '').trim();
+    if (authorization.toLowerCase().startsWith('bearer ')) {
+        return authorization.slice(7).trim();
+    }
+    const delegated = req.headers['x-airotc-mcp-delegation-token'];
+    return Array.isArray(delegated) ? String(delegated[0] || '').trim() : String(delegated || '').trim();
+}
+
+function requireInternalMcpAuth(req: Request, res: Response): boolean {
+    const expected = process.env.AIR_OTC_MCP_DELEGATION_TOKEN || '';
+    const token = bearerToken(req);
+    if (!expected || !token || !safeEqual(token, expected)) {
+        res.status(401).json({ success: false, error: 'Invalid MCP internal verification token' });
+        return false;
+    }
+    return true;
+}
+
 router.get('/config', (_req: Request, res: Response) => {
     res.json({
         success: true,
         data: {
-            tokenFormat: 'mcp_v1',
-            tokenIssuerReady: mcpTokenSigningSecret().length >= 16,
+            tokenFormat: 'airotc_sk',
+            legacyTokenFormat: 'mcp_v1',
+            tokenIssuerReady: true,
+            legacyTokenIssuerReady: mcpTokenSigningSecret().length >= 16,
             mcpUrl: process.env.AIR_OTC_PUBLIC_MCP_URL || process.env.NEXT_PUBLIC_MCP_URL || '',
             defaultExpiresInSeconds: 7 * 24 * 60 * 60,
+            scopePresets: {
+                trade: MCP_FULL_AGENT_SCOPES,
+                readonly: MCP_READ_ONLY_SCOPES,
+            },
         },
     });
 });
@@ -51,7 +86,7 @@ router.post('/message', (req: Request, res: Response) => {
     });
 });
 
-router.post('/token', (req: Request, res: Response) => {
+router.post('/token', async (req: Request, res: Response) => {
     try {
         const publicKey = String(req.body?.publicKey || '').trim();
         const signature = String(req.body?.signature || '').trim();
@@ -72,7 +107,7 @@ router.post('/token', (req: Request, res: Response) => {
             expiresInSeconds,
         });
 
-        const issued = issueMcpToken({ publicKey, scopes, expiresInSeconds });
+        const issued = await issueMcpToken({ publicKey, scopes, expiresInSeconds });
         res.json({
             success: true,
             data: {
@@ -82,12 +117,44 @@ router.post('/token', (req: Request, res: Response) => {
                 scopes: issued.payload.scopes,
                 issuedAt: issued.payload.iat,
                 expiresAt: issued.payload.exp,
-                tokenFormat: 'mcp_v1',
+                tokenFormat: issued.tokenFormat,
             },
         });
     } catch (error: any) {
         const message = error?.message || 'Failed to issue MCP token';
         const status = message.includes('signing secret') ? 503 : 400;
+        res.status(status).json({ success: false, error: message });
+    }
+});
+
+router.post('/verify', async (req: Request, res: Response) => {
+    if (!requireInternalMcpAuth(req, res)) return;
+    try {
+        const token = String(req.body?.token || '').trim();
+        const wallet = typeof req.body?.wallet === 'string' ? req.body.wallet.trim() : '';
+        if (!token) {
+            res.status(400).json({ success: false, error: 'token is required' });
+            return;
+        }
+
+        const verified = await verifyAnyMcpToken(token);
+        if (wallet && verified.wallet !== wallet) {
+            res.status(403).json({ success: false, error: 'mcp_wallet_mismatch' });
+            return;
+        }
+
+        res.json({
+            success: true,
+            data: {
+                wallet: verified.wallet,
+                scopes: verified.scopes,
+                expiresAt: verified.expiresAt,
+                tokenFormat: verified.tokenFormat,
+            },
+        });
+    } catch (error: any) {
+        const message = error?.message || 'Invalid MCP token';
+        const status = message.includes('expired') ? 401 : message.includes('revoked') ? 403 : 401;
         res.status(status).json({ success: false, error: message });
     }
 });
