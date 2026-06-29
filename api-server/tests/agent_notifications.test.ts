@@ -87,7 +87,7 @@ describe('agent notification channels', () => {
                 type: 'telegram',
                 enabled: true,
                 events: JSON.stringify(['dm.received']),
-                config: { chatId: '-1004494003789', threadId: 42 },
+                config: { chatId: '-1004494003789', threadId: 42, mention: '@newraclaw_bot' },
                 lastSentAt: null,
             },
         ]);
@@ -113,6 +113,7 @@ describe('agent notification channels', () => {
             chat_id: '-1004494003789',
             message_thread_id: 42,
         });
+        expect(JSON.parse(request.body).text).toContain('@newraclaw_bot AIR OTC agent alert');
         expect(JSON.parse(request.body).text).toContain('Yo big bro');
         expect(prismaMock.agentNotificationChannel.updateMany).toHaveBeenCalledWith(expect.objectContaining({
             where: { id: 'channel-1' },

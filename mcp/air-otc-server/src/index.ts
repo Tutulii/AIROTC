@@ -572,7 +572,7 @@ const tools: ToolDefinition[] = [
           config: {
             telegram: {
               required: ["chatId"],
-              optional: ["threadId"],
+              optional: ["threadId", "mention"],
               botToken: "platform-managed",
             },
           },
@@ -691,6 +691,10 @@ const tools: ToolDefinition[] = [
           type: "number",
           description: "Optional Telegram forum topic thread id.",
         },
+        mention: {
+          type: "string",
+          description: "Optional @username to include at the top of each Telegram wake-up message.",
+        },
         events: {
           type: "array",
           items: { type: "string", enum: [...TELEGRAM_NOTIFICATION_EVENT_NAMES] },
@@ -705,6 +709,7 @@ const tools: ToolDefinition[] = [
       const wallet = await delegatedWalletFromArgs(args, auth);
       const configBody: Record<string, unknown> = { chatId: args.chatId };
       if (args.threadId !== undefined) configBody.threadId = args.threadId;
+      if (args.mention !== undefined) configBody.mention = args.mention;
       return toolOutput(
         await httpJson(
           "/v1/agents/notifications",

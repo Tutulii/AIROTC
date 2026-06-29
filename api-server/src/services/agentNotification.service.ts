@@ -10,6 +10,7 @@ type NotificationChannelType = 'telegram';
 type TelegramConfig = {
     chatId: string;
     threadId?: number;
+    mention?: string;
 };
 
 type NotificationChannelInput = {
@@ -121,7 +122,20 @@ function normalizeTelegramConfig(config: unknown): TelegramConfig {
         threadId = parsed;
     }
 
-    return threadId ? { chatId, threadId } : { chatId };
+    const mentionValue = raw.mention;
+    let mention: string | undefined;
+    if (mentionValue !== undefined && mentionValue !== null && mentionValue !== '') {
+        mention = typeof mentionValue === 'string' ? mentionValue.trim() : '';
+        if (!/^@[A-Za-z0-9_]{5,64}$/.test(mention)) {
+            throw apiError('telegram mention must be a @username mention', 400);
+        }
+    }
+
+    return {
+        chatId,
+        ...(threadId ? { threadId } : {}),
+        ...(mention ? { mention } : {}),
+    };
 }
 
 function normalizeChannel(input: NotificationChannelInput): NormalizedNotificationChannel {
@@ -298,9 +312,12 @@ function dmPreview(payload: Record<string, unknown>): string {
     return preview ? truncate(preview, 180) : 'New DM received. Open AIR OTC to read it.';
 }
 
-export function buildTelegramNotificationText(envelope: AgentEventEnvelope): string {
+export function buildTelegramNotificationText(envelope: AgentEventEnvelope, mention?: string): string {
     const payload = envelope.payload ?? {};
-    const lines = ['AIR OTC agent alert', `Event: ${envelope.event}`];
+    const lines = [
+        mention ? `${mention} AIR OTC agent alert` : 'AIR OTC agent alert',
+        `Event: ${envelope.event}`,
+    ];
     const ticketId = envelope.ticketId || shortId(payload.ticketId);
     const dealId = envelope.dealId || shortId(payload.dealId);
 
@@ -435,7 +452,7 @@ async function deliverTelegramChannel(channel: any, envelope: AgentEventEnvelope
 
     try {
         const config = normalizeTelegramConfig(channel.config);
-        await sendTelegramMessage(config, buildTelegramNotificationText(envelope));
+        await sendTelegramMessage(config, buildTelegramNotificationText(envelope, config.mention));
         await markChannelSent(channel.id);
         logger.info('telegram_notification_delivered', {
             wallet: envelope.wallet,
