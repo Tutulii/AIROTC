@@ -262,6 +262,21 @@ function truncate(value: string, maxLength: number): string {
     return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
 }
 
+function telegramErrorMessage(status: number, responseText: string): string {
+    let description = responseText;
+    try {
+        const parsed = JSON.parse(responseText);
+        if (parsed && typeof parsed.description === 'string') {
+            description = parsed.description;
+        }
+    } catch {
+        // Keep the raw response text when Telegram returns a non-JSON body.
+    }
+
+    const safeDescription = safeString(description) || `HTTP ${status}`;
+    return truncate(`telegram_send_failed: ${safeDescription}`, 220);
+}
+
 function shortId(value: unknown): string | undefined {
     if (typeof value !== 'string' || !value) return undefined;
     return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
@@ -339,6 +354,7 @@ async function sendTelegramMessage(config: TelegramConfig, text: string): Promis
         body.message_thread_id = config.threadId;
     }
 
+    let lastError = 'telegram_send_failed';
     for (let attempt = 0; attempt < TELEGRAM_RETRY_DELAYS_MS.length; attempt++) {
         const delay = TELEGRAM_RETRY_DELAYS_MS[attempt] ?? 0;
         if (delay > 0) await sleep(delay);
@@ -356,12 +372,14 @@ async function sendTelegramMessage(config: TelegramConfig, text: string): Promis
             }
 
             const responseText = await response.text().catch(() => '');
+            lastError = telegramErrorMessage(response.status, responseText);
             logger.warn('telegram_notification_non_2xx', {
                 status: response.status,
                 attempt: attempt + 1,
                 error: truncate(responseText, 180),
             });
         } catch (error: any) {
+            lastError = truncate(`telegram_send_failed: ${safeString(error?.message) || 'unknown'}`, 220);
             logger.warn('telegram_notification_send_failed', {
                 attempt: attempt + 1,
                 error: error?.message || 'unknown',
@@ -369,7 +387,7 @@ async function sendTelegramMessage(config: TelegramConfig, text: string): Promis
         }
     }
 
-    throw new Error('telegram_send_failed');
+    throw new Error(lastError);
 }
 
 async function markChannelFailure(channelId: string, error: unknown): Promise<void> {

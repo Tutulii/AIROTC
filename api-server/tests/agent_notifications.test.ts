@@ -120,6 +120,44 @@ describe('agent notification channels', () => {
         }));
     });
 
+    it('records the Telegram API failure reason on failed delivery', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(
+            '{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}',
+            { status: 400 },
+        )));
+        prismaMock.agentNotificationChannel.findMany.mockResolvedValue([
+            {
+                id: 'channel-1',
+                wallet: 'wallet-1',
+                type: 'telegram',
+                enabled: true,
+                events: JSON.stringify(['dm.received']),
+                config: { chatId: '-1004494003789' },
+                lastSentAt: null,
+            },
+        ]);
+
+        const { deliverAgentNotifications } = await import('../src/services/agentNotification.service');
+        const delivered = await deliverAgentNotifications({
+            id: 'event-1',
+            event: 'dm.received',
+            wallet: 'wallet-1',
+            timestamp: '2026-06-29T00:00:00.000Z',
+            payload: {
+                fromWallet: 'A4bCoAbesNR18wwsujY5h5hwrZqJG4574tJ8uiEzLF3V',
+                preview: 'Yo big bro',
+            },
+            expiresAt: '2026-07-06T00:00:00.000Z',
+        });
+
+        expect(delivered).toBe(false);
+        expect(fetch).toHaveBeenCalledTimes(3);
+        expect(prismaMock.agentNotificationChannel.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: { id: 'channel-1' },
+            data: { lastError: 'telegram_send_failed: Bad Request: chat not found' },
+        }));
+    });
+
     it('returns a clear configuration error for test sends when the platform bot token is missing', async () => {
         delete process.env.TELEGRAM_BOT_TOKEN;
 
