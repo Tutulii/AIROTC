@@ -34,9 +34,13 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_get_agent_events", "deals:read"],
   ["airotc_ack_agent_event", "deals:read"],
   ["airotc_ack_agent_events", "deals:read"],
+  ["airotc_register_notification_channel", "deals:read"],
+  ["airotc_list_notification_channels", "deals:read"],
+  ["airotc_delete_notification_channel", "deals:read"],
+  ["airotc_test_notification_channel", "deals:read"],
 ]);
 
-assert.equal(__test.tools.length, 29, "MCP must expose exactly 29 tools");
+assert.equal(__test.tools.length, 33, "MCP must expose exactly 33 tools");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -110,3 +114,12 @@ const liveConfigTool = __test.tools.find((candidate: any) => candidate.name === 
 const liveConfig = JSON.parse((await liveConfigTool.handler({})).content[0].text);
 assert.equal(liveConfig.websocket.path, "/socket.io/", "live config must point agents at API Socket.IO");
 assert.ok(liveConfig.eventNames.includes("dm.received"), "live config must expose canonical dot event names");
+assert.equal(
+  liveConfig.notificationChannels.registerTool,
+  "airotc_register_notification_channel",
+  "live config must expose notification registration tool"
+);
+assert.ok(
+  liveConfig.notificationChannels.supportedEvents.includes("deal.expiring"),
+  "live config must expose Telegram wake-up event names"
+);

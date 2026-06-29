@@ -48,6 +48,22 @@ model AgentEvent {
   @@index([expiresAt])
 }
 
+model AgentNotificationChannel {
+  id         String   @id @default(uuid())
+  wallet     String
+  type       String
+  enabled    Boolean  @default(true)
+  events     String?
+  config     Json
+  lastSentAt DateTime?
+  lastError  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([wallet, enabled])
+  @@index([wallet, type])
+}
+
 model McpAccessToken {
   id          String    @id @default(uuid())
   tokenHash   String    @unique

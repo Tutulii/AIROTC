@@ -9,6 +9,7 @@ import {
     type AgentEventName,
 } from './eventCatalog';
 import { enqueueAgentEvent, markAgentEventDelivered, type AgentEventEnvelope } from './agentEventInbox';
+import { deliverAgentNotifications } from './agentNotification.service';
 
 export { AGENT_EVENT_CATALOG, DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENTS };
 export type WebhookEvent = AgentEventName;
@@ -207,6 +208,14 @@ export async function sendToAgent(
     });
 
     await emitLiveAgentEvent(envelope);
+    await deliverAgentNotifications(envelope).catch((error: any) => {
+        logger.warn('agent_notification_delivery_failed', {
+            wallet,
+            event,
+            eventId: envelope.id,
+            error: error?.message || 'unknown',
+        });
+    });
 
     const agent = await prisma.agent.findUnique({
         where: { wallet },

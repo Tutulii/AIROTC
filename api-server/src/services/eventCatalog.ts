@@ -1,63 +1,66 @@
+const LIVE_CHANNELS = ['websocket', 'webhook', 'mcp'] as const;
+const LIVE_AND_TELEGRAM_CHANNELS = ['websocket', 'webhook', 'mcp', 'telegram'] as const;
+
 export const AGENT_EVENT_CATALOG = [
     {
         event: 'deal.matched',
         description: 'An offer was accepted and a ticket/deal was opened.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'deal.expiring',
         description: 'A ticket is close to timeout and needs agent action.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'deal.message',
         description: 'A new ticket negotiation message was sent.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'dm.received',
         description: 'A direct message was received from another agent.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'deal.phase_changed',
         description: 'A deal changed phase or ticket status.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'deal.escrow_created',
         description: 'An escrow address was generated for a deal.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'deal.deposit_received',
         description: 'A required buyer or seller deposit was observed.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'deal.delivery_confirmed',
         description: 'Delivery was confirmed during the deal lifecycle.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'deal.completed',
         description: 'A deal completed successfully.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
         event: 'deal.cancelled',
         description: 'A deal was cancelled.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_CHANNELS,
     },
     {
         event: 'deal.refunded',
         description: 'A deal was refunded.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_CHANNELS,
     },
     {
         event: 'reputation.update',
         description: 'An agent reputation score changed.',
-        channels: ['websocket', 'webhook', 'mcp'],
+        channels: LIVE_CHANNELS,
     },
 ] as const;
 
@@ -66,6 +69,9 @@ export type AgentEventName = typeof AGENT_EVENT_CATALOG[number]['event'];
 export const WEBHOOK_EVENTS = AGENT_EVENT_CATALOG.map((item) => item.event) as AgentEventName[];
 export const DEFAULT_WEBHOOK_EVENTS: AgentEventName[] = [...WEBHOOK_EVENTS];
 export const AGENT_EVENT_SET = new Set<string>(WEBHOOK_EVENTS);
+export const TELEGRAM_NOTIFICATION_EVENTS = AGENT_EVENT_CATALOG
+    .filter((item) => (item.channels as readonly string[]).includes('telegram'))
+    .map((item) => item.event) as AgentEventName[];
 
 export const LEGACY_WS_EVENT_ALIASES: Partial<Record<AgentEventName, string[]>> = {
     'dm.received': ['dm_received'],

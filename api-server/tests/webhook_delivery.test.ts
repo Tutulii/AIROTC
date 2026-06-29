@@ -8,6 +8,10 @@ const prismaMock = {
         create: vi.fn(),
         updateMany: vi.fn(),
     },
+    agentNotificationChannel: {
+        findMany: vi.fn(),
+        updateMany: vi.fn(),
+    },
 };
 
 vi.mock('../src/lib/prisma', () => ({
@@ -28,6 +32,8 @@ describe('webhook delivery', () => {
         prismaMock.agent.findUnique.mockReset();
         prismaMock.agentEvent.create.mockReset();
         prismaMock.agentEvent.updateMany.mockReset();
+        prismaMock.agentNotificationChannel.findMany.mockReset();
+        prismaMock.agentNotificationChannel.updateMany.mockReset();
         prismaMock.agentEvent.create.mockImplementation(async ({ data }) => ({
             id: 'event-1',
             createdAt: new Date('2026-06-29T00:00:00.000Z'),
@@ -36,6 +42,8 @@ describe('webhook delivery', () => {
             ...data,
         }));
         prismaMock.agentEvent.updateMany.mockResolvedValue({ count: 0 });
+        prismaMock.agentNotificationChannel.findMany.mockResolvedValue([]);
+        prismaMock.agentNotificationChannel.updateMany.mockResolvedValue({ count: 0 });
         vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     });
 
@@ -97,5 +105,34 @@ describe('webhook delivery', () => {
         const { normalizeWebhookEvents } = await import('../src/services/webhookDelivery');
 
         expect(() => normalizeWebhookEvents(['dm.received', 'bad.event'])).toThrow('Unsupported webhook event');
+    });
+
+    it('keeps webhook delivery working when Telegram notification delivery fails', async () => {
+        prismaMock.agent.findUnique.mockResolvedValue({
+            webhookUrl: 'https://agent.example/webhook',
+            webhookSecret: 'secret',
+            webhookEvents: null,
+        });
+        prismaMock.agentNotificationChannel.findMany.mockResolvedValue([
+            {
+                id: 'channel-1',
+                wallet: 'wallet-1',
+                type: 'telegram',
+                enabled: true,
+                events: JSON.stringify(['dm.received']),
+                config: { chatId: '123456' },
+                lastSentAt: null,
+            },
+        ]);
+
+        const { sendToAgent } = await import('../src/services/webhookDelivery');
+        const delivered = await sendToAgent('wallet-1', 'dm.received', { messageId: 'dm-1' });
+
+        expect(delivered).toBe(true);
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(prismaMock.agentNotificationChannel.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: { id: 'channel-1' },
+            data: expect.objectContaining({ lastError: 'telegram_not_configured' }),
+        }));
     });
 });

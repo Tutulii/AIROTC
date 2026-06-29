@@ -117,6 +117,7 @@ describe('Live Event Catalog', () => {
         expect(json.success).toBe(true);
         expect(json.data.canonicalFormat).toBe('dot');
         expect(json.data.events.some((item: any) => item.event === 'dm.received')).toBe(true);
+        expect(json.data.events.find((item: any) => item.event === 'dm.received').channels).toContain('telegram');
         expect(json.data.websocket.event).toBe('agent.event');
     });
 });

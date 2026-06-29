@@ -1,6 +1,12 @@
 import { logger } from '../lib/logger';
 import { Request, Response } from 'express';
 import { registerAgentService, getAgentProfile, updateWebhookConfig } from '../services/agent.service';
+import {
+    deleteNotificationChannel,
+    listNotificationChannels,
+    replaceNotificationChannels,
+    sendTestNotification,
+} from '../services/agentNotification.service';
 
 export const registerAgent = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -73,5 +79,86 @@ export const updateWebhookHandler = async (req: Request, res: Response): Promise
         }
         logger.error("error");
         res.status(500).json({ success: false, error: 'Internal server error updating webhook config' });
+    }
+};
+
+function statusFromError(error: any, fallback = 500): number {
+    const parsed = Number(error?.name);
+    return Number.isInteger(parsed) && parsed >= 400 && parsed < 600 ? parsed : fallback;
+}
+
+export const replaceNotificationChannelsHandler = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const wallet = req.wallet;
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        const result = await replaceNotificationChannels(wallet, req.body?.channels);
+        res.status(200).json({ success: true, data: result });
+    } catch (error: any) {
+        const status = statusFromError(error);
+        if (status >= 500) {
+            logger.error('notification_channels_replace_failed', {}, error);
+        }
+        res.status(status).json({ success: false, error: error?.message || 'Failed to update notification channels' });
+    }
+};
+
+export const listNotificationChannelsHandler = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const wallet = req.wallet;
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        const result = await listNotificationChannels(wallet);
+        res.status(200).json({ success: true, data: result });
+    } catch (error: any) {
+        const status = statusFromError(error);
+        if (status >= 500) {
+            logger.error('notification_channels_list_failed', {}, error);
+        }
+        res.status(status).json({ success: false, error: error?.message || 'Failed to list notification channels' });
+    }
+};
+
+export const deleteNotificationChannelHandler = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const wallet = req.wallet;
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        const result = await deleteNotificationChannel(wallet, String(req.params.id || ''));
+        res.status(200).json({ success: true, data: result });
+    } catch (error: any) {
+        const status = statusFromError(error);
+        if (status >= 500) {
+            logger.error('notification_channel_delete_failed', {}, error);
+        }
+        res.status(status).json({ success: false, error: error?.message || 'Failed to delete notification channel' });
+    }
+};
+
+export const testNotificationChannelHandler = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const wallet = req.wallet;
+        if (!wallet) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Wallet missing' });
+            return;
+        }
+
+        const result = await sendTestNotification(wallet, req.body?.channelId);
+        res.status(200).json({ success: true, data: result });
+    } catch (error: any) {
+        const status = statusFromError(error);
+        if (status >= 500) {
+            logger.error('notification_channel_test_failed', {}, error);
+        }
+        res.status(status).json({ success: false, error: error?.message || 'Failed to send test notification' });
     }
 };

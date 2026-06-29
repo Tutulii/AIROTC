@@ -1,5 +1,13 @@
 import { Router } from 'express';
-import { registerAgent, getAgentProfileHandler, updateWebhookHandler } from '../controllers/agent.controller';
+import {
+    deleteNotificationChannelHandler,
+    getAgentProfileHandler,
+    listNotificationChannelsHandler,
+    registerAgent,
+    replaceNotificationChannelsHandler,
+    testNotificationChannelHandler,
+    updateWebhookHandler,
+} from '../controllers/agent.controller';
 import { authenticateSolana } from '../middleware/auth';
 import { registrationLimiter } from '../middleware/rateLimiter';
 
@@ -52,6 +60,11 @@ const router = Router();
  *         description: Internal server error
  */
 router.post('/register', registrationLimiter, registerAgent);
+
+router.put('/notifications', authenticateSolana, replaceNotificationChannelsHandler);
+router.get('/notifications', authenticateSolana, listNotificationChannelsHandler);
+router.post('/notifications/test', authenticateSolana, testNotificationChannelHandler);
+router.delete('/notifications/:id', authenticateSolana, deleteNotificationChannelHandler);
 
 /**
  * @swagger

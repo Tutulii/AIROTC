@@ -111,6 +111,17 @@ const AGENT_EVENT_NAMES = [
   "deal.refunded",
   "reputation.update",
 ] as const;
+const TELEGRAM_NOTIFICATION_EVENT_NAMES = [
+  "deal.matched",
+  "deal.expiring",
+  "deal.message",
+  "dm.received",
+  "deal.phase_changed",
+  "deal.escrow_created",
+  "deal.deposit_received",
+  "deal.delivery_confirmed",
+  "deal.completed",
+] as const;
 
 function parseScopes(value: string | string[] | undefined, fallback: Set<Scope>): Set<Scope> {
   if (!value) return new Set(fallback);
@@ -551,6 +562,21 @@ const tools: ToolDefinition[] = [
           retentionDays: 7,
           delivery: "at-least-once; dedupe by event id",
         },
+        notificationChannels: {
+          registerTool: "airotc_register_notification_channel",
+          listTool: "airotc_list_notification_channels",
+          deleteTool: "airotc_delete_notification_channel",
+          testTool: "airotc_test_notification_channel",
+          supportedTypes: ["telegram"],
+          supportedEvents: TELEGRAM_NOTIFICATION_EVENT_NAMES,
+          config: {
+            telegram: {
+              required: ["chatId"],
+              optional: ["threadId"],
+              botToken: "platform-managed",
+            },
+          },
+        },
         eventNames: AGENT_EVENT_NAMES,
       }),
   },
@@ -641,6 +667,137 @@ const tools: ToolDefinition[] = [
         await httpJson(
           "/v1/events/ack",
           { method: "POST", body: JSON.stringify({ eventIds: args.eventIds }) },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_register_notification_channel",
+    title: "Register Notification Channel",
+    description:
+      "Register a Telegram wake-up notification channel for live AIR OTC events. Replaces existing notification channels for the wallet. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        chatId: {
+          type: "string",
+          description: "Telegram numeric chat id, supergroup id, or @channel username.",
+        },
+        threadId: {
+          type: "number",
+          description: "Optional Telegram forum topic thread id.",
+        },
+        events: {
+          type: "array",
+          items: { type: "string", enum: [...TELEGRAM_NOTIFICATION_EVENT_NAMES] },
+          description: "Optional event allowlist. Omit to receive all Telegram-supported wake-up events.",
+        },
+        enabled: { type: "boolean", default: true },
+      },
+      ["wallet", "chatId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const configBody: Record<string, unknown> = { chatId: args.chatId };
+      if (args.threadId !== undefined) configBody.threadId = args.threadId;
+      return toolOutput(
+        await httpJson(
+          "/v1/agents/notifications",
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              channels: [
+                {
+                  type: "telegram",
+                  enabled: args.enabled !== false,
+                  events: args.events,
+                  config: configBody,
+                },
+              ],
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_list_notification_channels",
+    title: "List Notification Channels",
+    description: "List Telegram wake-up notification channels for a wallet. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/agents/notifications",
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_delete_notification_channel",
+    title: "Delete Notification Channel",
+    description: "Delete one Telegram wake-up notification channel for a wallet. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        channelId: { type: "string" },
+      },
+      ["wallet", "channelId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/agents/notifications/${encodeURIComponent(args.channelId)}`,
+          { method: "DELETE" },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_test_notification_channel",
+    title: "Test Notification Channel",
+    description: "Send a Telegram wake-up test notification to one or all enabled channels. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        channelId: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/agents/notifications/test",
+          { method: "POST", body: JSON.stringify({ channelId: args.channelId }) },
           config.apiUrl,
           { delegatedWallet: wallet, authToken: args.authToken }
         )
