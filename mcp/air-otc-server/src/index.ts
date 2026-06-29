@@ -97,6 +97,20 @@ const validScopes = new Set<Scope>([
 
 const defaultFullScopes = new Set<Scope>(validScopes);
 const MCP_SHORT_TOKEN_PREFIX = "airotc_sk_";
+const AGENT_EVENT_NAMES = [
+  "deal.matched",
+  "deal.expiring",
+  "deal.message",
+  "dm.received",
+  "deal.phase_changed",
+  "deal.escrow_created",
+  "deal.deposit_received",
+  "deal.delivery_confirmed",
+  "deal.completed",
+  "deal.cancelled",
+  "deal.refunded",
+  "reputation.update",
+] as const;
 
 function parseScopes(value: string | string[] | undefined, fallback: Set<Scope>): Set<Scope> {
   if (!value) return new Set(fallback);
@@ -153,6 +167,10 @@ const config = {
   middlemanUrl: (process.env.AIR_OTC_MIDDLEMAN_URL || "http://localhost:8080").replace(/\/$/, ""),
   middlemanHealthUrl: (process.env.AIR_OTC_MIDDLEMAN_HEALTH_URL || "http://localhost:8081").replace(/\/$/, ""),
   wsUrl: process.env.AIR_OTC_WS_URL || "ws://localhost:8080",
+  apiWsUrl:
+    process.env.AIR_OTC_API_WS_URL ||
+    process.env.AIR_OTC_PUBLIC_WS_URL ||
+    (process.env.AIR_OTC_API_URL || "http://localhost:3000").replace(/^http/, "ws").replace(/\/$/, ""),
   rpcUrl: process.env.AIR_OTC_RPC_URL || "https://api.devnet.solana.com",
   sdkPath:
     process.env.AIR_OTC_TS_SDK_PATH ||
@@ -443,6 +461,24 @@ async function bestEffort(
   }
 }
 
+function appendOptionalEventQuery(query: URLSearchParams, args: any) {
+  if (Array.isArray(args.events) && args.events.length > 0) {
+    query.set("events", args.events.join(","));
+  }
+  if (typeof args.since === "string" && args.since.trim()) {
+    query.set("since", args.since.trim());
+  }
+  if (typeof args.cursor === "string" && args.cursor.trim()) {
+    query.set("cursor", args.cursor.trim());
+  }
+  if (args.limit !== undefined) {
+    query.set("limit", String(args.limit));
+  }
+  if (args.includeAcked !== undefined) {
+    query.set("includeAcked", String(args.includeAcked));
+  }
+}
+
 async function loadSdk(): Promise<any> {
   return import(pathToFileURL(config.sdkPath).href);
 }
@@ -480,6 +516,136 @@ const tools: ToolDefinition[] = [
         api: await bestEffort("api", () => httpJson("/health", {}, config.apiUrl)),
         middleman: await bestEffort("middleman", () => httpJson("/health", {}, config.middlemanHealthUrl)),
       }),
+  },
+  {
+    name: "airotc_list_events",
+    title: "List Live Events",
+    description: "List canonical AIR OTC live event names and delivery channels.",
+    inputSchema: objectSchema({}),
+    handler: async () =>
+      toolOutput(
+        await bestEffort("event_catalog", () => httpJson("/v1/events/catalog", {}, config.apiUrl))
+      ),
+  },
+  {
+    name: "airotc_get_live_config",
+    title: "Get Live Config",
+    description: "Return WebSocket and event inbox settings for live agent integrations.",
+    inputSchema: objectSchema({}),
+    handler: async () =>
+      toolOutput({
+        websocket: {
+          url: config.apiWsUrl,
+          path: "/socket.io/",
+          auth: {
+            preferred: "auth.token",
+            alternatives: ["Authorization: Bearer <token>", "wallet signature auth"],
+          },
+          receives: ["agent.event", ...AGENT_EVENT_NAMES],
+          sends: ["subscribe", "ack_event", "ack_events", "get_missed_events"],
+        },
+        mcpPolling: {
+          getEventsTool: "airotc_get_agent_events",
+          ackTool: "airotc_ack_agent_event",
+          batchAckTool: "airotc_ack_agent_events",
+          retentionDays: 7,
+          delivery: "at-least-once; dedupe by event id",
+        },
+        eventNames: AGENT_EVENT_NAMES,
+      }),
+  },
+  {
+    name: "airotc_get_agent_events",
+    title: "Get Agent Events",
+    description:
+      "Poll persisted live events for a wallet. This is the webhook fallback for agents without a public endpoint. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        events: {
+          type: "array",
+          items: { type: "string", enum: [...AGENT_EVENT_NAMES] },
+        },
+        since: { type: "string", description: "Optional ISO timestamp." },
+        cursor: { type: "string", description: "Optional cursor returned by the previous call." },
+        limit: { type: "number", minimum: 1, maximum: 500, default: 100 },
+        includeAcked: { type: "boolean", default: false },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      appendOptionalEventQuery(query, args);
+      return toolOutput(
+        await httpJson(
+          `/v1/events${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_ack_agent_event",
+    title: "ACK Agent Event",
+    description: "Acknowledge one persisted live event for a wallet. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        eventId: { type: "string" },
+      },
+      ["wallet", "eventId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/events/${encodeURIComponent(args.eventId)}/ack`,
+          { method: "POST", body: JSON.stringify({}) },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_ack_agent_events",
+    title: "ACK Agent Events",
+    description: "Acknowledge a batch of persisted live events for a wallet. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        eventIds: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          maxItems: 500,
+        },
+      },
+      ["wallet", "eventIds"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/events/ack",
+          { method: "POST", body: JSON.stringify({ eventIds: args.eventIds }) },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
   },
   {
     name: "airotc_list_offers",

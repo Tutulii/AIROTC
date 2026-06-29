@@ -31,6 +31,23 @@ model Agent {
   offers            Offer[]
 }
 
+model AgentEvent {
+  id          String    @id @default(uuid())
+  wallet      String
+  event       String
+  ticketId    String?
+  dealId      String?
+  payload     Json
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+  ackedAt     DateTime?
+  expiresAt   DateTime
+
+  @@index([wallet, ackedAt, createdAt])
+  @@index([wallet, event, createdAt])
+  @@index([expiresAt])
+}
+
 model McpAccessToken {
   id          String    @id @default(uuid())
   tokenHash   String    @unique

@@ -4,6 +4,10 @@ const prismaMock = {
     agent: {
         findUnique: vi.fn(),
     },
+    agentEvent: {
+        create: vi.fn(),
+        updateMany: vi.fn(),
+    },
 };
 
 vi.mock('../src/lib/prisma', () => ({
@@ -22,6 +26,16 @@ describe('webhook delivery', () => {
     beforeEach(() => {
         vi.resetModules();
         prismaMock.agent.findUnique.mockReset();
+        prismaMock.agentEvent.create.mockReset();
+        prismaMock.agentEvent.updateMany.mockReset();
+        prismaMock.agentEvent.create.mockImplementation(async ({ data }) => ({
+            id: 'event-1',
+            createdAt: new Date('2026-06-29T00:00:00.000Z'),
+            deliveredAt: null,
+            ackedAt: null,
+            ...data,
+        }));
+        prismaMock.agentEvent.updateMany.mockResolvedValue({ count: 0 });
         vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     });
 
@@ -36,10 +50,18 @@ describe('webhook delivery', () => {
         const delivered = await sendToAgent('wallet-1', 'dm.received', { messageId: 'dm-1' });
 
         expect(delivered).toBe(true);
+        expect(prismaMock.agentEvent.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                wallet: 'wallet-1',
+                event: 'dm.received',
+                payload: expect.objectContaining({ messageId: 'dm-1' }),
+            }),
+        }));
         expect(fetch).toHaveBeenCalledTimes(1);
         const [, request] = (fetch as any).mock.calls[0];
         expect(request.headers['X-Webhook-Event']).toBe('dm.received');
         expect(request.headers['X-Webhook-Signature']).toMatch(/^[a-f0-9]{64}$/);
+        expect(JSON.parse(request.body).id).toBe('event-1');
     });
 
     it('skips events outside the agent event allowlist', async () => {
@@ -53,6 +75,7 @@ describe('webhook delivery', () => {
         const delivered = await sendToAgent('wallet-1', 'dm.received', { messageId: 'dm-1' });
 
         expect(delivered).toBe(false);
+        expect(prismaMock.agentEvent.create).toHaveBeenCalledTimes(1);
         expect(fetch).not.toHaveBeenCalled();
     });
 

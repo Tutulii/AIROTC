@@ -29,9 +29,14 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_get_dm_file_info", "dm:read"],
   ["airotc_run_per_buyer_flow", "per:run"],
   ["airotc_run_per_seller_flow", "per:run"],
+  ["airotc_list_events", undefined],
+  ["airotc_get_live_config", undefined],
+  ["airotc_get_agent_events", "deals:read"],
+  ["airotc_ack_agent_event", "deals:read"],
+  ["airotc_ack_agent_events", "deals:read"],
 ]);
 
-assert.equal(__test.tools.length, 24, "MCP must expose exactly 24 tools");
+assert.equal(__test.tools.length, 29, "MCP must expose exactly 29 tools");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -100,3 +105,8 @@ const fullScopes = __test.parseScopes(
   new Set()
 );
 assert.equal(fullScopes.size, 9, "full trade-agent scope set must include all 9 scopes");
+
+const liveConfigTool = __test.tools.find((candidate: any) => candidate.name === "airotc_get_live_config");
+const liveConfig = JSON.parse((await liveConfigTool.handler({})).content[0].text);
+assert.equal(liveConfig.websocket.path, "/socket.io/", "live config must point agents at API Socket.IO");
+assert.ok(liveConfig.eventNames.includes("dm.received"), "live config must expose canonical dot event names");

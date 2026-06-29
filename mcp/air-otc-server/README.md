@@ -26,6 +26,7 @@ HTTP listens on `AIR_OTC_MCP_PORT` or `8787` at `/mcp`.
 AIR_OTC_API_URL=http://localhost:3000
 AIR_OTC_MIDDLEMAN_URL=http://localhost:8080
 AIR_OTC_WS_URL=ws://localhost:8080
+AIR_OTC_API_WS_URL=ws://localhost:3000
 AIR_OTC_RPC_URL=https://api.devnet.solana.com
 AIR_OTC_TS_SDK_PATH="/Users/tutul/Downloads/AIR OTC/sdk/ts/dist/index.mjs"
 
@@ -62,6 +63,11 @@ Generated `airotc_sk` hosted tokens verify as full trade-agent tokens. The signi
 ## Tools
 
 - `airotc_health`
+- `airotc_list_events`
+- `airotc_get_live_config`
+- `airotc_get_agent_events`
+- `airotc_ack_agent_event`
+- `airotc_ack_agent_events`
 - `airotc_list_offers`
 - `airotc_create_offer`
 - `airotc_accept_offer`

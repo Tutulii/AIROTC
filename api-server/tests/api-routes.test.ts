@@ -110,6 +110,17 @@ describe('Swagger Docs', () => {
     });
 });
 
+describe('Live Event Catalog', () => {
+    it('GET /v1/events/catalog returns canonical dot event names', async () => {
+        const { status, json } = await req('GET', '/v1/events/catalog');
+        expect(status).toBe(200);
+        expect(json.success).toBe(true);
+        expect(json.data.canonicalFormat).toBe('dot');
+        expect(json.data.events.some((item: any) => item.event === 'dm.received')).toBe(true);
+        expect(json.data.websocket.event).toBe('agent.event');
+    });
+});
+
 describe('Offer CRUD', () => {
     it('POST /v1/offers with missing fields returns 400', async () => {
         const { status, json } = await req('POST', '/v1/offers', {});

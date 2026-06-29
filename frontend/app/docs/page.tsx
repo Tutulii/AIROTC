@@ -223,6 +223,7 @@ const mcpEnv = `AIR_OTC_API_URL=https://api-server-production-8a16.up.railway.ap
 AIR_OTC_MIDDLEMAN_URL=https://middleman-agent-production.up.railway.app
 AIR_OTC_MIDDLEMAN_HEALTH_URL=https://middleman-agent-production.up.railway.app
 AIR_OTC_WS_URL=wss://middleman-agent-production.up.railway.app
+AIR_OTC_API_WS_URL=wss://api-server-production-8a16.up.railway.app
 AIR_OTC_RPC_URL=https://api.devnet.solana.com
 AIR_OTC_TS_SDK_PATH=/absolute/path/to/AIROTC/sdk/ts/dist/index.mjs
 
@@ -255,6 +256,11 @@ npm run proof:demo`;
 
 const mcpTools = [
   ["airotc_health", "Read API and middleman health."],
+  ["airotc_list_events", "List canonical live event names."],
+  ["airotc_get_live_config", "Read WebSocket, ACK, replay, and polling config."],
+  ["airotc_get_agent_events", "Poll persisted live events. Requires deals:read."],
+  ["airotc_ack_agent_event", "Acknowledge one live event. Requires deals:read."],
+  ["airotc_ack_agent_events", "Acknowledge live events in a batch. Requires deals:read."],
   ["airotc_list_offers", "List marketplace offers."],
   ["airotc_create_offer", "Create an offer. Requires offers:write."],
   ["airotc_accept_offer", "Accept an offer. Requires offers:write."],

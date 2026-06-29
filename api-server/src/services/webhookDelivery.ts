@@ -1,36 +1,29 @@
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
+import {
+    AGENT_EVENT_CATALOG,
+    AGENT_EVENT_SET,
+    DEFAULT_WEBHOOK_EVENTS,
+    WEBHOOK_EVENTS,
+    type AgentEventName,
+} from './eventCatalog';
+import { enqueueAgentEvent, markAgentEventDelivered, type AgentEventEnvelope } from './agentEventInbox';
 
-export const WEBHOOK_EVENTS = [
-    'deal.matched',
-    'deal.expiring',
-    'deal.message',
-    'dm.received',
-    'deal.phase_changed',
-    'deal.escrow_created',
-    'deal.deposit_received',
-    'deal.delivery_confirmed',
-    'deal.completed',
-    'deal.cancelled',
-    'deal.refunded',
-    'reputation.update',
-] as const;
-
-export type WebhookEvent = typeof WEBHOOK_EVENTS[number];
-
-export const DEFAULT_WEBHOOK_EVENTS: WebhookEvent[] = [...WEBHOOK_EVENTS];
+export { AGENT_EVENT_CATALOG, DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENTS };
+export type WebhookEvent = AgentEventName;
 
 interface WebhookPayload {
+    id: string;
     event: WebhookEvent;
     ticketId?: string;
+    dealId?: string;
     timestamp: string;
     data: Record<string, unknown>;
 }
 
 const TIMEOUT_MS = 5_000;
 const RETRY_DELAYS_MS = [0, 500, 1_500];
-const EVENT_SET = new Set<string>(WEBHOOK_EVENTS);
 
 export function normalizeWebhookEvents(events: unknown): WebhookEvent[] | null {
     if (events === undefined || events === null) {
@@ -49,7 +42,7 @@ export function normalizeWebhookEvents(events: unknown): WebhookEvent[] | null {
     }).filter(Boolean);
 
     for (const event of normalized) {
-        if (!EVENT_SET.has(event)) {
+        if (!AGENT_EVENT_SET.has(event)) {
             throw new Error(`Unsupported webhook event: ${event}`);
         }
     }
@@ -74,6 +67,44 @@ export function serializeWebhookEvents(events: WebhookEvent[] | null): string | 
 
 export function webhookEventEnabled(storedEvents: string | null | undefined, event: WebhookEvent): boolean {
     return parseStoredWebhookEvents(storedEvents).includes(event);
+}
+
+function eventMatchesSocketSubscription(subscription: unknown, event: WebhookEvent): boolean {
+    if (!Array.isArray(subscription) || subscription.length === 0) return true;
+    return subscription.includes(event);
+}
+
+async function emitLiveAgentEvent(envelope: AgentEventEnvelope): Promise<boolean> {
+    try {
+        const { getIO } = await import('../ws/socket');
+        const io = getIO();
+        const sockets = await io.in(`agent:${envelope.wallet}`).fetchSockets();
+        if (sockets.length === 0) return false;
+
+        for (const socket of sockets) {
+            if (!eventMatchesSocketSubscription(socket.data?.subscribedEvents, envelope.event)) {
+                continue;
+            }
+
+            socket.emit('agent.event', envelope);
+            socket.emit(envelope.event, envelope);
+        }
+
+        await markAgentEventDelivered(envelope.wallet, envelope.id).catch((error: any) => {
+            logger.warn('agent_event_delivered_mark_failed', {
+                eventId: envelope.id,
+                error: error?.message || 'unknown',
+            });
+        });
+        return true;
+    } catch (error: any) {
+        logger.warn('agent_event_ws_emit_failed', {
+            eventId: envelope.id,
+            event: envelope.event,
+            error: error?.message || 'unknown',
+        });
+        return false;
+    }
 }
 
 export function isValidWebhookUrl(url: string): boolean {
@@ -167,6 +198,16 @@ export async function sendToAgent(
     data: Record<string, unknown> = {},
     ticketId?: string,
 ): Promise<boolean> {
+    const envelope = await enqueueAgentEvent({
+        wallet,
+        event,
+        payload: data,
+        ticketId: ticketId || (typeof data.ticketId === 'string' ? data.ticketId : undefined),
+        dealId: typeof data.dealId === 'string' ? data.dealId : undefined,
+    });
+
+    await emitLiveAgentEvent(envelope);
+
     const agent = await prisma.agent.findUnique({
         where: { wallet },
         select: {
@@ -185,9 +226,11 @@ export async function sendToAgent(
     }
 
     return deliverWebhook(agent.webhookUrl, agent.webhookSecret, {
+        id: envelope.id,
         event,
-        ticketId,
-        timestamp: new Date().toISOString(),
+        ticketId: envelope.ticketId,
+        dealId: envelope.dealId,
+        timestamp: envelope.timestamp,
         data,
     });
 }
