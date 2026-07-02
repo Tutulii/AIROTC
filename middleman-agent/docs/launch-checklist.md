@@ -1,62 +1,35 @@
-# Launch Checklist
+# AIR OTC Launch Checklist
 
-Use this checklist before a high-confidence deploy, demo, or reviewer session.
+Last updated: 2026-07-02
+
+Use this checklist for the current MCP-first architecture.
+
+## Product Posture
+
+- MCP server is the first agent-control surface to verify.
+- API server and middleman runtime are reachable.
+- Frontend observatory is read-only.
+- SDK and no-code runtime are treated as helper surfaces.
+- Current public integrations are Arcium and Umbra only.
 
 ## Configuration
 
-- `PER_STRICT_OPAQUE_MODE=true`
-- `ENABLE_LEGACY_UMBRA_STEALTH_LIFECYCLE=false`
-- `ENABLE_SIMULATION_ROUTES=false`
-- `ALLOW_DEMO_RUNTIME_LISTENERS=false`
-- `NEXT_PUBLIC_ENABLE_SIMULATION_ROUTES=false`
-- `BRIDGE_SECRET` is configured in both `api-server` and `middleman-agent`
+- API bridge secret is configured where required.
+- Database configuration is present.
+- Solana RPC endpoint is configured.
+- Operator wallets are funded only for the target environment.
+- Simulation and demo-only routes are disabled for production-like runs.
 
-## Dependency health
+## Proof Gates
 
-- Solana RPC reachable
-- MagicBlock TEE reachable
-- MagicBlock auth reachable
-- Encrypt reachable
-- IKA reachable
+- MCP tools can list offers and fetch status/proof surfaces.
+- Normal Mode escrow path can be exercised in a controlled environment.
+- Private Mode claims are backed by Arcium and Umbra phase-gate evidence before production use.
+- Emergency pause and authority controls are documented before capped beta.
 
-## Proof gates
+## Do Not Launch If
 
-Run:
-
-```bash
-cd /Users/tutul/Downloads/AIR OTC/middleman-agent
-npm run test:phase8:gate
-```
-
-Then run:
-
-```bash
-npm run test:marketplace:observatory:proof
-STABILITY_CAMPAIGN_RUNS=3 npm run test:stability:campaign
-```
-
-## Runtime posture
-
-- no plaintext PER logs appear during proof runs
-- buyer-only PER gate blocks correctly
-- observatory bridge writes are signed and authenticated
-- marketplace PER read surfaces stay redacted after match
-- simulation routes return `404` unless explicitly enabled
-
-## Evidence package
-
-Keep these local artifacts for demos, audits, or grants:
-
-- latest local diagram-soak summary
-- latest local stability-campaign summary
-- latest strict PER live proof output
-- latest marketplace + observatory proof output
-
-For the public submission bundle, use sanitized summaries under `docs/proof-evidence/` instead of raw local logs.
-
-## Do not launch if
-
-- `test:phase8:gate` is red
-- `test:stability:campaign` is red
-- dependency health is degraded on critical vendors
-- demo flags are enabled in a production environment
+- MCP mutating operations are not scope-gated.
+- Private terms are exposed through logs, API responses, or proof bundles.
+- Frontend controls can mutate settlement state directly.
+- Old integration paths are required for the advertised public flow.

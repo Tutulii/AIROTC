@@ -1,70 +1,72 @@
-# AIR OTC Judge Demo Script
+# AIR OTC Demo Script
 
-Last updated: 2026-05-10
+Last updated: 2026-07-02
 
 Target length: 3-5 minutes.
 
-## 0:00-0:30 — Problem
+## 0:00-0:30 - Product
 
-Autonomous agents can find counterparties, but private OTC settlement is still messy: public terms leak strategy, delivery is hard to prove, and a judge or operator needs a clean evidence trail after the trade.
+AIR OTC is a private OTC settlement layer where AI agents negotiate, escrow, and settle digital asset deals autonomously.
 
-AIR OTC solves that on Solana devnet with agent-to-agent OTC settlement, private execution records, encrypted delivery, and proof bundles that map every claim to a ticket.
+The product is built for autonomous buyer and seller agents that need private deal commitments, escrow, release/refund logic, private payout evidence, and audit visibility.
 
-## 0:30-1:15 — Product Surfaces
+## 0:30-1:15 - Current Direction
 
-Show the four surfaces:
+AIR OTC is currently MCP-first.
 
-- SDKs for builders: TypeScript is the flagship live path; Python has parity models and fail-closed PER helpers.
-- No-code runtime for operators: config-driven `init`, `validate`, `start`, and `proof pair`.
-- MCP server for external AI agents and operator tooling.
-- Observatory frontend for humans: dashboard, marketplace, agents, explorer, and docs.
+Show the product surfaces in this order:
 
-State the boundary clearly: the frontend observes. Agents execute through SDK, runtime, or MCP workflows.
+1. MCP server for agent control.
+2. API server for offers, tickets, policies, and bridge operations.
+3. Middleman runtime for coordinator, state machine, proof builder, watcher, and settlement orchestration.
+4. Solana escrow programs for settlement truth.
+5. Frontend observatory for read-only human visibility.
+6. SDKs and no-code runtime as secondary helper surfaces.
 
-## 1:15-2:15 — Live Observatory
+## 1:15-2:15 - Modes
 
-Open the frontend and show:
+Explain Normal Mode:
 
-- Dashboard: latest proof panel and live system state.
-- Marketplace: public offer discovery; PER terms stay private after acceptance.
-- Agents: registered agent directory.
-- Explorer: deal lifecycle and on-chain state.
-- Docs: proof IDs, setup commands, and honest boundaries.
+- public SOL escrow;
+- canonical raw amounts;
+- direct escrow funding;
+- buyer release;
+- timeout refund;
+- proof/status visibility.
 
-If the backend is offline, say so directly. Offline screens are not live evidence; they are only the observatory shell.
+Explain Private Mode:
 
-## 2:15-3:30 — Proof Command And Ticket Evidence
+- private buyer and seller terms;
+- committed hashes;
+- Arcium private YES/NO verdict;
+- settlement truth through escrow invariants;
+- Umbra private payout evidence.
 
-Show the flagship proof command:
+## 2:15-3:30 - Diagram
 
-```bash
-cd "/Users/tutul/Downloads/AIR OTC/agents/elizaos-agent"
-AIROTC_TRADE_PRICE_SOL=0.001 \
-AIROTC_TRADE_COLLATERAL_SOL=0.0001 \
-AIROTC_TRADE_AMOUNT=1 \
-AIROTC_REQUIRE_FULL_UMBRA=true \
-UMBRA_SETTLEMENT_LIFECYCLE_MODE=FULL_UMBRA \
-AIROTC_REQUIRE_ZERION=true \
-AIROTC_ZERION_ONLINE_CHECK_MODE=light \
-AGENT_LOOP_DELAY_MS=2500 \
-AGENT_MAX_LOOPS=360 \
-npm run proof:full-pipeline
-```
+Show the pipeline diagram in [README.md](/Users/tutul/Downloads/AIR OTC/README.md) or [AIROTC_ARCHITECTURE.md](/Users/tutul/Downloads/AIR OTC/AIROTC_ARCHITECTURE.md).
 
-Then show the latest ticket:
+Call out:
 
-- ticket: `13e6ae1d-68d0-46f0-a50a-6329965b598c`
-- offer: `5024c326-3b75-4d7f-9aba-75c4aad05adb`
-- escrow PDA: `5PrqGPyMspsPehK2h1PVpo3Fd4R2Pdo4TyAdqhmi7h9K`
-- audit: valid with `45` entries
-- timeline: completed with `62` events
+- MCP is first priority for controlling agents.
+- The coordinator sees hashes and state signals, not raw private terms.
+- Arcium and Umbra are the only named ecosystem integrations in the current architecture.
+- The frontend is an observatory, not the execution surface.
 
-Explain what it proves: Zerion online gate, strict PER, shielded-credit funding, encrypted seller delivery, buyer release confirmation, full Umbra lifecycle, and Torque sidecar delivery.
+## 3:30-4:30 - Production Gates
 
-## 3:30-4:30 — Honest Boundaries
+Close with the phase gates:
 
-Say exactly:
+1. Production contract.
+2. Financial correctness.
+3. Agent guardrails.
+4. Arcium private negotiation.
+5. Umbra stealth dUSDC payout.
+6. Batch/delay privacy hardening.
+7. Capped mainnet beta.
 
-AIR OTC is 100% devnet submission-ready, not mainnet production-ready. It is trust-minimized and privacy-hardened, not fully trustless. SDK-only full-pipeline needs real or external Zerion transaction evidence, and Python-side independent FHE ciphertext generation is future work.
+For capped beta, state the controls: allowlisted agents, low caps, mainnet smoke proofs, Arcium + Umbra receipts, and emergency pause proof.
 
-Close with the credibility point: every submitted claim maps to code, command, ticket ID, and evidence registry entry.
+## Closing Line
+
+AIR OTC is moving toward production by making the MCP control surface reliable first, then proving the Arcium and Umbra private-mode path through phase-gated releases.

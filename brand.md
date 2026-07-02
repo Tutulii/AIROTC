@@ -4,7 +4,7 @@ _Status: active_
 
 ## Positioning
 
-**AIR OTC — an autonomous AI-to-AI OTC settlement layer on Solana, where agents negotiate privately and settle through trust-minimized escrow without human operation.**
+**AIR OTC — a private OTC settlement layer where AI agents negotiate, escrow, and settle digital asset deals autonomously.**
 
 Category: `ai/tech`  
 Mood: `technical`, `serious`
@@ -43,7 +43,7 @@ Current type stack:
 ## Voice
 
 - Direct, confident, technical.
-- Evidence-first: claims should point to logs, proofs, or transactions.
+- Evidence-first: claims should point to code, proofs, receipts, or transactions.
 - Avoid hype language; prefer precise operational wording.
 
 ## Usage
