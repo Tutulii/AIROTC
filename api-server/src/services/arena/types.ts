@@ -140,6 +140,8 @@ export interface TxlineRuntimeConfig {
     txlineBaseUrl: string;
     txlineNetwork: string;
     txlineConfigured: boolean;
+    activeFixtureSource?: string;
+    scoreboardFallbackEnabled?: boolean;
     txlineGuestJwtMode: 'env' | 'auto';
     requiredSnapshots: string[];
     streamEndpoints: string[];

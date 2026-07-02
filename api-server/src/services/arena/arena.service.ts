@@ -7,8 +7,10 @@ import {
     fetchScoresSnapshot,
     normalizeOddsPayload,
     normalizeScoresPayload,
+    txlineActiveFixtureSource,
     txlineAuthConfigured,
     txlineBaseUrl,
+    txlineFallbackEnabled,
     txlineGuestJwtMode,
     txlineNetwork,
 } from './txlineClient';
@@ -22,6 +24,33 @@ import {
 } from './types';
 
 const prismaAny = prisma as any;
+let lastFixtureAutoSyncAt = 0;
+let fixtureAutoSyncPromise: Promise<unknown> | null = null;
+
+function fixtureAutoSyncEnabled(): boolean {
+    return (process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST || 'true').toLowerCase() !== 'false';
+}
+
+function fixtureAutoSyncIntervalMs(): number {
+    return Math.max(Number(process.env.TXLINE_FIXTURE_AUTO_SYNC_INTERVAL_MS) || 120_000, 30_000);
+}
+
+async function maybeAutoSyncFixtures(): Promise<void> {
+    if (!fixtureAutoSyncEnabled()) return;
+    if (!txlineAuthConfigured() && !txlineFallbackEnabled()) return;
+
+    const now = Date.now();
+    if (now - lastFixtureAutoSyncAt < fixtureAutoSyncIntervalMs()) return;
+    if (!fixtureAutoSyncPromise) {
+        fixtureAutoSyncPromise = syncFixturesFromTxline()
+            .catch(() => undefined)
+            .finally(() => {
+                lastFixtureAutoSyncAt = Date.now();
+                fixtureAutoSyncPromise = null;
+            });
+    }
+    await fixtureAutoSyncPromise;
+}
 
 function jsonValue(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(JSON.stringify(value ?? {})) as Prisma.InputJsonValue;
@@ -33,6 +62,8 @@ export function txlineRuntimeConfig(): TxlineRuntimeConfig {
         txlineBaseUrl: txlineBaseUrl(),
         txlineNetwork: txlineNetwork(),
         txlineConfigured: txlineAuthConfigured(),
+        activeFixtureSource: txlineActiveFixtureSource(),
+        scoreboardFallbackEnabled: txlineFallbackEnabled(),
         txlineGuestJwtMode: txlineGuestJwtMode(),
         requiredSnapshots: [
             '/api/fixtures/snapshot',
@@ -270,6 +301,7 @@ export async function ingestScoresPayload(fixtureId: string, payload: unknown): 
 }
 
 export async function listTxlineFixtures(limit = 50): Promise<any[]> {
+    await maybeAutoSyncFixtures();
     return prismaAny.arenaFixture.findMany({
         orderBy: [{ startsAt: 'asc' }, { createdAt: 'desc' }],
         take: Math.min(Math.max(limit, 1), 100),

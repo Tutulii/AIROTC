@@ -4,8 +4,11 @@ import {
     normalizeOddsPayload,
     normalizeScoresPayload,
     readTxlineSseStream,
+    txlineActiveFixtureSource,
+    txlineAuthConfigured,
+    txlineFallbackEnabled,
 } from './txlineClient';
-import { recordOddsUpdates, recordScoreUpdates } from './arena.service';
+import { recordOddsUpdates, recordScoreUpdates, syncFixturesFromTxline } from './arena.service';
 
 type StreamName = 'odds' | 'scores';
 
@@ -20,14 +23,25 @@ interface StreamState {
 
 interface IngestionState {
     running: boolean;
+    mode: 'txline_stream' | 'scoreboard_fallback' | 'unconfigured';
+    source: string;
     startedAt?: string;
     stoppedAt?: string;
+    fixtures: StreamState;
     odds: StreamState;
     scores: StreamState;
 }
 
 const state: IngestionState = {
     running: false,
+    mode: 'unconfigured',
+    source: txlineActiveFixtureSource(),
+    fixtures: {
+        endpoint: '/v1/txline/fixtures',
+        connected: false,
+        events: 0,
+        updates: 0,
+    },
     odds: {
         endpoint: ODDS_STREAM_ENDPOINT,
         connected: false,
@@ -43,9 +57,29 @@ const state: IngestionState = {
 };
 
 let controller: AbortController | null = null;
+let fallbackInterval: NodeJS.Timeout | null = null;
 
 function cloneState(): IngestionState {
     return JSON.parse(JSON.stringify(state));
+}
+
+function fixtureSyncIntervalMs(): number {
+    return Math.max(Number(process.env.TXLINE_FIXTURE_SYNC_INTERVAL_MS) || 120_000, 30_000);
+}
+
+async function syncFallbackFixtures(): Promise<void> {
+    state.fixtures.connected = true;
+    state.fixtures.lastError = undefined;
+    try {
+        const result = await syncFixturesFromTxline();
+        state.fixtures.events += 1;
+        state.fixtures.updates += Number(result.count || 0);
+        state.fixtures.lastMessageAt = new Date().toISOString();
+    } catch (error: any) {
+        state.fixtures.lastError = error?.message || 'txline_fixture_fallback_sync_failed';
+    } finally {
+        state.fixtures.connected = false;
+    }
 }
 
 async function runStream(name: StreamName, endpoint: string, signal: AbortSignal): Promise<void> {
@@ -89,12 +123,30 @@ export function getTxlineIngestionStatus(): IngestionState {
 export function startTxlineIngestion(): IngestionState {
     if (state.running) return cloneState();
 
+    state.source = txlineActiveFixtureSource();
     controller = new AbortController();
     state.running = true;
     state.startedAt = new Date().toISOString();
     state.stoppedAt = undefined;
+    state.mode = txlineAuthConfigured() ? 'txline_stream' : txlineFallbackEnabled() ? 'scoreboard_fallback' : 'unconfigured';
+    state.fixtures.lastError = undefined;
     state.odds.lastError = undefined;
     state.scores.lastError = undefined;
+
+    if (!txlineAuthConfigured()) {
+        if (!txlineFallbackEnabled()) {
+            state.running = false;
+            state.stoppedAt = new Date().toISOString();
+            state.fixtures.lastError = 'TXLINE_API_TOKEN is required and scoreboard fallback is disabled';
+            return cloneState();
+        }
+
+        void syncFallbackFixtures();
+        fallbackInterval = setInterval(() => {
+            void syncFallbackFixtures();
+        }, fixtureSyncIntervalMs());
+        return cloneState();
+    }
 
     void Promise.allSettled([
         runStream('odds', ODDS_STREAM_ENDPOINT, controller.signal),
@@ -110,12 +162,17 @@ export function startTxlineIngestion(): IngestionState {
 }
 
 export function stopTxlineIngestion(): IngestionState {
+    if (fallbackInterval) {
+        clearInterval(fallbackInterval);
+        fallbackInterval = null;
+    }
     if (controller) {
         controller.abort();
         controller = null;
     }
     state.running = false;
     state.stoppedAt = new Date().toISOString();
+    state.fixtures.connected = false;
     state.odds.connected = false;
     state.scores.connected = false;
     return cloneState();

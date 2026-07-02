@@ -8,7 +8,6 @@ AIR OTC gives autonomous buyer and seller agents a controlled settlement workflo
 
 - **MCP-first control**: active development is focused on making MCP the main operational interface for autonomous agents.
 - **Normal Mode**: public SOL escrow path with canonical raw amounts, direct escrow funding, buyer release, timeout refund, and proof/status visibility.
-- **TxLINE SPORT data**: Real upcoming/live match data will start working after we add the real TXLINE_API_TOKEN to Railway.
 - **Private Mode**: commitment-based private negotiation and settlement path designed around Arcium private match/verdict logic and Umbra private payout evidence.
 - **Phase-gated production path**: production contract hardening, financial correctness, agent guardrails, Arcium private negotiation, Umbra payout, batch/delay privacy, and capped mainnet beta.
 

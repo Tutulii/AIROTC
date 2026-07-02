@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     clearTxlineGuestJwtCacheForTests,
     fetchFixturesSnapshot,
+    fetchScoresSnapshot,
     normalizeFixturesPayload,
     normalizeOddsPayload,
     normalizeScoresPayload,
@@ -241,6 +242,105 @@ describe('TxLINE Day 1 snapshot normalization', () => {
                     'X-Api-Token': 'activated-token',
                 }),
             }));
+        } finally {
+            process.env = originalEnv;
+            fetchMock.mockRestore();
+            clearTxlineGuestJwtCacheForTests();
+        }
+    });
+
+    it('falls back to live ESPN scoreboard fixtures when TxLINE token is absent', async () => {
+        const originalEnv = { ...process.env };
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                events: [
+                    {
+                        id: '401',
+                        date: '2026-07-02T18:00:00.000Z',
+                        status: { type: { name: 'STATUS_SCHEDULED', state: 'pre', completed: false } },
+                        competitions: [{
+                            competitors: [
+                                { homeAway: 'home', score: '0', team: { displayName: 'Home FC' } },
+                                { homeAway: 'away', score: '0', team: { displayName: 'Away FC' } },
+                            ],
+                        }],
+                    },
+                ],
+            }),
+        } as Response);
+
+        try {
+            delete process.env.TXLINE_API_TOKEN;
+            delete process.env.TXLINE_API_KEY;
+            delete process.env.TXLINE_GUEST_JWT;
+            delete process.env.TXLINE_SCOREBOARD_FALLBACK_ENABLED;
+
+            const fixtures = await fetchFixturesSnapshot();
+
+            expect(fixtures.length).toBeGreaterThan(0);
+            expect(fixtures[0]).toMatchObject({
+                homeTeam: 'Home FC',
+                awayTeam: 'Away FC',
+                status: 'scheduled',
+            });
+            expect(fixtures[0].fixtureId).toMatch(/^espn:/);
+            expect(fixtures[0].raw).toMatchObject({
+                source: 'espn_scoreboard_fallback',
+                fallbackFor: 'txline',
+            });
+            expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('site.api.espn.com'), expect.objectContaining({
+                method: 'GET',
+            }));
+        } finally {
+            process.env = originalEnv;
+            fetchMock.mockRestore();
+            clearTxlineGuestJwtCacheForTests();
+        }
+    });
+
+    it('falls back to ESPN scoreboard scores for fallback fixtures', async () => {
+        const originalEnv = { ...process.env };
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                events: [
+                    {
+                        id: '401',
+                        date: '2026-07-02T18:00:00.000Z',
+                        status: { type: { name: 'STATUS_FINAL', state: 'post', completed: true } },
+                        competitions: [{
+                            competitors: [
+                                { homeAway: 'home', score: '3', team: { displayName: 'Home FC' } },
+                                { homeAway: 'away', score: '1', team: { displayName: 'Away FC' } },
+                            ],
+                        }],
+                    },
+                ],
+            }),
+        } as Response);
+
+        try {
+            delete process.env.TXLINE_API_TOKEN;
+            delete process.env.TXLINE_API_KEY;
+            delete process.env.TXLINE_GUEST_JWT;
+            delete process.env.TXLINE_SCOREBOARD_FALLBACK_ENABLED;
+
+            const scores = await fetchScoresSnapshot('espn:mlb:401');
+
+            expect(scores).toHaveLength(1);
+            expect(scores[0]).toMatchObject({
+                fixtureId: 'espn:mlb:401',
+                homeScore: 3,
+                awayScore: 1,
+                status: 'final',
+                source: 'espn_scoreboard_fallback',
+            });
+            expect(scores[0].raw.normalizedScoreState).toMatchObject({
+                status: 'final',
+                homeScore: 3,
+                awayScore: 1,
+            });
         } finally {
             process.env = originalEnv;
             fetchMock.mockRestore();
