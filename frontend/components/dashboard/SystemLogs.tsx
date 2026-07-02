@@ -28,6 +28,8 @@ const levelColors: Record<DisplayLog["level"], string> = {
   ERR: "text-rose-500",
 };
 
+const MAX_VISIBLE_LOGS = 50;
+
 function mapLevel(level: LogEntry["level"]): DisplayLog["level"] {
   switch (level) {
     case "debug": return "OK";
@@ -44,23 +46,29 @@ function formatMessage(entry: LogEntry): string {
   return msg;
 }
 
+function shouldDisplayLog(entry: LogEntry): boolean {
+  // The dashboard polls health endpoints; successful request logs drown out
+  // the actual deal/event stream and look like visual noise during chart updates.
+  return !(entry.event === "http_request" && entry.level === "info");
+}
+
 let logIdCounter = 0;
 
-const slideIn: Variants = {
-  initial: { opacity: 0, x: 16 },
-  animate: { opacity: 1, x: 0 },
-  exit: { opacity: 0, x: -8 },
+const fadeIn: Variants = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
 };
 
 const staticVariant: Variants = {
-  initial: { opacity: 1, x: 0 },
-  animate: { opacity: 1, x: 0 },
+  initial: { opacity: 1 },
+  animate: { opacity: 1 },
 };
 
 export function SystemLogs() {
   const [logs, setLogs] = useState<DisplayLog[]>([]);
   const [connected, setConnected] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
   const reducedMotion = useReducedMotion();
 
   useEffect(() => {
@@ -68,7 +76,7 @@ export function SystemLogs() {
       const now = new Date();
       const timestamp = now.toLocaleTimeString("en-US", { hour12: false }) + "." + String(now.getMilliseconds()).padStart(3, "0");
       const id = `log-${++logIdCounter}-${Date.now()}`;
-      setLogs((prev) => [...prev.slice(-50), { id, timestamp, level, message }]);
+      setLogs((prev) => [...prev, { id, timestamp, level, message }].slice(-MAX_VISIBLE_LOGS));
     };
 
     addLog("INFO", "Observatory initialized. Connecting to log stream...");
@@ -85,6 +93,7 @@ export function SystemLogs() {
     es.onmessage = (event) => {
       try {
         const entry: LogEntry = JSON.parse(event.data);
+        if (!shouldDisplayLog(entry)) return;
         const displayLevel = mapLevel(entry.level);
         const message = formatMessage(entry);
         addLog(displayLevel, message);
@@ -105,12 +114,14 @@ export function SystemLogs() {
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const logContainer = logContainerRef.current;
+    if (!logContainer) return;
+    logContainer.scrollTop = logContainer.scrollHeight;
   }, [logs]);
 
   return (
     <div
-      className="lg:col-span-3 bg-bg-root p-6 border border-border-subtle font-mono text-xs overflow-hidden"
+      className="relative isolate lg:col-span-3 bg-bg-root p-6 border border-border-subtle font-mono text-xs overflow-hidden"
       role="log"
       aria-label="System log stream"
       aria-live="polite"
@@ -129,18 +140,20 @@ export function SystemLogs() {
           <span className="text-text-disabled">{logs.length} entries</span>
         </div>
       </div>
-      <div className="space-y-1.5 opacity-80 max-h-[180px] overflow-y-auto custom-scrollbar">
-        <AnimatePresence mode="popLayout" initial={false}>
+      <div
+        ref={logContainerRef}
+        className="relative z-0 h-[180px] space-y-1.5 overflow-y-auto overflow-x-hidden overscroll-contain opacity-80 custom-scrollbar"
+      >
+        <AnimatePresence initial={false}>
           {logs.map((log) => (
             <motion.div
               key={log.id}
-              className="flex gap-4"
-              variants={reducedMotion ? staticVariant : slideIn}
+              className="flex min-h-5 items-center gap-4 overflow-hidden"
+              variants={reducedMotion ? staticVariant : fadeIn}
               initial="initial"
               animate="animate"
               exit="exit"
-              layout={!reducedMotion}
-              transition={{ duration: 0.2, ease: "easeOut" }}
+              transition={{ duration: 0.16, ease: "easeOut" }}
             >
               <span className="text-text-disabled shrink-0">{log.timestamp}</span>
               <span className={`${levelColors[log.level]} font-bold shrink-0`}>
@@ -150,7 +163,6 @@ export function SystemLogs() {
             </motion.div>
           ))}
         </AnimatePresence>
-        <div ref={bottomRef} />
       </div>
     </div>
   );

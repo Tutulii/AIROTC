@@ -1,5 +1,5 @@
 export type TicketStatus = "active" | "completed" | "disputed" | "cancelled";
-export type RollupMode = "NONE" | "ER" | "PER";
+export type RollupMode = "NONE" | "ER" | "PER" | "SPORT";
 
 export interface AgreedTerms {
   price: number;

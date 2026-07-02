@@ -2,6 +2,7 @@ import { logger } from '../lib/logger';
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { validateCreateOffer } from '../utils/offerValidator';
+import { serializeArenaMatch } from '../services/arena/arenaMatch.service';
 
 function sanitizeOffer<T extends Record<string, any>>(offer: T): T {
     const {
@@ -43,10 +44,100 @@ export const createOffer = async (req: Request, res: Response): Promise<void> =>
             settlementWallet,
             rewardWallet,
             fundingWallet,
+            fixtureId,
+            marketType,
+            selection,
         } = req.body;
         const tokenDecimals = validation.tokenDecimals ?? 9;
         const resolvedRollupMode =
-            rollupMode === 'PER' || privateMode === true ? 'PER' : rollupMode === 'NONE' ? 'NONE' : 'ER';
+            rollupMode === 'PER' || privateMode === true
+                ? 'PER'
+                : rollupMode === 'SPORT'
+                    ? 'SPORT'
+                    : rollupMode === 'NONE'
+                        ? 'NONE'
+                        : 'ER';
+
+        const sportFixtureId =
+            resolvedRollupMode === 'SPORT' && typeof fixtureId === 'string' ? fixtureId.trim() : null;
+        const sportMarketType =
+            resolvedRollupMode === 'SPORT' && typeof marketType === 'string' && marketType.trim()
+                ? marketType.trim()
+                : null;
+        const sportSelection =
+            resolvedRollupMode === 'SPORT' && typeof selection === 'string' ? selection.trim() : null;
+
+        if (resolvedRollupMode === 'SPORT') {
+            if (!sportFixtureId || !sportSelection) {
+                res.status(400).json({ success: false, error: 'fixtureId and selection are required for SPORT offers' });
+                return;
+            }
+
+            const result = await prisma.$transaction(async (tx) => {
+                const agent = await tx.agent.upsert({
+                    where: { wallet },
+                    update: {},
+                    create: { wallet },
+                });
+
+                const offer = await tx.offer.create({
+                    data: {
+                        creatorId: agent.id,
+                        asset,
+                        price,
+                        amount,
+                        mode,
+                        rollupMode: resolvedRollupMode,
+                        collateral,
+                        tokenMint: tokenMint || null,
+                        tokenDecimals,
+                        creatorSettlementWallet: settlementWallet || null,
+                        creatorRewardWallet: rewardWallet || null,
+                        creatorFundingWallet: fundingWallet || null,
+                        fixtureId: sportFixtureId,
+                        marketType: sportMarketType,
+                        selection: sportSelection,
+                    },
+                });
+
+                let fixture: any = null;
+                try {
+                    fixture = await (tx as any).arenaFixture.findUnique({
+                        where: { fixtureId: sportFixtureId },
+                    });
+                } catch {
+                    fixture = null;
+                }
+
+                const arenaMatch = await (tx as any).arenaMatch.create({
+                    data: {
+                        fixtureId: sportFixtureId,
+                        offerId: offer.id,
+                        marketType: sportMarketType,
+                        selection: sportSelection,
+                        direction: mode === 'sell' ? 'SELL_SELECTION' : 'BUY_SELECTION',
+                        makerWallet: wallet,
+                        rollupMode: 'SPORT',
+                        status: 'offer_created',
+                        startedAt: new Date(),
+                        proof: {
+                            createdBy: 'sport_offer',
+                            fixtureKnown: Boolean(fixture),
+                            settlementSource: 'txline',
+                        },
+                    },
+                });
+
+                return { offer, arenaMatch };
+            });
+
+            res.status(201).json({
+                success: true,
+                data: sanitizeOffer(result.offer),
+                arenaMatch: serializeArenaMatch(result.arenaMatch),
+            });
+            return;
+        }
 
         const agent = await prisma.agent.upsert({
             where: { wallet },
@@ -84,7 +175,7 @@ export const createOffer = async (req: Request, res: Response): Promise<void> =>
 export const getOffers = async (req: Request, res: Response): Promise<void> => {
     try {
         const rawAsset = req.query.asset;
-        const { minPrice, maxPrice, mode } = req.query;
+        const { minPrice, maxPrice, mode, rollupMode } = req.query;
 
         // ── Sanitize query parameters ──
         const sanitizeQueryParam = (val: unknown, maxLen = 100): string | undefined => {
@@ -105,6 +196,20 @@ export const getOffers = async (req: Request, res: Response): Promise<void> => {
         const cleanAsset = sanitizeQueryParam(rawAsset, 64);
         if (cleanAsset) {
             where.asset = cleanAsset;
+        }
+
+        const cleanFixtureId = sanitizeQueryParam(req.query.fixtureId, 100);
+        if (cleanFixtureId) {
+            where.fixtureId = cleanFixtureId;
+        }
+
+        if (rollupMode) {
+            if (rollupMode === 'ER' || rollupMode === 'PER' || rollupMode === 'NONE' || rollupMode === 'SPORT') {
+                where.rollupMode = rollupMode;
+            } else {
+                res.status(400).json({ success: false, error: 'rollupMode must be "NONE", "ER", "PER", or "SPORT"' });
+                return;
+            }
         }
 
         if (mode) {

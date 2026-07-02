@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
-import { Topbar } from "@/components/layout/Topbar";
 import { ToastProvider } from "@/components/ui/Toast";
 import { SystemHooks } from "@/components/layout/SystemHooks";
 
@@ -38,8 +37,7 @@ export default function RootLayout({
           <SystemHooks />
           <a href="#main-content" className="skip-nav">Skip to content</a>
           <Sidebar />
-          <Topbar />
-          <main id="main-content" className="pt-24 pb-12 px-4 sm:px-6 md:ml-64 min-h-screen">
+          <main id="main-content" className="pt-8 pb-12 px-4 sm:px-6 md:ml-56 min-h-screen">
             <div className="max-w-7xl mx-auto space-y-6">{children}</div>
           </main>
         </ToastProvider>

@@ -8,6 +8,7 @@ import { logger } from './lib/logger';
 import { prisma } from './lib/prisma';
 import { ensureApiSchema } from './lib/ensureApiSchema';
 import { startTransactionMonitor, stopTransactionMonitor } from './services/transactionMonitor';
+import { startTxlineIngestion, stopTxlineIngestion } from './services/arena/txlineStreamIngestion';
 
 // Load environment variables
 dotenv.config();
@@ -25,6 +26,15 @@ const startServer = async () => {
 
         // Start transaction monitoring (stale deal detection, settlement rate alerts)
         startTransactionMonitor();
+
+        if ((process.env.TXLINE_INGESTION_AUTOSTART || 'true').toLowerCase() !== 'false') {
+            const ingestion = startTxlineIngestion();
+            logger.info('txline_ingestion_autostarted', {
+                running: ingestion.running,
+                oddsEndpoint: ingestion.odds.endpoint,
+                scoresEndpoint: ingestion.scores.endpoint,
+            });
+        }
 
         server.listen(PORT, () => {
             logger.info('server_started', {
@@ -50,6 +60,7 @@ const startServer = async () => {
 
             // 1. Stop monitoring
             stopTransactionMonitor();
+            stopTxlineIngestion();
 
             // 2. Stop accepting new connections
             server.close(() => {

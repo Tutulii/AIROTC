@@ -11,44 +11,68 @@ import {
 import { useState, useEffect } from "react";
 import { fetchHealth } from "@/lib/api";
 
+const MAX_POINTS = 12;
+const POLL_INTERVAL_MS = 5000;
+const HEALTH_TIMEOUT_MS = 2500;
+
+type PulsePoint = { time: string; activity: number };
+
+function timeLabel(date = new Date()): string {
+  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+async function fetchHealthWithTimeout(): Promise<void> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    await fetchHealth({ signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 /**
  * Market Pulse — shows platform activity over time.
  * Currently tracks real-time connection activity (not mock volume data).
  * Each poll records a data point so the chart builds up organically.
  */
 export function MarketPulse() {
-  const [activeRange, setActiveRange] = useState<"LIVE" | "1H" | "24H">("LIVE");
-  const [dataPoints, setDataPoints] = useState<{ time: string; activity: number }[]>([]);
+  const [dataPoints, setDataPoints] = useState<PulsePoint[]>([]);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     const poll = async () => {
-      const now = new Date();
-      const timeLabel = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+      const label = timeLabel();
 
       try {
         const start = performance.now();
-        await fetchHealth();
+        await fetchHealthWithTimeout();
+        if (cancelled) return;
         const latency = Math.round(performance.now() - start);
         setConnected(true);
 
         setDataPoints((prev) => {
-          const next = [...prev, { time: timeLabel, activity: latency }];
-          // Keep last 12 data points
-          return next.slice(-12);
+          const next = [...prev, { time: label, activity: latency }];
+          return next.slice(-MAX_POINTS);
         });
       } catch {
+        if (cancelled) return;
         setConnected(false);
         setDataPoints((prev) => {
-          const next = [...prev, { time: timeLabel, activity: 0 }];
-          return next.slice(-12);
+          const next = [...prev, { time: label, activity: 0 }];
+          return next.slice(-MAX_POINTS);
         });
       }
     };
 
     poll();
-    const interval = setInterval(poll, 15000); // Poll every 15s
-    return () => clearInterval(interval);
+    const interval = window.setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, []);
 
   return (
@@ -69,11 +93,11 @@ export function MarketPulse() {
       </div>
 
       <div className="h-64 relative">
-        {dataPoints.length < 2 ? (
+        {dataPoints.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <div className="w-6 h-6 border-2 border-accent/50 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-              <span className="text-text-muted text-xs font-mono">Collecting data points...</span>
+              <span className="text-text-muted text-xs font-mono">Checking API heartbeat...</span>
             </div>
           </div>
         ) : (
@@ -111,7 +135,9 @@ export function MarketPulse() {
                 stroke="#46f1c5"
                 strokeWidth={2}
                 fill="url(#chartGradient)"
-                animationDuration={1200}
+                dot={dataPoints.length < 3 ? { r: 3, fill: "#46f1c5", strokeWidth: 0 } : false}
+                activeDot={{ r: 4, fill: "#46f1c5", stroke: "#11151c", strokeWidth: 2 }}
+                animationDuration={450}
               />
             </AreaChart>
           </ResponsiveContainer>

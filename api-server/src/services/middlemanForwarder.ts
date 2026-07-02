@@ -167,4 +167,68 @@ export const middlemanForwarder = {
             return { success: false, error: err.message };
         }
     },
+
+    /**
+     * Forward a TxLINE SPORT settlement decision to the escrow owner.
+     * The middleman verifies the ticket is SPORT and funded before executing.
+     */
+    async forwardSportSettlement(params: {
+        ticketId: string;
+        settlementAction: 'release_to_maker' | 'refund_to_taker';
+        matchId?: string | null;
+        fixtureId?: string | null;
+        outcomeWinner?: string | null;
+        winnerWallet?: string | null;
+    }): Promise<{
+        success: boolean;
+        tx?: string;
+        onChainAction?: string;
+        status?: string;
+        error?: string;
+        raw?: any;
+    }> {
+        try {
+            const path = `/v1/deals/${params.ticketId}/sport-settle`;
+            const body = JSON.stringify({
+                settlementAction: params.settlementAction,
+                matchId: params.matchId || null,
+                fixtureId: params.fixtureId || null,
+                outcomeWinner: params.outcomeWinner || null,
+                winnerWallet: params.winnerWallet || null,
+            });
+
+            const res = await fetch(`${MIDDLEMAN_URL}${path}`, {
+                method: 'POST',
+                headers: buildSignedHeaders('POST', path, body),
+                body,
+                signal: AbortSignal.timeout(60000),
+            });
+
+            const text = await res.text();
+            let data: any = null;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch {
+                data = { raw: text };
+            }
+
+            if (!res.ok || !data?.success) {
+                return {
+                    success: false,
+                    error: data?.error || `Status ${res.status}`,
+                    raw: data,
+                };
+            }
+
+            return {
+                success: true,
+                tx: data.tx,
+                onChainAction: data.onChainAction,
+                status: data.status,
+                raw: data,
+            };
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
+    },
 };

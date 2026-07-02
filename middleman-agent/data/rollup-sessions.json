@@ -60,19 +60,6 @@
     "updatedAt": 1778311308118
   },
   {
-    "ticketId": "ticket-fallback",
-    "sessionPda": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
-    "validator": "devnet-tee.magicblock.app",
-    "validatorIdentity": "MTEWGuqxUpYZGFJQcp8tLN7x5v9BSeoFHYWQQ3n3xzo",
-    "isPrivate": true,
-    "delegatedAt": 1778509602435,
-    "phase": "pending_per_close",
-    "attempts": 10,
-    "lastError": "Simulation failed. \nMessage: Transaction simulation failed: Error processing Instruction 0: Program failed to complete. \nLogs: \n[\n  \"Program ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1 invoke [1]\",\n  \"Program ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1 consumed 239 of 200000 compute units\",\n  \"Program ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1 failed: SBF program Panicked in apis/magicblock-permission/src/state/v1.rs at 134:29\"\n]. \nCatch the `SendTransactionError` and call `getLogs()` on it for full details.",
-    "commitSignature": "commit-sig",
-    "updatedAt": 1778509602435
-  },
-  {
     "ticketId": "17b415f5-08b9-4473-9b24-811999d0df8f",
     "sessionPda": "2UBryEdP9KKUF3c8p48yz4Dr6QAdVvhCyHZVe7z6Q29N",
     "validator": "devnet-tee.magicblock.app",
@@ -110,5 +97,18 @@
     "sellerAgentId": "8f0edf87-6d4f-4750-b861-3ffc120db04d",
     "phase": "active",
     "updatedAt": 1778525556598
+  },
+  {
+    "ticketId": "ticket-fallback",
+    "sessionPda": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+    "validator": "tee.magicblock.test",
+    "validatorIdentity": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+    "isPrivate": true,
+    "delegatedAt": 1782813357946,
+    "phase": "pending_per_close",
+    "attempts": 1,
+    "lastError": "close permission failed",
+    "commitSignature": "commit-sig",
+    "updatedAt": 1782813357946
   }
 ]

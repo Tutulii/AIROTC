@@ -156,6 +156,136 @@ describe("PER marketplace offer flow", () => {
     );
   });
 
+  it("creates a SPORT offer and links it to an Arena match for TxLINE settlement", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z");
+    const tx = {
+      agent: {
+        upsert: vi.fn().mockResolvedValue({ id: "agent-1", wallet: "seller-wallet" }),
+      },
+      offer: {
+        create: vi.fn().mockResolvedValue({
+          id: "offer-sport-1",
+          asset: "TXLINE:fixture-1:1X2_PARTICIPANT_RESULT:part1",
+          price: 0.1,
+          amount: 1,
+          mode: "sell",
+          collateral: 0.3,
+          rollupMode: "SPORT",
+          fixtureId: "fixture-1",
+          marketType: "1X2_PARTICIPANT_RESULT",
+          selection: "part1",
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        }),
+      },
+      arenaFixture: {
+        findUnique: vi.fn().mockResolvedValue({ fixtureId: "fixture-1" }),
+      },
+      arenaMatch: {
+        create: vi.fn().mockImplementation(async ({ data }) => ({
+          id: "match-sport-1",
+          ...data,
+          createdAt: now,
+          updatedAt: now,
+        })),
+      },
+    };
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx));
+
+    const { createOffer } = await import("../src/controllers/offersController");
+    const req: any = {
+      wallet: "seller-wallet",
+      body: {
+        asset: "TXLINE:fixture-1:1X2_PARTICIPANT_RESULT:part1",
+        price: 0.1,
+        amount: 1,
+        mode: "sell",
+        collateral: 0.3,
+        rollupMode: "SPORT",
+        fixtureId: "fixture-1",
+        marketType: "1X2_PARTICIPANT_RESULT",
+        selection: "part1",
+      },
+    };
+    const res = createResponseMock();
+
+    await createOffer(req, res);
+
+    expect(tx.offer.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          rollupMode: "SPORT",
+          fixtureId: "fixture-1",
+          marketType: "1X2_PARTICIPANT_RESULT",
+          selection: "part1",
+        }),
+      })
+    );
+    expect(tx.arenaMatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          offerId: "offer-sport-1",
+          fixtureId: "fixture-1",
+          marketType: "1X2_PARTICIPANT_RESULT",
+          selection: "part1",
+          direction: "SELL_SELECTION",
+          makerWallet: "seller-wallet",
+          rollupMode: "SPORT",
+          status: "offer_created",
+          proof: expect.objectContaining({
+            createdBy: "sport_offer",
+            settlementSource: "txline",
+          }),
+        }),
+      })
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          id: "offer-sport-1",
+          rollupMode: "SPORT",
+          fixtureId: "fixture-1",
+        }),
+        arenaMatch: expect.objectContaining({
+          id: "match-sport-1",
+          rollupMode: "SPORT",
+          fixtureId: "fixture-1",
+          offerId: "offer-sport-1",
+        }),
+      })
+    );
+  });
+
+  it("rejects SPORT offers without a fixture id", async () => {
+    const { createOffer } = await import("../src/controllers/offersController");
+    const req: any = {
+      wallet: "seller-wallet",
+      body: {
+        asset: "TXLINE:missing-fixture",
+        price: 0.1,
+        amount: 1,
+        mode: "sell",
+        collateral: 0.3,
+        rollupMode: "SPORT",
+        selection: "part1",
+      },
+    };
+    const res = createResponseMock();
+
+    await createOffer(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        error: "fixtureId is required for SPORT offers",
+      })
+    );
+  });
+
   it("lists PER offers publicly for marketplace discovery", async () => {
     prismaMock.offer.findMany.mockResolvedValue([
       {

@@ -1,5 +1,5 @@
 /**
- * BravoBot — Autonomous Seller Agent (Normal + ER + PER)
+ * BravoBot — Autonomous Seller Agent (Normal + ER + PER + SPORT)
  * 
  * ER Mode:  Chat-based negotiation → middleman analyzes → auto-escrow → collateral deposit → deliver
  * PER Mode: Brief chat greeting → terms via SDK (opaque) → deposit → encrypted delivery
@@ -20,7 +20,7 @@ export interface BravoBotConfig {
   askingPrice: number;
   minPrice: number;
   collateral: number;
-  rollupMode: "ER" | "PER" | "NONE";
+  rollupMode: "ER" | "PER" | "NONE" | "SPORT";
   bridgeSecret: string;
 }
 

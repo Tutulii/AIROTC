@@ -159,4 +159,40 @@ describe("deposit watcher historical reconciliation", () => {
     ]);
     expect(depositTypes[2]).toBe("buyer_payment");
   });
+
+  it("publishes missing deposit confirmations when the escrow balance is fully funded but tx attribution is unusable", async () => {
+    const connection = {
+      getBalance: vi.fn()
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValue(703_633_120),
+      getSignaturesForAddress: vi.fn().mockResolvedValue([]),
+      getTransaction: vi.fn(),
+      removeAccountChangeListener: vi.fn(),
+    };
+
+    const { watchForDeposits, reconcileDepositWatcherFromHistory } = await import("../src/listeners/depositWatcher");
+    await watchForDeposits(
+      connection as any,
+      ticketId,
+      dealPda,
+      0.3 * LAMPORTS_PER_SOL,
+      0.3 * LAMPORTS_PER_SOL,
+      0.1 * LAMPORTS_PER_SOL,
+    );
+
+    const result = await reconcileDepositWatcherFromHistory(connection as any, ticketId, "aggregate-test");
+
+    expect(result.reconciled).toBe(true);
+    expect(result.reason).toBe("aggregate_balance_reconciled");
+    expect(result.buyerDeposited).toBe(true);
+    expect(result.sellerDeposited).toBe(true);
+    expect(result.paymentDeposited).toBe(true);
+    expect(publishMock.mock.calls.map(call => call[1].deposit_type)).toEqual([
+      "buyer_collateral",
+      "seller_collateral",
+      "buyer_payment",
+    ]);
+    expect(transactionCreateMock).toHaveBeenCalledTimes(3);
+  });
 });

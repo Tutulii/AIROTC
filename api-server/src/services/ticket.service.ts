@@ -37,6 +37,9 @@ function summarizeTicket<T extends {
         price: unknown;
         collateral: unknown;
         status?: string;
+        fixtureId?: string | null;
+        marketType?: string | null;
+        selection?: string | null;
     };
     messages?: Array<{
         id: string;
@@ -61,6 +64,9 @@ function summarizeTicket<T extends {
             type: ticket.offer.mode,
             asset: ticket.offer.asset,
             status: ticket.offer.status,
+            fixtureId: ticket.offer.fixtureId || null,
+            marketType: ticket.offer.marketType || null,
+            selection: ticket.offer.selection || null,
             price: redactPrivateTerms ? null : toSafeNumber(ticket.offer.price),
             collateral: redactPrivateTerms ? null : toSafeNumber(ticket.offer.collateral),
             privateTermsRedacted: redactPrivateTerms,
@@ -104,6 +110,9 @@ export const listTicketsForWalletService = async (
                     price: true,
                     collateral: true,
                     status: true,
+                    fixtureId: true,
+                    marketType: true,
+                    selection: true,
                 },
             },
             messages: {
@@ -223,7 +232,10 @@ export const getTicketByIdService = async (ticketId: string, wallet: string) => 
                     mode: true,
                     asset: true,
                     price: true,
-                    collateral: true
+                    collateral: true,
+                    fixtureId: true,
+                    marketType: true,
+                    selection: true
                 }
             },
             messages: {
@@ -255,6 +267,9 @@ export const getTicketByIdService = async (ticketId: string, wallet: string) => 
             id: ticket.offer.id,
             type: ticket.offer.mode,
             asset: ticket.offer.asset,
+            fixtureId: ticket.offer.fixtureId || null,
+            marketType: ticket.offer.marketType || null,
+            selection: ticket.offer.selection || null,
             price: redactPrivateTerms ? null : ticket.offer.price,
             collateral: redactPrivateTerms ? null : ticket.offer.collateral,
             privateTermsRedacted: redactPrivateTerms,

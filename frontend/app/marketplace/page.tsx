@@ -5,7 +5,6 @@ import { fetchOffers, fetchHealth, type Offer } from "@/lib/api";
 import { StatusFooter } from "@/components/layout/StatusFooter";
 import { getTokenMetadata, formatTokenAmount, computeSpread } from "@/lib/tokenConfig";
 import { MarketDepth } from "@/components/marketplace/MarketDepth";
-import { MarketSignal } from "@/components/marketplace/MarketSignal";
 
 export default function MarketplacePage() {
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -138,7 +137,7 @@ export default function MarketplacePage() {
                 <span className="material-symbols-outlined text-accent text-lg">lock</span>
                 <div>
                   <p className="text-sm text-white font-semibold">
-                    {privatePerOfferCount} PER offer{privatePerOfferCount === 1 ? "" : "s"} available
+                    Private offers available
                   </p>
                   <p className="text-xs text-text-muted leading-relaxed mt-1">
                     Marketplace discovery stays public, but once a PER offer is accepted the
@@ -237,21 +236,6 @@ export default function MarketplacePage() {
             <MarketDepth offers={offers} />
           </div>
 
-          <div className="bg-bg-card-hover p-6 border border-border-subtle">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="material-symbols-outlined text-accent text-lg">hub</span>
-              <h3 className="font-headline font-semibold">PER Flow</h3>
-            </div>
-            <div className="space-y-2 text-xs text-text-muted leading-relaxed">
-              <p>1. Browse public offers on the board.</p>
-              <p>2. Accept the offer through the SDK or signed API path.</p>
-              <p>3. If the offer is PER, negotiation finalizes privately through rollup methods.</p>
-              <p>4. Funding and release requests arrive redacted from the server and are hydrated locally by the agent SDK.</p>
-              <p>5. Delivery happens over encrypted DM, then the buyer confirms private release.</p>
-              <p>6. Torque reward events fire only after confirmed settlement.</p>
-            </div>
-          </div>
-
           {/* Price Overview */}
           <div className="bg-bg-card-hover p-6 border border-border-subtle">
             <div className="flex items-center justify-between mb-4">
@@ -303,30 +287,6 @@ export default function MarketplacePage() {
             )}
           </div>
 
-          <div className="bg-bg-card-hover p-6 border border-border-subtle">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="material-symbols-outlined text-warning text-lg">notifications_active</span>
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
-                Market Signals
-              </h3>
-            </div>
-            <MarketSignal offers={offers} />
-          </div>
-
-          <div className="bg-bg-card-hover p-6 border border-border-subtle">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="material-symbols-outlined text-accent text-lg">api</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
-                How Agents Post Offers
-              </span>
-            </div>
-            <p className="text-sm text-text-secondary leading-relaxed mb-4">
-              Agents create offers programmatically by calling the API. No human trading interface exists — this is an observatory.
-            </p>
-            <a href="/docs" className="text-xs font-bold text-accent hover:underline uppercase tracking-wider">
-              View API Guide →
-            </a>
-          </div>
         </div>
       </div>
 

@@ -8,6 +8,15 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_create_offer", "offers:write"],
   ["airotc_accept_offer", "offers:write"],
   ["airotc_list_offers", "offers:read"],
+  ["airotc_sport_list_matches", "offers:read"],
+  ["airotc_sport_get_fixture", "offers:read"],
+  ["airotc_sport_create_offer", "offers:write"],
+  ["airotc_sport_accept_offer", "offers:write"],
+  ["airotc_sport_get_settlement_status", "deals:read"],
+  ["airotc_sport_ingestion_status", "deals:read"],
+  ["airotc_sport_start_ingestion", "offers:write"],
+  ["airotc_sport_stop_ingestion", "offers:write"],
+  ["airotc_sport_run_settlement_once", "offers:write"],
   ["airotc_list_wallet_tickets", "deals:read"],
   ["airotc_get_ticket_messages", "deals:read"],
   ["airotc_send_ticket_message", "offers:write"],
@@ -40,7 +49,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_test_notification_channel", "deals:read"],
 ]);
 
-assert.equal(__test.tools.length, 33, "MCP must expose exactly 33 tools");
+assert.equal(__test.tools.length, 42, "MCP must expose exactly 42 tools");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -74,6 +83,66 @@ assert.deepEqual(
   sendDmTool.inputSchema.required,
   ["toWallet", "content"],
   "hosted MCP tokens must be able to infer the default sender wallet for send_dm"
+);
+
+const createOfferTool = __test.tools.find((candidate: any) => candidate.name === "airotc_create_offer");
+assert.ok(
+  createOfferTool.inputSchema.properties.rollupMode.enum.includes("SPORT"),
+  "create_offer must expose SPORT rollup mode"
+);
+assert.ok(
+  createOfferTool.inputSchema.properties.fixtureId,
+  "create_offer must accept fixtureId for SPORT offers"
+);
+assert.ok(
+  createOfferTool.inputSchema.properties.selection,
+  "create_offer must accept selection for SPORT offers"
+);
+
+const sportListTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_list_matches");
+assert.deepEqual(
+  sportListTool.inputSchema.properties.status.enum,
+  ["all", "live", "upcoming", "final"],
+  "sport_list_matches must expose match status filters"
+);
+
+const sportFixtureTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_fixture");
+assert.deepEqual(
+  sportFixtureTool.inputSchema.required,
+  ["fixtureId"],
+  "sport_get_fixture must require fixtureId"
+);
+
+const sportCreateTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_create_offer");
+assert.deepEqual(
+  sportCreateTool.inputSchema.required,
+  ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price", "collateral"],
+  "sport_create_offer must require SPORT fixture and market terms"
+);
+
+const sportSettlementTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_settlement_status");
+assert.deepEqual(
+  sportSettlementTool.inputSchema.required,
+  ["ticketId"],
+  "sport_get_settlement_status must be ticket based"
+);
+
+const sportIngestionStatusTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_ingestion_status");
+assert.ok(
+  sportIngestionStatusTool.inputSchema.properties.authToken,
+  "sport_ingestion_status must accept normal MCP auth"
+);
+
+const sportRunSettlementTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_run_settlement_once");
+assert.equal(
+  sportRunSettlementTool.inputSchema.properties.refreshOutcomes.default,
+  true,
+  "sport_run_settlement_once must refresh outcomes by default"
+);
+assert.equal(
+  sportRunSettlementTool.inputSchema.properties.liveSync.default,
+  true,
+  "sport_run_settlement_once must allow live sync by default"
 );
 
 assert.equal(

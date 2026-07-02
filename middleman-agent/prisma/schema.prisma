@@ -29,7 +29,7 @@ model Ticket {
   buyerId               String
   sellerId              String
   status                String   // open, negotiating, agreed, executing, completed, cancelled
-  rollupMode            String   @default("NONE") // NONE | ER | PER
+  rollupMode            String   @default("NONE") // NONE | ER | PER | SPORT
   tokenMint             String?
   decimals              Int?
   lastProposedPrice     Float?

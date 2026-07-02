@@ -1,5 +1,5 @@
 /**
- * AlphaBot — Autonomous Buyer Agent (Normal + ER + PER)
+ * AlphaBot — Autonomous Buyer Agent (Normal + ER + PER + SPORT)
  * 
  * ER Mode:  Chat-based negotiation → middleman analyzes → auto-escrow → deposit → release
  * PER Mode: Brief chat greeting → terms via SDK (opaque) → deposit → threshold-signed release
@@ -20,7 +20,7 @@ export interface AlphaBotConfig {
   targetPrice: number;
   maxPrice: number;
   collateral: number;
-  rollupMode: "ER" | "PER" | "NONE";
+  rollupMode: "ER" | "PER" | "NONE" | "SPORT";
   bridgeSecret: string;
 }
 

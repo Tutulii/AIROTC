@@ -64,6 +64,188 @@ model AgentNotificationChannel {
   @@index([wallet, type])
 }
 
+model ArenaFixture {
+  id        String   @id @default(uuid())
+  fixtureId String  @unique
+  sport     String  @default("football")
+  homeTeam  String?
+  awayTeam  String?
+  startsAt  DateTime?
+  status    String  @default("unknown")
+  raw       Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, startsAt])
+}
+
+model ArenaOddsUpdate {
+  id                 String   @id @default(uuid())
+  fixtureId          String
+  market             String
+  selection          String
+  odds               Float
+  impliedProbability Float?
+  source             String
+  sourceUpdateId     String?
+  sourceTimestamp    DateTime
+  raw                Json
+  createdAt          DateTime @default(now())
+
+  @@index([fixtureId, market, selection, sourceTimestamp])
+  @@index([sourceUpdateId])
+}
+
+model ArenaScoreUpdate {
+  id              String   @id @default(uuid())
+  fixtureId       String
+  homeScore       Int?
+  awayScore       Int?
+  status          String   @default("unknown")
+  source          String
+  sourceUpdateId  String?
+  sourceTimestamp DateTime
+  raw             Json
+  createdAt       DateTime @default(now())
+
+  @@index([fixtureId, sourceTimestamp])
+  @@index([sourceUpdateId])
+}
+
+model ArenaTimelineEvent {
+  id              String   @id @default(uuid())
+  fixtureId       String
+  eventType       String
+  homeTeam        String?
+  awayTeam        String?
+  marketType      String?
+  selection       String?
+  oddsValue       Float?
+  scoreState      Json?
+  txlineTimestamp DateTime
+  sourceEndpoint  String
+  sourceUpdateId  String?
+  dedupeKey       String   @unique
+  raw             Json
+  createdAt       DateTime @default(now())
+
+  @@index([fixtureId, txlineTimestamp, eventType])
+  @@index([sourceEndpoint, txlineTimestamp])
+}
+
+model ArenaStrategySignal {
+  id              String   @id @default(uuid())
+  fixtureId       String
+  strategy        String
+  signalType      String
+  marketType      String?
+  selection       String?
+  direction       String
+  confidence      Float
+  oddsBefore      Float?
+  oddsAfter       Float?
+  oddsChangePct   Float?
+  impliedBefore   Float?
+  impliedAfter    Float?
+  impliedDelta    Float?
+  scoreContext    Json?
+  tradeIntent     Json
+  reason          String
+  sourceEventIds  Json
+  signalTimestamp DateTime
+  dedupeKey       String   @unique
+  createdAt       DateTime @default(now())
+
+  @@index([fixtureId, strategy, signalTimestamp])
+  @@index([strategy, confidence])
+}
+
+model ArenaStrategyOffer {
+  id         String   @id @default(uuid())
+  signalId   String
+  offerId    String
+  wallet     String
+  fixtureId  String
+  params     Json
+  dedupeKey  String   @unique
+  createdAt  DateTime @default(now())
+
+  @@index([signalId])
+  @@index([offerId])
+  @@index([wallet, createdAt])
+}
+
+model ArenaOutcome {
+  id              String   @id @default(uuid())
+  fixtureId       String   @unique
+  status          String
+  homeScore       Int
+  awayScore       Int
+  winner          String
+  source          String
+  sourceUpdateId  String?
+  sourceTimestamp DateTime
+  settledAt       DateTime
+  raw             Json
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([winner])
+  @@index([sourceTimestamp])
+}
+
+model ArenaMatch {
+  id                    String   @id @default(uuid())
+  fixtureId             String
+  signalId              String?
+  strategy              String?
+  marketType            String?
+  selection             String?
+  direction             String?
+  signalConfidence      Float?
+
+  makerWallet           String
+  takerWallet           String?
+  buyerWallet           String?
+  sellerWallet          String?
+
+  offerId               String?
+  ticketId              String?
+  escrowPda             String?
+  rollupMode            String   @default("NONE")
+  status                String   @default("created")
+
+  buyerDepositLamports  String?
+  sellerDepositLamports String?
+  buyerDepositTx        String?
+  sellerDepositTx       String?
+  buyerDepositedAt      DateTime?
+  sellerDepositedAt     DateTime?
+
+  outcomeId             String?
+  outcomeWinner         String?
+  winnerWallet          String?
+  settlementAction      String?
+  settlementStatus      String?
+  releaseTx             String?
+  refundTx              String?
+  settledAt             DateTime?
+
+  proof                 Json
+  lastError             String?
+  startedAt             DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([fixtureId, status])
+  @@index([signalId])
+  @@index([offerId])
+  @@index([ticketId])
+  @@index([makerWallet, createdAt])
+  @@index([takerWallet, createdAt])
+  @@index([escrowPda])
+}
+
 model McpAccessToken {
   id          String    @id @default(uuid())
   tokenHash   String    @unique
@@ -89,16 +271,21 @@ model Offer {
   price         Float
   amount        Float
   mode          String   // "buy" | "sell"
-  rollupMode    String   @default("ER") // ER | PER
+  rollupMode    String   @default("ER") // NONE | ER | PER | SPORT
   collateral    Float
   tokenMint     String?  // SPL token mint address (null = native SOL)
   tokenDecimals Int      @default(9) // Token decimal precision (9 for SOL, 6 for USDC/USDT)
+  fixtureId     String?  // TxLINE fixture ID for SPORT settlement offers
+  marketType    String?  // TxLINE market identifier for SPORT settlement offers
+  selection     String?  // TxLINE outcome selection, e.g. part1, draw, part2
   status        String   @default("active")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   ticket        Ticket?
 
   creator Agent @relation(fields: [creatorId], references: [id])
+
+  @@index([fixtureId, rollupMode])
 }
 
 model Ticket {

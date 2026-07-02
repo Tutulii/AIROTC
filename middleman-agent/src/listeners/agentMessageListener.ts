@@ -25,6 +25,7 @@ import { pipelineStateStore } from "../state/pipelineStateStore";
 function mergeRollupModes(a: RollupMode, b: RollupMode): RollupMode {
     if (a === "PER" || b === "PER") return "PER";
     if (a === "ER" || b === "ER") return "ER";
+    if (a === "SPORT" || b === "SPORT") return "SPORT";
     return "NONE";
 }
 
@@ -306,7 +307,7 @@ export function initAgentMessageListener(): void {
 
                 logger.info("seller_joined_ticket", { ticket_id, agent_id, wallet: agentWallet });
 
-                if (rollupMode !== "NONE") {
+                if (rollupMode === "ER" || rollupMode === "PER") {
                     eventBus.publish("negotiation_ready", {
                         ticketId: ticket.ticket_id,
                         buyer: ticket.buyer,

@@ -38,6 +38,7 @@ import { rewardTargetStore } from '../state/rewardTargetStore';
 import { getAgentDWallet, isConfidentialEscrowReady } from '../services/confidentialExecutionService';
 import { executeDeal, executeRelease } from '../services/executionService';
 import { executeCancelDeal, executeFractionalSplit } from '../services/onChainExecutionService';
+import { executeSportSettlement } from '../services/sportSettlementBridge';
 import { loadConfig } from '../config';
 import { registerObservatoryTicketMapping } from '../services/observatoryBridge';
 import { pipelineStateStore } from '../state/pipelineStateStore';
@@ -59,7 +60,7 @@ type LocalDemoOffer = {
     creatorSettlementWallet?: string | null;
     creatorRewardWallet?: string | null;
     creatorFundingWallet?: string | null;
-    rollupMode: "ER" | "PER" | "NONE";
+    rollupMode: "ER" | "PER" | "NONE" | "SPORT";
     tokenMint?: string | null;
     tokenDecimals?: number;
 };
@@ -470,7 +471,14 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 creatorSettlementWallet,
                 creatorRewardWallet,
                 creatorFundingWallet,
-                rollupMode: rollupMode === "PER" ? "PER" : rollupMode === "NONE" ? "NONE" : "ER",
+                rollupMode:
+                    rollupMode === "PER"
+                        ? "PER"
+                        : rollupMode === "SPORT"
+                            ? "SPORT"
+                            : rollupMode === "NONE"
+                                ? "NONE"
+                                : "ER",
                 tokenMint,
                 tokenDecimals: tokenDecimals ? Number(tokenDecimals) : undefined,
             };
@@ -807,7 +815,14 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 offer_id: externalTicketId || '',
                 buyer: buyerWallet,
                 seller: sellerWallet,
-                rollup_mode: rollupMode === 'PER' ? 'PER' : rollupMode === 'ER' ? 'ER' : 'NONE',
+                rollup_mode:
+                    rollupMode === 'PER'
+                        ? 'PER'
+                        : rollupMode === 'ER'
+                            ? 'ER'
+                            : rollupMode === 'SPORT'
+                                ? 'SPORT'
+                                : 'NONE',
                 tokenMint,
                 decimals: decimals ? parseInt(decimals) : undefined,
                 status: "active",
@@ -1168,6 +1183,28 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             logger.info("bridge_message_forwarded", { ticketId, sender: agentId, senderWallet, action: decision.action });
         } catch (e: any) {
             res.status(500).json({ error: e.message });
+        }
+    });
+
+    app.post('/v1/deals/:ticketId/sport-settle', verifyBridgeHmac, bridgeRateLimiter, async (req, res) => {
+        try {
+            const ticketId = req.params.ticketId as string;
+            const result = await executeSportSettlement({
+                ticketId,
+                settlementAction: req.body?.settlementAction,
+                matchId: req.body?.matchId,
+                fixtureId: req.body?.fixtureId,
+                outcomeWinner: req.body?.outcomeWinner,
+                winnerWallet: req.body?.winnerWallet,
+            });
+
+            res.status(result.success ? 200 : 502).json(result);
+        } catch (e: any) {
+            const statusCode = Number.isInteger(e?.statusCode) ? e.statusCode : 500;
+            res.status(statusCode).json({
+                success: false,
+                error: e?.message || String(e),
+            });
         }
     });
 

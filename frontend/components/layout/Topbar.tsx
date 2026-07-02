@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { SimulateDealModal } from "@/components/ui/SimulateDealModal";
@@ -15,7 +14,7 @@ export function Topbar() {
 
   return (
     <>
-      <header className="fixed top-0 right-0 left-0 md:left-64 h-16 bg-bg-surface/80 backdrop-blur-md z-30 shadow-[0px_4px_24px_var(--color-accent-glow)] flex justify-between items-center px-6">
+      <header className="fixed top-0 right-0 left-0 md:left-56 h-16 bg-bg-surface/80 backdrop-blur-md z-30 shadow-[0px_4px_24px_var(--color-accent-glow)] flex justify-between items-center px-6">
         <div className="flex items-center gap-8">
           {isAgents ? (
             <>
@@ -69,23 +68,6 @@ export function Topbar() {
               SIMULATE DEAL
             </button>
           ) : null}
-          <Link href="/docs" className="p-2 text-text-muted hover:text-accent transition-colors active:opacity-80">
-            <span className="material-symbols-outlined">
-              notifications_active
-            </span>
-          </Link>
-          <Link href="/agents" className="p-2 text-text-muted hover:text-accent transition-colors active:opacity-80">
-            <span className="material-symbols-outlined">
-              settings_input_component
-            </span>
-          </Link>
-          <Link
-            href="/mcp-token"
-            aria-label="Generate MCP token"
-            className="w-10 h-10 rounded-full bg-bg-highest border border-border-subtle flex items-center justify-center text-text-secondary overflow-hidden hover:text-accent hover:border-accent transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
-          >
-            <span className="material-symbols-outlined text-sm" aria-hidden="true">terminal</span>
-          </Link>
         </div>
       </header>
 

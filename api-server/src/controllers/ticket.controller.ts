@@ -11,6 +11,7 @@ import {
 import { middlemanForwarder } from '../services/middlemanForwarder';
 import { prisma } from '../lib/prisma';
 import { webhooks } from '../services/webhookDelivery';
+import { attachSportTicketByOffer } from '../services/arena/sportSettlementEngine';
 
 function toNumber(value: unknown): number {
     if (typeof value === 'number') return value;
@@ -117,6 +118,7 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
         }
 
         const ticket = await acceptOfferService(id as string, wallet, settlementWallet);
+        let sportArenaMatch: Record<string, unknown> | null = null;
 
         // Forward to Middleman before telling the agent the offer is accepted.
         // Sends BOTH buyer and seller wallets so they land in ONE ticket.
@@ -182,6 +184,22 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
                 middlemanTicketId: result.middlemanTicketId,
             });
 
+            if ((offer as any).rollupMode === 'SPORT') {
+                try {
+                    const attachResult = await attachSportTicketByOffer({
+                        offerId: offer.id,
+                        ticketId: ticket.id,
+                    });
+                    sportArenaMatch = (attachResult as any).match || attachResult;
+                } catch (error: any) {
+                    logger.warn('sport_ticket_attach_failed', {
+                        offerId: offer.id,
+                        ticketId: ticket.id,
+                        error: error?.message,
+                    });
+                }
+            }
+
             // Webhook: notify both parties
             webhooks.dealMatched(ticket.id, ticket.buyer, ticket.seller, offer)
                 .catch((error: any) => {
@@ -191,7 +209,8 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
 
         res.status(200).json({
             success: true,
-            ticket
+            ticket,
+            ...(sportArenaMatch ? { arenaMatch: sportArenaMatch } : {}),
         });
     } catch (error: any) {
         if (error.message === 'OFFER_NOT_FOUND') {

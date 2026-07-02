@@ -5,6 +5,8 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
+export type RollupMode = "ER" | "PER" | "NONE" | "SPORT";
+
 /** Generic fetch wrapper with error handling */
 async function apiFetch<T>(
   endpoint: string,
@@ -33,8 +35,8 @@ export interface HealthStatus {
   timestamp: string;
 }
 
-export async function fetchHealth(): Promise<HealthStatus> {
-  return apiFetch<HealthStatus>("/health");
+export async function fetchHealth(options?: RequestInit): Promise<HealthStatus> {
+  return apiFetch<HealthStatus>("/health", options);
 }
 
 // ─── Agents ──────────────────────────────────────────
@@ -68,7 +70,10 @@ export interface Offer {
   amount: number;
   amountRaw?: string | null;
   mode: "buy" | "sell";
-  rollupMode?: "ER" | "PER" | "NONE";
+  rollupMode?: RollupMode;
+  fixtureId?: string | null;
+  marketType?: string | null;
+  selection?: string | null;
   collateral: number;
   collateralRaw?: string | null;
   status: string;
@@ -134,6 +139,8 @@ export async function fetchOffers(params?: {
   maxPrice?: number;
   mode?: "buy" | "sell";
   tokenMint?: string;
+  fixtureId?: string;
+  rollupMode?: RollupMode;
 }): Promise<Offer[]> {
   const searchParams = new URLSearchParams();
   if (params?.asset) searchParams.set("asset", params.asset);
@@ -141,6 +148,8 @@ export async function fetchOffers(params?: {
   if (params?.maxPrice) searchParams.set("maxPrice", String(params.maxPrice));
   if (params?.mode) searchParams.set("mode", params.mode);
   if (params?.tokenMint) searchParams.set("tokenMint", params.tokenMint);
+  if (params?.fixtureId) searchParams.set("fixtureId", params.fixtureId);
+  if (params?.rollupMode) searchParams.set("rollupMode", params.rollupMode);
 
   const query = searchParams.toString();
   const res = await apiFetch<OffersResponse>(
@@ -193,12 +202,15 @@ export interface TicketView {
   buyer: string;
   seller: string;
   status: string;
-  rollupMode?: "ER" | "PER" | "NONE";
+  rollupMode?: RollupMode;
   privateTermsRedacted?: boolean;
   offer: {
     id: string;
     type: "buy" | "sell";
     asset: string;
+    fixtureId?: string | null;
+    marketType?: string | null;
+    selection?: string | null;
     price: number | null;
     collateral: number | null;
     privateTermsRedacted?: boolean;
@@ -219,7 +231,7 @@ export async function acceptOffer(
   buyer: string;
   seller: string;
   status: string;
-  rollupMode?: "ER" | "PER" | "NONE";
+  rollupMode?: RollupMode;
 }> {
   const res = await apiFetch<{
     success: boolean;
@@ -228,7 +240,7 @@ export async function acceptOffer(
       buyer: string;
       seller: string;
       status: string;
-      rollupMode?: "ER" | "PER" | "NONE";
+      rollupMode?: RollupMode;
     };
   }>(`/v1/offers/${offerId}/accept`, {
     method: "POST",
@@ -321,10 +333,13 @@ export interface RecentDeal {
   seller: string;
   status: string;
   createdAt: string;
-  rollupMode?: "ER" | "PER" | "NONE";
+  rollupMode?: RollupMode;
   privateTermsRedacted?: boolean;
   offer?: {
     asset: string;
+    fixtureId?: string | null;
+    marketType?: string | null;
+    selection?: string | null;
     price: number | null;
     amount: number;
     mode: string;
@@ -410,5 +425,273 @@ export async function fetchPrices(): Promise<Record<string, PriceEntry>> {
 
 export async function fetchPrice(symbol: string): Promise<PriceEntry> {
   const res = await apiFetch<{ success: boolean; data: PriceEntry }>(`/v1/prices/${symbol}`);
+  return res.data;
+}
+
+// ─── TxLINE Arena ───────────────────────────────────
+export interface TxlineConfig {
+  day: number;
+  txlineBaseUrl: string;
+  txlineNetwork: string;
+  txlineConfigured: boolean;
+  txlineGuestJwtMode?: boolean;
+  requiredSnapshots: string[];
+  streamEndpoints: string[];
+  replayEndpoints: string[];
+  strategyEndpoints: string[];
+  outcomeEndpoints: string[];
+  backtestEndpoints: string[];
+  demoReplayEndpoints: string[];
+  proofModes: string[];
+  publicEndpoints: Record<string, string>;
+  adminEndpoints: Record<string, string>;
+}
+
+export interface TxlineFixture {
+  id?: string;
+  fixtureId: string;
+  sport?: string | null;
+  homeTeam?: string | null;
+  awayTeam?: string | null;
+  startsAt?: string | null;
+  status?: string | null;
+  raw?: Record<string, unknown> | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TxlineReplayEvent {
+  id: string;
+  sequence: number;
+  fixtureId: string;
+  type: "odds" | "score" | string;
+  teams?: {
+    home?: string;
+    away?: string;
+  };
+  marketType?: string;
+  selection?: string;
+  oddsValue?: number;
+  scoreState?: Record<string, unknown>;
+  txlineTimestamp: string;
+  sourceEndpoint: string;
+  sourceUpdateId?: string;
+  raw?: Record<string, unknown>;
+}
+
+export interface TxlineReplay {
+  fixtureId: string;
+  deterministic: boolean;
+  rebuilt: boolean;
+  count: number;
+  order: string[];
+  events: TxlineReplayEvent[];
+}
+
+export interface TxlineSnapshotProof {
+  day: number;
+  fixtureId: string;
+  fixture?: TxlineFixture | null;
+  latestOdds: Record<string, unknown>[];
+  latestScores: Record<string, unknown>[];
+  replayEvents: TxlineReplayEvent[];
+  acceptance: {
+    hasFixture: boolean;
+    oddsSnapshots: number;
+    scoreSnapshots: number;
+    replayEvents: number;
+  };
+}
+
+export interface TxlineStrategyConfig {
+  day: number;
+  strategy: string;
+  signalType: string;
+  description: string;
+  thresholds: {
+    minOddsChangePct: number;
+    minImpliedProbabilityDelta: number;
+    maxStakeSol: number;
+  };
+  endpoints: string[];
+  outputMode: "signal_only" | string;
+}
+
+export interface TxlineStrategySignal {
+  id: string;
+  fixtureId: string;
+  strategy: string;
+  signalType: string;
+  marketType?: string;
+  selection?: string;
+  direction: string;
+  confidence?: number;
+  oddsBefore?: number;
+  oddsAfter?: number;
+  oddsChangePct?: number;
+  impliedBefore?: number;
+  impliedAfter?: number;
+  impliedDelta?: number;
+  scoreContext?: Record<string, unknown>;
+  tradeIntent?: Record<string, unknown>;
+  reason?: string;
+  sourceEventIds?: string[];
+  signalTimestamp: string;
+  dedupeKey?: string;
+  createdAt?: string;
+}
+
+export interface TxlineStrategySignalsResponse {
+  fixtureId: string;
+  strategy: string;
+  count: number;
+  signals: TxlineStrategySignal[];
+}
+
+export interface TxlineBacktestEvaluation {
+  signalId: string;
+  fixtureId: string;
+  marketType?: string;
+  selection?: string;
+  direction: string;
+  oddsAfter?: number;
+  signalTimestamp: string;
+  outcome?: {
+    winner: string;
+    homeScore: number;
+    awayScore: number;
+    settledAt: string;
+  };
+  correct: boolean | null;
+  oneUnitPnl: number | null;
+  skippedReason?: string;
+}
+
+export interface TxlineBacktest {
+  day: number;
+  fixtureId: string | null;
+  fixtureIds?: string[];
+  generatedAt: string;
+  totalSignals: number;
+  storedOutcomes: number;
+  evaluableSignals: number;
+  correctSignals: number;
+  accuracy: number | null;
+  oneUnitPnl: number | null;
+  minSampleSize: number;
+  sampleSizeWarning: string | null;
+  verdict: string;
+  skippedCounts: Record<string, number>;
+  evaluations: TxlineBacktestEvaluation[];
+}
+
+export interface TxlineDemoReplayProof {
+  mode: string;
+  source: string;
+  generatedAt: string;
+  fixtureIds: string[];
+  seeded: {
+    fixtures: number;
+    oddsUpdates: number;
+    scoreUpdates: number;
+    signals: number;
+    outcomes: number;
+    ready: boolean;
+  };
+  backtest: TxlineBacktest;
+  judgeNote: string;
+}
+
+export interface TxlineIngestionStatus {
+  running?: boolean;
+  startedAt?: string | null;
+  odds?: Record<string, unknown>;
+  scores?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export async function fetchTxlineConfig(): Promise<TxlineConfig> {
+  const res = await apiFetch<{ success: boolean; data: TxlineConfig }>("/v1/txline/config");
+  return res.data;
+}
+
+export async function fetchTxlineFixtures(limit = 50): Promise<TxlineFixture[]> {
+  const res = await apiFetch<{ success: boolean; data: TxlineFixture[] }>(
+    `/v1/txline/fixtures?limit=${limit}`
+  );
+  return res.data;
+}
+
+export async function fetchTxlineIngestionStatus(): Promise<TxlineIngestionStatus> {
+  const res = await apiFetch<{ success: boolean; data: TxlineIngestionStatus }>(
+    "/v1/txline/ingestion/status"
+  );
+  return res.data;
+}
+
+export async function fetchTxlineReplay(
+  fixtureId: string,
+  limit = 500
+): Promise<TxlineReplay> {
+  const res = await apiFetch<{ success: boolean; data: TxlineReplay }>(
+    `/v1/txline/replay/${encodeURIComponent(fixtureId)}?limit=${limit}`
+  );
+  return res.data;
+}
+
+export function getTxlineReplayStreamUrl(fixtureId: string, intervalMs = 250): string {
+  return `${API_BASE}/v1/txline/replay/${encodeURIComponent(
+    fixtureId
+  )}/stream?intervalMs=${intervalMs}`;
+}
+
+export async function fetchTxlineSnapshotProof(
+  fixtureId: string
+): Promise<TxlineSnapshotProof> {
+  const res = await apiFetch<{ success: boolean; data: TxlineSnapshotProof }>(
+    `/v1/txline/proof/${encodeURIComponent(fixtureId)}`
+  );
+  return res.data;
+}
+
+export async function fetchTxlineStrategyConfig(): Promise<TxlineStrategyConfig> {
+  const res = await apiFetch<{ success: boolean; data: TxlineStrategyConfig }>(
+    "/v1/txline/strategy/config"
+  );
+  return res.data;
+}
+
+export async function fetchTxlineStrategySignals(
+  fixtureId: string,
+  limit = 50
+): Promise<TxlineStrategySignalsResponse> {
+  const res = await apiFetch<{ success: boolean; data: TxlineStrategySignalsResponse }>(
+    `/v1/txline/strategy/signals/${encodeURIComponent(fixtureId)}?limit=${limit}`
+  );
+  return res.data;
+}
+
+export async function fetchTxlineBacktest(params?: {
+  fixtureId?: string;
+  minSampleSize?: number;
+  limit?: number;
+}): Promise<TxlineBacktest> {
+  const searchParams = new URLSearchParams();
+  if (params?.fixtureId) searchParams.set("fixtureId", params.fixtureId);
+  if (params?.minSampleSize) searchParams.set("minSampleSize", String(params.minSampleSize));
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  const res = await apiFetch<{ success: boolean; data: TxlineBacktest }>(
+    `/v1/txline/backtest${query ? `?${query}` : ""}`
+  );
+  return res.data;
+}
+
+export async function fetchTxlineDemoReplayProof(
+  minSampleSize = 12
+): Promise<TxlineDemoReplayProof> {
+  const res = await apiFetch<{ success: boolean; data: TxlineDemoReplayProof }>(
+    `/v1/txline/demo-replay/proof?minSampleSize=${minSampleSize}`
+  );
   return res.data;
 }

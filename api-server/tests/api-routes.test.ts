@@ -122,6 +122,73 @@ describe('Live Event Catalog', () => {
     });
 });
 
+describe('TxLINE Day 4 Routes', () => {
+    it('GET /v1/txline/config exposes snapshot, stream, and replay endpoints', async () => {
+        const { status, json } = await req('GET', '/v1/txline/config');
+        expect(status).toBe(200);
+        expect(json.success).toBe(true);
+        expect(json.data.day).toBe(4);
+        expect(json.data.requiredSnapshots).toContain('/api/fixtures/snapshot');
+        expect(json.data.requiredSnapshots).toContain('/api/odds/snapshot/:fixtureId');
+        expect(json.data.requiredSnapshots).toContain('/api/scores/snapshot/:fixtureId');
+        expect(json.data.streamEndpoints).toContain('/api/odds/stream');
+        expect(json.data.streamEndpoints).toContain('/api/scores/stream');
+        expect(json.data.replayEndpoints).toContain('/v1/txline/replay/:fixtureId');
+        expect(json.data.strategyEndpoints).toContain('/v1/txline/strategy/run/:fixtureId');
+        expect(json.data.strategyEndpoints).toContain('/v1/txline/strategy/signals/:signalId/offer');
+        expect(json.data.outcomeEndpoints).toContain('/v1/txline/outcomes/:fixtureId');
+        expect(json.data.backtestEndpoints).toContain('/v1/txline/backtest');
+        expect(json.data.demoReplayEndpoints).toContain('/v1/txline/demo-replay/seed');
+        expect(json.data.demoReplayEndpoints).toContain('/v1/txline/demo-replay/proof');
+        expect(json.data.proofModes).toEqual(['live_txline', 'demo_replay']);
+        expect(json.data.publicEndpoints.replayStream).toBe('/v1/txline/replay/:fixtureId/stream');
+        expect(json.data.publicEndpoints.strategySignals).toBe('/v1/txline/strategy/signals/:fixtureId');
+        expect(json.data.publicEndpoints.strategyOffer).toBe('POST /v1/txline/strategy/signals/:signalId/offer');
+        expect(json.data.publicEndpoints.outcomes).toBe('/v1/txline/outcomes');
+        expect(json.data.publicEndpoints.backtest).toBe('/v1/txline/backtest');
+        expect(json.data.publicEndpoints.demoReplayProof).toBe('/v1/txline/demo-replay/proof');
+        expect(json.data.adminEndpoints.runStrategy).toBe('POST /v1/txline/strategy/run/:fixtureId');
+        expect(json.data.adminEndpoints.syncOutcome).toBe('POST /v1/txline/outcomes/sync/:fixtureId');
+        expect(json.data.adminEndpoints.seedDemoReplay).toBe('POST /v1/txline/demo-replay/seed');
+    });
+
+    it('GET /v1/txline/strategy/config exposes signal-only strategy settings', async () => {
+        const { status, json } = await req('GET', '/v1/txline/strategy/config');
+        expect(status).toBe(200);
+        expect(json.success).toBe(true);
+        expect(json.data).toMatchObject({
+            day: 3,
+            strategy: 'sharp_movement_v1',
+            signalType: 'sharp_odds_movement',
+            outputMode: 'signal_only',
+        });
+        expect(json.data.endpoints).toContain('/v1/txline/strategy/signals/:fixtureId');
+        expect(json.data.endpoints).toContain('/v1/txline/strategy/signals/:signalId/offer');
+    });
+});
+
+describe('Arena Match Routes', () => {
+    it('POST /v1/arena/matches rejects missing fixture or signal', async () => {
+        const { status, json } = await req('POST', '/v1/arena/matches', {});
+        expect(status).toBe(400);
+        expect(json).toMatchObject({
+            success: false,
+            error: 'arena_fixture_id_or_signal_required',
+        });
+    });
+
+    it('POST /v1/arena/matches rejects a match without a maker wallet', async () => {
+        const { status, json } = await req('POST', '/v1/arena/matches', {
+            fixtureId: 'fixture-route-smoke',
+        });
+        expect(status).toBe(400);
+        expect(json).toMatchObject({
+            success: false,
+            error: 'arena_maker_wallet_required',
+        });
+    });
+});
+
 describe('Offer CRUD', () => {
     it('POST /v1/offers with missing fields returns 400', async () => {
         const { status, json } = await req('POST', '/v1/offers', {});

@@ -40,6 +40,12 @@ export interface DepositExpectation {
 
 const expectations: Map<string, DepositExpectation> = new Map();
 type DepositType = "buyer_collateral" | "seller_collateral" | "buyer_payment";
+const DUST_TOLERANCE_LAMPORTS = 2000;
+const DEPOSIT_CONFIRMATION_ORDER: DepositType[] = [
+  "buyer_collateral",
+  "seller_collateral",
+  "buyer_payment",
+];
 
 export async function watchForDeposits(
   connection: Connection,
@@ -230,6 +236,125 @@ async function pollOnChainDealState(
   }
 }
 
+function expectedAmountForDeposit(expect: DepositExpectation, depositType: DepositType): number {
+  if (depositType === "buyer_collateral") return expect.expectedBuyerCollateral;
+  if (depositType === "seller_collateral") return expect.expectedSellerCollateral;
+  return expect.expectedPayment;
+}
+
+function markExpectationConfirmed(expect: DepositExpectation, depositType: DepositType): void {
+  if (depositType === "buyer_collateral") {
+    expect.buyerDeposited = true;
+  } else if (depositType === "seller_collateral") {
+    expect.sellerDeposited = true;
+  } else {
+    expect.paymentDeposited = true;
+  }
+}
+
+function isDepositConfirmed(expect: DepositExpectation, depositType: DepositType): boolean {
+  if (depositType === "buyer_collateral") return expect.buyerDeposited;
+  if (depositType === "seller_collateral") return expect.sellerDeposited;
+  return expect.paymentDeposited;
+}
+
+async function publishAggregateBalanceDeposit(
+  ticketId: string,
+  expect: DepositExpectation,
+  depositType: DepositType,
+  currentBalance: number,
+): Promise<boolean> {
+  const syntheticSignature = `aggregate-balance:${expect.dealPda.toBase58()}:${depositType}`;
+  const updated = await prisma.depositConfirmation.updateMany({
+    where: { ticketId, type: depositType, confirmed: false },
+    data: { confirmed: true, txHash: syntheticSignature },
+  });
+
+  markExpectationConfirmed(expect, depositType);
+
+  if (updated.count === 0) {
+    logger.warn("deposit_aggregate_confirmation_duplicate", {
+      ticket_id: ticketId,
+      depositType,
+      deal_pda: expect.dealPda.toBase58(),
+    });
+    return false;
+  }
+
+  const deal = await prisma.deal.findUnique({ where: { ticketId } });
+  if (deal) {
+    await prisma.transaction.create({
+      data: {
+        dealId: deal.id,
+        type: depositType,
+        txSignature: syntheticSignature,
+        status: "confirmed",
+      },
+    }).catch((err: any) => {
+      if (err.code !== "P2002") throw err;
+    });
+  }
+
+  const amountLamports = expectedAmountForDeposit(expect, depositType);
+  logger.info("deposit_aggregate_balance_confirmed", {
+    ticket_id: ticketId,
+    depositType,
+    amount: amountLamports / LAMPORTS_PER_SOL,
+    balance: currentBalance / LAMPORTS_PER_SOL,
+    deal_pda: expect.dealPda.toBase58(),
+  });
+
+  eventBus.publish("deposit_received", {
+    ticket_id: ticketId,
+    deal_pda: expect.dealPda.toBase58(),
+    deposit_type: depositType,
+    amount_lamports: amountLamports,
+    dune_sim_verified: false,
+  });
+
+  return true;
+}
+
+async function reconcileFullyFundedBalance(
+  ticketId: string,
+  expect: DepositExpectation,
+  currentBalance: number,
+): Promise<boolean> {
+  const expectedTotal =
+    expect.expectedBuyerCollateral
+    + expect.expectedSellerCollateral
+    + expect.expectedPayment;
+
+  if (expectedTotal <= 0 || currentBalance + DUST_TOLERANCE_LAMPORTS < expectedTotal) {
+    return false;
+  }
+
+  const missingDepositTypes = DEPOSIT_CONFIRMATION_ORDER.filter(type => !isDepositConfirmed(expect, type));
+  if (missingDepositTypes.length === 0) {
+    return true;
+  }
+
+  logger.warn("deposit_aggregate_balance_reconcile_started", {
+    ticket_id: ticketId,
+    balance: currentBalance / LAMPORTS_PER_SOL,
+    expected_total: expectedTotal / LAMPORTS_PER_SOL,
+    missing: missingDepositTypes,
+    deal_pda: expect.dealPda.toBase58(),
+  });
+
+  let publishedAny = false;
+  for (const depositType of missingDepositTypes) {
+    const published = await publishAggregateBalanceDeposit(ticketId, expect, depositType, currentBalance);
+    publishedAny = publishedAny || published;
+  }
+
+  if (expect.buyerDeposited && expect.sellerDeposited && expect.paymentDeposited) {
+    stopWatching(ticketId);
+  }
+
+  return publishedAny;
+}
+
 
 
 async function identifyAndConfirmDeposit(
@@ -240,11 +365,9 @@ async function identifyAndConfirmDeposit(
   depositAmount: number,
   pass = 0,
 ): Promise<void> {
-  const DUST_TOLERANCE = 2000; // Allow max 2000 lamports drift for rent/fees
-
   function isClose(actual: number, expected: number): boolean {
     if (expected === 0) return false;
-    return Math.abs(actual - expected) <= DUST_TOLERANCE;
+    return Math.abs(actual - expected) <= DUST_TOLERANCE_LAMPORTS;
   }
 
   // Poll recent signatures for the PDA and process each unseen transfer individually.
@@ -319,7 +442,23 @@ async function identifyAndConfirmDeposit(
       expect.expectedBuyerCollateral + expect.expectedPayment,
     );
 
-    if (!expect.buyerDeposited && isClose(txDepositAmount, expect.expectedBuyerCollateral)) {
+    if (
+      !expect.sellerDeposited
+      && expectedSellerWallet
+      && senderPubkey === expectedSellerWallet
+      && isClose(txDepositAmount, expect.expectedSellerCollateral)
+    ) {
+      depositTypes.push("seller_collateral");
+      expect.sellerDeposited = true;
+    } else if (
+      !expect.buyerDeposited
+      && expectedBuyerWallet
+      && senderPubkey === expectedBuyerWallet
+      && isClose(txDepositAmount, expect.expectedBuyerCollateral)
+    ) {
+      depositTypes.push("buyer_collateral");
+      expect.buyerDeposited = true;
+    } else if (!expect.buyerDeposited && isClose(txDepositAmount, expect.expectedBuyerCollateral)) {
       if (expectedBuyerWallet && senderPubkey !== expectedBuyerWallet) {
         logger.warn("deposit_direction_mismatch", {
           ticket_id: ticketId,
@@ -550,15 +689,21 @@ export async function reconcileDepositWatcherFromHistory(
     Math.max(0, currentBalance - previousBalance || currentBalance),
   );
 
+  const aggregateReconciled =
+    !(expect.buyerDeposited && expect.sellerDeposited && expect.paymentDeposited)
+    && await reconcileFullyFundedBalance(ticketId, expect, currentBalance);
+
   const reconciled =
     before.buyerDeposited !== expect.buyerDeposited
     || before.sellerDeposited !== expect.sellerDeposited
-    || before.paymentDeposited !== expect.paymentDeposited;
+    || before.paymentDeposited !== expect.paymentDeposited
+    || aggregateReconciled;
 
   logger.info("deposit_reconcile_finished", {
     ticket_id: ticketId,
     reason,
     reconciled,
+    aggregate_reconciled: aggregateReconciled,
     balance_sol: currentBalance / LAMPORTS_PER_SOL,
     buyerDeposited: expect.buyerDeposited,
     sellerDeposited: expect.sellerDeposited,
@@ -567,7 +712,11 @@ export async function reconcileDepositWatcherFromHistory(
 
   return {
     reconciled,
-    reason: reconciled ? "historical_signatures_processed" : "no_matching_deposits",
+    reason: aggregateReconciled
+      ? "aggregate_balance_reconciled"
+      : reconciled
+        ? "historical_signatures_processed"
+        : "no_matching_deposits",
     currentBalanceLamports: currentBalance,
     buyerDeposited: expect.buyerDeposited,
     sellerDeposited: expect.sellerDeposited,

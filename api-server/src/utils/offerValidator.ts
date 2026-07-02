@@ -19,7 +19,22 @@ interface ValidationResult {
 }
 
 export function validateCreateOffer(body: any): ValidationResult {
-    const { asset, price, amount, collateral, mode, tokenMint, rollupMode, privateMode, settlementWallet, rewardWallet, fundingWallet } = body;
+    const {
+        asset,
+        price,
+        amount,
+        collateral,
+        mode,
+        tokenMint,
+        rollupMode,
+        privateMode,
+        settlementWallet,
+        rewardWallet,
+        fundingWallet,
+        fixtureId,
+        marketType,
+        selection,
+    } = body;
 
     // ── Asset ──
     if (!asset || typeof asset !== 'string' || asset.trim() === '') {
@@ -50,12 +65,36 @@ export function validateCreateOffer(body: any): ValidationResult {
         return { valid: false, error: 'mode must be either "buy" or "sell"' };
     }
 
-    if (rollupMode !== undefined && rollupMode !== 'ER' && rollupMode !== 'PER' && rollupMode !== 'NONE') {
-        return { valid: false, error: 'rollupMode must be "NONE", "ER", or "PER"' };
+    if (rollupMode !== undefined && rollupMode !== 'ER' && rollupMode !== 'PER' && rollupMode !== 'NONE' && rollupMode !== 'SPORT') {
+        return { valid: false, error: 'rollupMode must be "NONE", "ER", "PER", or "SPORT"' };
     }
 
     if (privateMode !== undefined && typeof privateMode !== 'boolean') {
         return { valid: false, error: 'privateMode must be a boolean when provided' };
+    }
+
+    if (rollupMode === 'SPORT') {
+        if (!fixtureId || typeof fixtureId !== 'string' || fixtureId.trim() === '') {
+            return { valid: false, error: 'fixtureId is required for SPORT offers' };
+        }
+        if (fixtureId.length > 100) {
+            return { valid: false, error: 'fixtureId must be 100 characters or less' };
+        }
+        if (!selection || typeof selection !== 'string' || selection.trim() === '') {
+            return { valid: false, error: 'selection is required for SPORT offers' };
+        }
+    }
+
+    if (marketType !== undefined && marketType !== null) {
+        if (typeof marketType !== 'string' || marketType.length > 160) {
+            return { valid: false, error: 'marketType must be a string of 160 characters or less when provided' };
+        }
+    }
+
+    if (selection !== undefined && selection !== null) {
+        if (typeof selection !== 'string' || selection.length > 100) {
+            return { valid: false, error: 'selection must be a string of 100 characters or less when provided' };
+        }
     }
 
     if (settlementWallet !== undefined && settlementWallet !== null) {

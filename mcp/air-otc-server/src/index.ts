@@ -197,6 +197,12 @@ const config = {
   tokenRules: parseTokenRules(defaultScopes),
   walletPrivateKey: process.env.AIR_OTC_WALLET_PRIVATE_KEY || "",
   apiKey: process.env.AIR_OTC_API_KEY || "",
+  txlineAdminToken:
+    process.env.AIR_OTC_TXLINE_ADMIN_TOKEN ||
+    process.env.AIR_OTC_ARENA_ADMIN_TOKEN ||
+    process.env.TXLINE_ADMIN_TOKEN ||
+    process.env.ARENA_ADMIN_TOKEN ||
+    "",
 };
 
 let cachedWalletAuth:
@@ -488,6 +494,46 @@ function appendOptionalEventQuery(query: URLSearchParams, args: any) {
   if (args.includeAcked !== undefined) {
     query.set("includeAcked", String(args.includeAcked));
   }
+}
+
+function normalizeSportStatus(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function sportStatusBucket(value: unknown): "live" | "upcoming" | "final" | "unknown" {
+  const status = normalizeSportStatus(value);
+  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half"].includes(status)) {
+    return "live";
+  }
+  if (["scheduled", "upcoming", "not_started", "pre_match", "pending"].includes(status)) {
+    return "upcoming";
+  }
+  if (["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft"].includes(status)) {
+    return "final";
+  }
+  return "unknown";
+}
+
+function filterSportFixtures(fixtures: any[], status?: string): any[] {
+  if (!status || status === "all") return fixtures;
+  return fixtures.filter((fixture) => sportStatusBucket(fixture?.status || fixture?.raw?.status) === status);
+}
+
+function sportAsset(args: { fixtureId: string; marketType: string; selection: string; asset?: string }): string {
+  const supplied = typeof args.asset === "string" ? args.asset.trim() : "";
+  if (supplied) return supplied;
+  return ["TXLINE", args.fixtureId, args.marketType, args.selection]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(":")
+    .slice(0, 200);
+}
+
+function txlineAdminHeaders(args: any): Record<string, string> {
+  const token = typeof args.adminToken === "string" && args.adminToken.trim()
+    ? args.adminToken.trim()
+    : config.txlineAdminToken;
+  return token ? { authorization: `Bearer ${token}` } : {};
 }
 
 async function loadSdk(): Promise<any> {
@@ -819,6 +865,8 @@ const tools: ToolDefinition[] = [
       asset: { type: "string" },
       mode: { type: "string", enum: ["buy", "sell"] },
       status: { type: "string" },
+      rollupMode: { type: "string", enum: ["ER", "PER", "NONE", "SPORT"] },
+      fixtureId: { type: "string" },
     }),
     handler: async (args) => {
       await requireScope(args, "offers:read");
@@ -826,7 +874,286 @@ const tools: ToolDefinition[] = [
       if (args.asset) query.set("asset", args.asset);
       if (args.mode) query.set("mode", args.mode);
       if (args.status) query.set("status", args.status);
+      if (args.rollupMode) query.set("rollupMode", args.rollupMode);
+      if (args.fixtureId) query.set("fixtureId", args.fixtureId);
       return toolOutput(await httpJson(`/v1/offers${query.size ? `?${query}` : ""}`));
+    },
+  },
+  {
+    name: "airotc_sport_list_matches",
+    title: "Sport List Matches",
+    description:
+      "List TxLINE live/upcoming/final fixtures available for SPORT mode agents. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+      status: { type: "string", enum: ["all", "live", "upcoming", "final"], default: "all" },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const limit = Math.min(Math.max(Math.floor(Number(args.limit) || 50), 1), 100);
+      const response = await httpJson(`/v1/txline/fixtures?limit=${limit}`, {}, config.apiUrl);
+      const fixtures = Array.isArray(response?.data) ? response.data : [];
+      const filtered = filterSportFixtures(fixtures, args.status);
+      return toolOutput({
+        success: true,
+        source: "txline",
+        filter: args.status || "all",
+        count: filtered.length,
+        data: filtered,
+      });
+    },
+  },
+  {
+    name: "airotc_sport_get_fixture",
+    title: "Sport Get Fixture",
+    description:
+      "Fetch exact TxLINE fixture data with replay, proof, and final outcome if available. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        fixtureId: { type: "string" },
+        replayLimit: { type: "number", minimum: 1, maximum: 500, default: 100 },
+      },
+      ["fixtureId"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const fixtureId = encodeURIComponent(args.fixtureId);
+      const replayLimit = Math.min(Math.max(Math.floor(Number(args.replayLimit) || 100), 1), 500);
+      return toolOutput({
+        fixtureId: args.fixtureId,
+        collectedAt: new Date().toISOString(),
+        proof: await bestEffort("txline_fixture_proof", () =>
+          httpJson(`/v1/txline/proof/${fixtureId}`, {}, config.apiUrl)
+        ),
+        replay: await bestEffort("txline_replay", () =>
+          httpJson(`/v1/txline/replay/${fixtureId}?limit=${replayLimit}`, {}, config.apiUrl)
+        ),
+        outcome: await bestEffort("txline_outcome", () =>
+          httpJson(`/v1/txline/outcomes/${fixtureId}`, {}, config.apiUrl)
+        ),
+      });
+    },
+  },
+  {
+    name: "airotc_sport_create_offer",
+    title: "Sport Create Offer",
+    description:
+      "Create an AIR OTC SPORT offer bound to a TxLINE fixture, market, and selection. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        fixtureId: { type: "string" },
+        marketType: { type: "string" },
+        selection: { type: "string" },
+        asset: { type: "string" },
+        mode: { type: "string", enum: ["buy", "sell"] },
+        amount: { type: "number", exclusiveMinimum: 0 },
+        price: { type: "number", exclusiveMinimum: 0 },
+        collateral: { type: "number", minimum: 0 },
+        settlementWallet: { type: "string" },
+        rewardWallet: { type: "string" },
+        fundingWallet: { type: "string" },
+      },
+      ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price", "collateral"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/offers",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              publicKey: wallet,
+              asset: sportAsset(args),
+              mode: args.mode,
+              amount: args.amount,
+              price: args.price,
+              collateral: args.collateral,
+              rollupMode: "SPORT",
+              fixtureId: args.fixtureId,
+              marketType: args.marketType,
+              selection: args.selection,
+              settlementWallet: args.settlementWallet,
+              rewardWallet: args.rewardWallet,
+              fundingWallet: args.fundingWallet,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_accept_offer",
+    title: "Sport Accept Offer",
+    description:
+      "Accept a SPORT offer, create the AIR OTC ticket, and attach it to the SPORT settlement tracker. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        offerId: { type: "string" },
+        wallet: { type: "string" },
+        settlementWallet: { type: "string" },
+        rewardWallet: { type: "string" },
+        fundingWallet: { type: "string" },
+      },
+      ["offerId", "wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/offers/${encodeURIComponent(args.offerId)}/accept`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              wallet,
+              settlementWallet: args.settlementWallet,
+              rewardWallet: args.rewardWallet,
+              fundingWallet: args.fundingWallet,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_get_settlement_status",
+    title: "Sport Settlement Status",
+    description:
+      "Get SPORT ticket funding, TxLINE outcome, and release/refund settlement status. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        ticketId: { type: "string" },
+        includeMiddlemanStatus: { type: "boolean", default: true },
+      },
+      ["ticketId"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "deals:read");
+      const ticketId = encodeURIComponent(args.ticketId);
+      const settlementStatus = await httpJson(
+        `/v1/arena/tickets/${ticketId}/settlement-status`,
+        {},
+        config.apiUrl
+      );
+      const middlemanStatus = args.includeMiddlemanStatus === false
+        ? undefined
+        : await bestEffort("middleman_deal_status", () =>
+          httpJson(`/v1/deals/${ticketId}/status`, {}, config.middlemanUrl)
+        );
+      return toolOutput({
+        ...settlementStatus,
+        ...(middlemanStatus ? { middlemanStatus } : {}),
+      });
+    },
+  },
+  {
+    name: "airotc_sport_ingestion_status",
+    title: "Sport Ingestion Status",
+    description:
+      "Get TxLINE live odds/scores ingestion status for SPORT mode. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema({ ...authSchema }),
+    handler: async (args) => {
+      await requireScope(args, "deals:read");
+      return toolOutput(await httpJson("/v1/txline/ingestion/status", {}, config.apiUrl));
+    },
+  },
+  {
+    name: "airotc_sport_start_ingestion",
+    title: "Sport Start Ingestion",
+    description:
+      "Start TxLINE live odds/scores ingestion for SPORT mode. Requires offers:write scope and API admin authorization in production.",
+    scope: "offers:write",
+    inputSchema: objectSchema({
+      ...authSchema,
+      adminToken: { type: "string" },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:write");
+      return toolOutput(
+        await httpJson(
+          "/v1/txline/ingestion/start",
+          { method: "POST", headers: txlineAdminHeaders(args), body: "{}" },
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_stop_ingestion",
+    title: "Sport Stop Ingestion",
+    description:
+      "Stop TxLINE live odds/scores ingestion for SPORT mode. Requires offers:write scope and API admin authorization in production.",
+    scope: "offers:write",
+    inputSchema: objectSchema({
+      ...authSchema,
+      adminToken: { type: "string" },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:write");
+      return toolOutput(
+        await httpJson(
+          "/v1/txline/ingestion/stop",
+          { method: "POST", headers: txlineAdminHeaders(args), body: "{}" },
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_run_settlement_once",
+    title: "Sport Run Settlement Once",
+    description:
+      "Run one SPORT settlement sweep now, refreshing TxLINE outcomes before escrow execution. Requires offers:write scope and API admin authorization in production.",
+    scope: "offers:write",
+    inputSchema: objectSchema({
+      ...authSchema,
+      adminToken: { type: "string" },
+      matchId: { type: "string" },
+      fixtureId: { type: "string" },
+      limit: { type: "number", minimum: 1, maximum: 100, default: 25 },
+      refreshOutcomes: { type: "boolean", default: true },
+      liveSync: { type: "boolean", default: true },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:write");
+      const body: Record<string, unknown> = {
+        refreshOutcomes: args.refreshOutcomes !== false,
+        liveSync: args.liveSync !== false,
+      };
+      if (args.matchId) body.matchId = args.matchId;
+      if (args.fixtureId) body.fixtureId = args.fixtureId;
+      if (args.limit !== undefined) {
+        body.limit = Math.min(Math.max(Math.floor(Number(args.limit) || 25), 1), 100);
+      }
+      return toolOutput(
+        await httpJson(
+          "/v1/arena/settlement/run",
+          {
+            method: "POST",
+            headers: txlineAdminHeaders(args),
+            body: JSON.stringify(body),
+          },
+          config.apiUrl
+        )
+      );
     },
   },
   {
@@ -843,7 +1170,10 @@ const tools: ToolDefinition[] = [
         amount: { type: "number", exclusiveMinimum: 0 },
         price: { type: "number", exclusiveMinimum: 0 },
         collateral: { type: "number", minimum: 0 },
-        rollupMode: { type: "string", enum: ["ER", "PER", "NONE"], default: "NONE" },
+        rollupMode: { type: "string", enum: ["ER", "PER", "NONE", "SPORT"], default: "NONE" },
+        fixtureId: { type: "string" },
+        marketType: { type: "string" },
+        selection: { type: "string" },
         settlementWallet: { type: "string" },
         rewardWallet: { type: "string" },
         fundingWallet: { type: "string" },
@@ -864,6 +1194,9 @@ const tools: ToolDefinition[] = [
             price: args.price,
             collateral: args.collateral,
             rollupMode: args.rollupMode || "NONE",
+            fixtureId: args.fixtureId,
+            marketType: args.marketType,
+            selection: args.selection,
             settlementWallet: args.settlementWallet,
             rewardWallet: args.rewardWallet,
             fundingWallet: args.fundingWallet,

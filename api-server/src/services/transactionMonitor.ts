@@ -13,6 +13,7 @@
 import { prisma } from '../lib/prisma';
 import { logger, logDrain, type AlertSeverity } from '../lib/logger';
 import { SUCCESSFUL_TICKET_STATUSES } from './ticketStatusPolicy';
+import { runSportSettlement } from './arena/sportSettlementEngine';
 
 // ═══════════════════════════════════════════════════════
 // CONFIGURATION
@@ -24,6 +25,16 @@ const STALE_NEGOTIATION_CANCEL_MS = parseInt(process.env.STALE_NEGOTIATION_CANCE
 const STALE_NEGOTIATION_AUTO_CANCEL =
     (process.env.STALE_NEGOTIATION_AUTO_CANCEL || 'true').toLowerCase() !== 'false';
 const SETTLEMENT_RATE_ALERT = parseFloat(process.env.SETTLEMENT_RATE_ALERT || '0.7'); // 70%
+const SPORT_SETTLEMENT_MONITOR_ENABLED =
+    (process.env.SPORT_SETTLEMENT_MONITOR_ENABLED || 'true').toLowerCase() !== 'false';
+const SPORT_SETTLEMENT_INTERVAL_MS = Math.max(
+    parseInt(process.env.SPORT_SETTLEMENT_INTERVAL_MS || '120000', 10),
+    30_000
+);
+const SPORT_SETTLEMENT_MONITOR_LIMIT = Math.min(
+    Math.max(parseInt(process.env.SPORT_SETTLEMENT_MONITOR_LIMIT || '25', 10), 1),
+    100
+);
 
 // ═══════════════════════════════════════════════════════
 // METRICS STORE (in-memory, reset on restart)
@@ -48,6 +59,7 @@ interface MetricsSnapshot {
 
 let latestMetrics: MetricsSnapshot | null = null;
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
+let sportSettlementInterval: ReturnType<typeof setInterval> | null = null;
 const startTime = Date.now();
 
 export async function cancelStaleNegotiationTickets(now: number = Date.now()): Promise<number> {
@@ -212,6 +224,38 @@ async function sweep(): Promise<MetricsSnapshot> {
     }
 }
 
+export async function sweepSportSettlement(): Promise<Record<string, unknown>> {
+    if (!SPORT_SETTLEMENT_MONITOR_ENABLED) {
+        return {
+            mode: 'SPORT',
+            skipped: true,
+            reason: 'sport_settlement_monitor_disabled',
+        };
+    }
+
+    try {
+        const sportSettlement = await runSportSettlement({
+            limit: SPORT_SETTLEMENT_MONITOR_LIMIT,
+            refreshOutcomes: true,
+        });
+        if ((sportSettlement as any).settledCount > 0 || (sportSettlement as any).skippedCount > 0) {
+            logger.info('sport_settlement_monitor_sweep', {
+                scanned: (sportSettlement as any).scanned,
+                settledCount: (sportSettlement as any).settledCount,
+                skippedCount: (sportSettlement as any).skippedCount,
+            });
+        }
+        return sportSettlement;
+    } catch (error: any) {
+        logger.warn('sport_settlement_monitor_failed', { error: error?.message });
+        return {
+            mode: 'SPORT',
+            success: false,
+            error: error?.message || 'sport_settlement_monitor_failed',
+        };
+    }
+}
+
 // ═══════════════════════════════════════════════════════
 // PUBLIC API
 // ═══════════════════════════════════════════════════════
@@ -222,6 +266,12 @@ export function startTransactionMonitor(): void {
     logger.info('transaction_monitor_started', { interval_ms: MONITOR_INTERVAL_MS });
     sweep(); // Initial sweep
     monitorInterval = setInterval(sweep, MONITOR_INTERVAL_MS);
+
+    if (SPORT_SETTLEMENT_MONITOR_ENABLED && !sportSettlementInterval) {
+        logger.info('sport_settlement_monitor_started', { interval_ms: SPORT_SETTLEMENT_INTERVAL_MS });
+        sweepSportSettlement();
+        sportSettlementInterval = setInterval(sweepSportSettlement, SPORT_SETTLEMENT_INTERVAL_MS);
+    }
 }
 
 /** Stop the monitor (for graceful shutdown). */
@@ -229,6 +279,10 @@ export function stopTransactionMonitor(): void {
     if (monitorInterval) {
         clearInterval(monitorInterval);
         monitorInterval = null;
+    }
+    if (sportSettlementInterval) {
+        clearInterval(sportSettlementInterval);
+        sportSettlementInterval = null;
     }
 }
 

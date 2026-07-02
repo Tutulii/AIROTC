@@ -5,6 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "txline:activate": "node scripts/txline-activate-free-tier.js",
+    "txline:stream-smoke": "node scripts/txline-stream-smoke.js",
+    "txline:day4-proof": "node scripts/txline-day4-proof.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -17,6 +20,7 @@
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
     "@prisma/client": "^5.22.0",
+    "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "axios": "^1.15.0",
     "bs58": "^6.0.0",
