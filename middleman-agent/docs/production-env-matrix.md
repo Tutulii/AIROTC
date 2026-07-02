@@ -1,76 +1,30 @@
-# Production Environment Matrix
+# AIR OTC Production Environment Matrix
 
-This document defines the minimum environment posture for the `AIR OTC` stack.
+Last updated: 2026-07-02
 
-## Shared safety flags
+This matrix reflects the current MCP-first architecture.
 
-These values should be the default production posture:
+## Required Core Environment
 
-```bash
-PER_STRICT_OPAQUE_MODE=true
-ENABLE_LEGACY_UMBRA_STEALTH_LIFECYCLE=false
-ENABLE_SIMULATION_ROUTES=false
-ALLOW_DEMO_RUNTIME_LISTENERS=false
-```
+| Component | Required configuration |
+| --- | --- |
+| MCP server | transport mode, API URL, auth/scope configuration |
+| API server | `DATABASE_URL`, bridge secret, runtime API configuration |
+| Middleman runtime | Solana RPC URL, operator wallet, bridge secret, coordinator configuration |
+| Escrow programs | program IDs for the target network |
+| Frontend observatory | API URL and read-only route configuration |
 
-## `middleman-agent`
+## Private Mode Environment
 
-Required:
+| Integration | Required posture |
+| --- | --- |
+| Arcium | private negotiation and verdict receipts configured before active private-mode claims |
+| Umbra | stealth payout and dUSDC private payout evidence configured before active private-payout claims |
 
-- `SOLANA_RPC_URL`
-- `PROGRAM_ID`
-- `PRIVATE_KEY`
-- `OPENAI_API_KEY`
-- `ENCRYPT_GRPC_URL`
-- `CONFIDENTIAL_ESCROW_PROGRAM_ID`
-- `DWALLET_PROGRAM_ID`
-- `IKA_GRPC_URL`
+## Production Expectations
 
-Recommended:
-
-- `OBSERVATORY_API_URL`
-- `BRIDGE_SECRET`
-- `ZERION_API_KEY`
-- `RELEASE_DISPUTE_WINDOW_SECONDS`
-
-Production-only expectations:
-
-- funded operator wallet
-- MagicBlock auth + TEE reachability
-- Encrypt reachability
-- IKA reachability
-- real Umbra receiver registrations for participating wallets
-
-## `api-server`
-
-Required:
-
-- `DATABASE_URL`
-- `BRIDGE_SECRET`
-
-Production-only expectations:
-
-- `ENABLE_DB_DIAGNOSTICS_ROUTE=false`
-- `ENABLE_SIMULATION_ROUTES=false`
-
-## `frontend`
-
-Required:
-
-- `NEXT_PUBLIC_API_URL`
-
-Production-only expectations:
-
-- `NEXT_PUBLIC_ENABLE_SIMULATION_ROUTES=false`
-
-## Demo-only overrides
-
-Use these only in local demos or explicitly isolated demo environments:
-
-```bash
-ENABLE_SIMULATION_ROUTES=true
-ALLOW_DEMO_RUNTIME_LISTENERS=true
-NEXT_PUBLIC_ENABLE_SIMULATION_ROUTES=true
-```
-
-Do not use demo overrides in normal production or proving environments.
+- Demo-only routes disabled.
+- Simulation-only listeners disabled.
+- Mutating MCP tools scope-gated.
+- Private terms not logged.
+- Private commitments and proof bundles reviewed before public use.

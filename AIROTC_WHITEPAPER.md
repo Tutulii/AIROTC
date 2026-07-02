@@ -1,175 +1,119 @@
 # AIR OTC Whitepaper
 
-Last updated: 2026-05-10
+Last updated: 2026-07-02
 
 ## Abstract
 
-AIR OTC is an agent-to-agent OTC settlement system built for Solana. It separates execution from observation: agents trade through SDKs, a no-code runtime, or scoped MCP tools, while humans monitor the market through a read-only observatory.
+AIR OTC is a private OTC settlement layer where AI agents negotiate, escrow, and settle digital asset deals autonomously.
 
-The current flagship devnet proof is strict PER: online Zerion check, shielded-credit funding, encrypted seller delivery, buyer release confirmation, full Umbra shield / UTXO / claim / unshield lifecycle evidence, and post-settlement Torque sidecar delivery.
+The system is designed for autonomous buyer and seller agents that need a controlled settlement workflow: offer creation, ticket negotiation, escrow, delivery confirmation, release approval, refund/dispute handling, private payout evidence, and operator-readable audit trails.
 
-## 1. The problem
+AIR OTC is now documented as an MCP-first architecture. SDK and no-code surfaces remain useful helper interfaces, but the primary product direction is to improve the MCP control surface for agent operation before expanding heavier SDK and CLI workflows.
 
-Autonomous agents can hold wallets, post offers, negotiate, buy services, and deliver digital goods. What they still need is a settlement layer that sits between:
+## 1. Problem
 
-- direct trust
-- manual human OTC handling
-- token-only DEX assumptions
+AI agents can discover opportunities, hold wallets, and negotiate. They still need a settlement layer that can:
 
-AIR OTC exists for trades where the traded object is not just a token swap. The system is meant for digital services, datasets, credentials, and agent-to-agent commerce where escrow, delivery, release confirmation, and proof bundles matter.
+- encode private OTC terms as commitments;
+- hold funds in escrow;
+- enforce release and timeout/refund paths;
+- keep raw sensitive terms away from the coordinator;
+- produce audit evidence for operators;
+- support private payout evidence where wallet linkage should be reduced.
 
-## 2. The AIR OTC product model
+Without this layer, agent commerce remains trapped between manual OTC operations and fully public transaction flows.
 
-AIR OTC is deliberately split into four public surfaces.
+## 2. Product Model
 
-### 2.1 Technical surface
+AIR OTC has four practical product surfaces:
 
-The technical surface is the SDK layer:
+| Surface | Role |
+| --- | --- |
+| MCP server | Primary agent-control surface for autonomous workflows |
+| API server + middleman runtime | Offers, tickets, policies, state machine, proof builder, watcher, and bridge logic |
+| Frontend observatory | Read-only proof, audit, and market visibility |
+| SDKs / no-code runtime | Secondary helper surfaces for builders and operators |
 
-- TypeScript SDK for the fullest external-agent path and flagship PER workflows
-- Python SDK for technical automation, ER workflows, PER models, and fail-closed PER parity helpers
+The frontend observes. The MCP server and backend workflow control execution.
 
-This is the surface for agent builders, backend engineers, and custom automation.
+## 3. Settlement Model
 
-### 2.2 No-code surface
+### Normal Mode
 
-The no-code surface is the runtime:
+Normal Mode is the direct public escrow route.
 
-- setup wizard
-- config file
-- one-command startup
-- prebuilt buyer, seller, watcher, and maker roles
+It uses:
 
-This is how a user can run an AIR OTC agent without editing application source.
+- `privacyTier: PUBLIC`;
+- `settlementRail: SOL_ESCROW`;
+- canonical raw amounts such as `priceRaw`, `amountRaw`, and `collateralRaw`;
+- direct escrow funding;
+- buyer release or timeout refund;
+- normal proof bundle and escrow transaction signatures.
 
-### 2.3 Human surface
+### Private Mode
 
-The human surface is the observatory frontend:
+Private Mode is the commitment-based route for sensitive deals.
 
-- dashboard
-- marketplace
-- agents
-- explorer
-- docs
+It uses:
 
-Humans use it to inspect activity. Agents do not need it to trade.
+- encrypted buyer terms;
+- encrypted seller terms;
+- `termsHash`;
+- `buyerCommitment`;
+- `sellerCommitment`;
+- `privateMatchBindingHash`;
+- `deliveryHash` and `policyHash`;
+- Arcium private negotiation and match verdict;
+- Solana escrow invariants;
+- Umbra private payout evidence.
 
-### 2.4 Agent/operator surface
+The coordinator should see hashes and state signals, not raw private terms.
 
-The MCP server gives external AI agents and operators scoped tools for:
+## 4. Ecosystem Integrations
 
-- offer listing, creation, and acceptance
-- PER buyer/seller workflow entrypoints
-- deal status and proof-bundle reads
-- vault and Umbra lifecycle checks
-- health checks
+AIR OTC currently presents only two ecosystem integrations in the current public architecture:
 
-Mutating tools are scope-gated and must not expose private keys, plaintext PER terms, or sealed private metadata.
+| Integration | Function |
+| --- | --- |
+| Arcium | Private negotiation and match logic. The expected output is a YES/NO verdict bound to `termsHash` and `privateMatchBindingHash`. |
+| Umbra | Private payout layer using stealth wallet/address, dUSDC, private claim, shielded balance, optional batch/delay exit, optional split payout, and optional compliance viewing grant. |
 
-## 3. Why this architecture matters
+## 5. Governance And Safety
 
-Many products try to collapse everything into a single web control panel too early. AIR OTC does not.
+AIR OTC is phase-gated before any serious production claim:
 
-That would be the wrong product shape for the current protocol for three reasons:
+1. Production contract.
+2. Financial correctness.
+3. Agent guardrails.
+4. Arcium private negotiation.
+5. Umbra stealth dUSDC payout.
+6. Batch/delay privacy hardening.
+7. Capped mainnet beta.
 
-1. agents are the primary economic actors
-2. execution logic belongs in SDK/runtime/MCP flows
-3. the frontend is most valuable as a trust and observability layer
+The capped beta requires allowlisted agents, low caps, mainnet smoke proofs, Arcium + Umbra receipts, and emergency pause proof.
 
-That separation is now a deliberate product choice, not an accident.
+## 6. Target Users
 
-## 4. Trade execution model
+- AI agent operators running autonomous buyer and seller agents.
+- Digital asset teams and protocols that need private OTC settlement.
+- OTC desks and marketplace operators that need agent-driven escrow automation.
+- Institutional and enterprise teams that need governance controls, compliance visibility, and audit discipline.
 
-### ER
+## 7. What AIR OTC Should Claim Publicly
 
-ER is the simpler public path. It is the cleaner fit for low-friction or less privacy-sensitive trades.
+AIR OTC should be presented as:
 
-### PER
+- a private OTC settlement layer for AI agents;
+- MCP-first in current product direction;
+- capable of public Normal Mode escrow;
+- designed for private commitment-based settlement using Arcium and Umbra;
+- phase-gated before capped mainnet beta.
 
-PER is the flagship path for the current devnet proof story. The current implementation demonstrates:
+AIR OTC should not describe removed integrations as active product dependencies in current public docs.
 
-- private agreement handling and strict redaction boundaries
-- shielded-credit funding for strict PER
-- encrypted seller delivery over DM
-- buyer private release confirmation
-- full Umbra lifecycle evidence for shield / UTXO / claim / unshield
-- post-settlement Torque sidecar delivery
-- MCP-readable proof bundle and lifecycle status
+## 8. Read Next
 
-## 5. What the current repo proves
-
-The current repository proves more than a static SDK:
-
-1. there are public SDKs
-2. there is a no-code runtime package
-3. there are real ElizaOS external agents
-4. there is a scoped MCP interface for agents/operators
-5. there is a frontend observatory that matches the intended human product shape
-6. there are successful build, test, and proof commands in the workspace
-
-The key point is that AIR OTC is no longer only an internal middleman project. It exposes builder-facing, operator-facing, and observer-facing interface contracts.
-
-As of the latest submission-readiness pass, the repo contains:
-
-- a successful live TypeScript SDK PER shielded-credit proof
-- a successful live external-agent Eliza PER shielded-credit proof
-- a successful live ElizaOS full-pipeline devnet proof on ticket `f616b13e-f219-4926-94a3-29dcc65dddc9`
-- a historical no-code runtime PER pair proof
-- local and soak coverage for the full-Umbra lifecycle path
-
-## 6. Honest privacy boundary
-
-This is the most important part to keep honest.
-
-AIR OTC’s current PER story is stronger than a plain chat-driven OTC flow, but it is not fully trustless and it is not mainnet production-ready.
-
-Today’s strengths include:
-
-- private agreement handling
-- strict PER redaction
-- shielded internal credit for strict PER
-- encrypted delivery
-- buyer release confirmation
-- full-Umbra lifecycle evidence on devnet
-- proof bundles that can be inspected through MCP
-
-Current boundaries:
-
-- native SOL entry and exit remain public on Solana
-- MagicBlock, Encrypt, Umbra, IKA, Zerion, RPC providers, and the middleman runtime remain trust or availability dependencies
-- Python-side Encrypt/FHE ciphertext creation is not independently live-proven
-- mixed Python/TypeScript live PER is not yet recorded
-- SDK-only full-pipeline live proof is not separately recorded
-
-AIR OTC should therefore be described as trust-minimized and privacy-hardened, not fully trustless.
-
-## 7. Current implementation maturity
-
-The current repository supports:
-
-- TypeScript workflow helpers for ER and PER
-- Python workflow helpers plus fail-closed PER parity surfaces
-- a config-driven runtime for no-code use
-- observatory-only frontend routes
-- scoped MCP tools for external agents/operators
-- devnet deployment of the shielded-credit confidential escrow program
-- canonical docs and evidence registry for judges and contributors
-
-## 8. Submission framing
-
-The strongest current submission framing is:
-
-1. AIR OTC is an agent-to-agent OTC settlement system
-2. technical builders can integrate through SDKs
-3. non-technical users can launch agents through the runtime
-4. external AI agents/operators can interact through MCP
-5. humans monitor activity through the observatory
-6. the flagship devnet proof is strict PER with online Zerion check, shielded-credit funding, encrypted delivery, private release, full-Umbra lifecycle evidence, and post-settlement Torque sidecar delivery
-
-## 9. Read this next
-
-- [SUBMISSION_README.md](/Users/tutul/Downloads/AIR OTC/SUBMISSION_README.md)
-- [NEW_SUBMISSION_CHECKLIST.md](/Users/tutul/Downloads/AIR OTC/NEW_SUBMISSION_CHECKLIST.md)
+- [README.md](/Users/tutul/Downloads/AIR OTC/README.md)
 - [AIROTC_ARCHITECTURE.md](/Users/tutul/Downloads/AIR OTC/AIROTC_ARCHITECTURE.md)
 - [PROJECT_STATUS.md](/Users/tutul/Downloads/AIR OTC/PROJECT_STATUS.md)
-- [docs/EVIDENCE_REGISTRY.md](/Users/tutul/Downloads/AIR OTC/docs/EVIDENCE_REGISTRY.md)

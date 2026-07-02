@@ -1,80 +1,30 @@
-# Incident Playbook
+# AIR OTC Incident Playbook
 
-Use this when a production proof, demo, or live run goes red.
+Last updated: 2026-07-02
 
-## First response
+Use this playbook when a current MCP-first proof, demo, or run goes red.
 
-1. classify the failure before changing code
-2. capture the failing command, timestamp, and log artifact
-3. note which dependency class failed:
-   - `magicblock_tee`
-   - `magicblock_auth`
-   - `encrypt`
-   - `ika`
-   - `solana_rpc`
-   - `umbra`
-   - `internal_pipeline`
-   - `proof_pack`
-   - `unknown`
+## First Response
 
-## Command-level triage
+1. Capture the failing command, timestamp, and log artifact.
+2. Classify the failure as MCP, API, coordinator, escrow, frontend, Arcium, Umbra, Solana RPC, database, or unknown.
+3. Do not change code until the failing boundary is identified.
 
-If the main gate fails:
+## Triage
 
-```bash
-cd /Users/tutul/Downloads/AIR OTC/middleman-agent
-npm run test:phase7:proof
-npm run test:per:strict:live
-npm run test:diagram:live
-```
+| Failure area | First check |
+| --- | --- |
+| MCP | health, scopes, auth, tool payload, API reachability |
+| API | schema readiness, bridge secret, offer/ticket route logs |
+| Coordinator | WebSocket gateway, state machine, proof builder, watcher |
+| Escrow | program ID, transaction signature, release/refund invariant |
+| Frontend | read-only status, API URL, stale cached data |
+| Arcium | private verdict receipt availability |
+| Umbra | private payout evidence availability |
 
-If you need repeatability context:
+## Recovery Rules
 
-```bash
-STABILITY_CAMPAIGN_RUNS=3 npm run test:stability:campaign
-```
-
-## Dependency-specific guidance
-
-### `magicblock_tee`
-
-- do not blame the local PER pipeline first
-- confirm MagicBlock status
-- keep the failing session stage and timestamp
-
-### `magicblock_auth`
-
-- verify auth token flow and TTL reuse
-- capture TLS/auth errors exactly
-- do not treat auth outages as escrow-logic bugs
-
-### `solana_rpc`
-
-- keep the failing RPC endpoint, signature, and timestamp
-- retry after failover before changing core logic
-
-### `encrypt` / `ika`
-
-- rerun component proofs separately
-- classify as vendor-path degradation unless a local regression is reproducible
-
-### `internal_pipeline`
-
-- rerun strict PER proof and marketplace proof
-- inspect approval state, ticket state, and latest private handoff proof
-
-## Rollback rules
-
-- keep `PER_STRICT_OPAQUE_MODE=true`
-- never re-enable the legacy Umbra lifecycle as a shortcut
-- never enable demo runtime listeners in production as a workaround
-- never enable simulation routes in production to bypass a real flow
-
-## Recovery criteria
-
-Only call the incident resolved when:
-
-- the dependency is healthy again or the local fix is merged
-- `test:phase8:gate` is green
-- `test:stability:campaign` is green
-- the latest artifact summaries are updated
+- Keep private terms out of logs and public responses.
+- Do not bypass MCP scopes to recover a failed run.
+- Do not use frontend writes to patch settlement state.
+- Do not call an incident resolved until the failing gate is green again.

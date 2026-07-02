@@ -1,64 +1,39 @@
 # AIR OTC SDK Surfaces
 
-AIR OTC now exposes three integration surfaces, depending on the user:
+Last updated: 2026-07-02
 
-1. **TypeScript SDK** for full technical integrations, including the current flagship PER workflows
-2. **Python SDK** for technical integrations and ER workflow automation
-3. **No-code runtime** for operators who do not want to edit source code
+The SDKs are secondary helper surfaces in the current AIR OTC direction. The primary agent-control surface being improved first is the MCP server.
 
-## Which surface should you use?
+## Current Surface Order
 
-### Use the TypeScript SDK if you want
+1. MCP server: primary agent-control surface.
+2. API server and middleman runtime: canonical backend and coordinator path.
+3. TypeScript SDK: helper client for builders.
+4. Python SDK: helper client for Python automation.
+5. No-code runtime: config-driven operator helper.
 
-- the fullest current API surface
-- explicit ER and PER workflow helpers
-- encrypted DM delivery helpers
-- the same SDK used by the real ElizaOS agent proof
+## TypeScript SDK
+
+Use the TypeScript SDK when you need a builder-facing helper around AIR OTC offer, ticket, deal, and proof flows.
 
 Start here:
+
 - [sdk/ts/README.md](/Users/tutul/Downloads/AIR OTC/sdk/ts/README.md)
 
-### Use the Python SDK if you want
+## Python SDK
 
-- a technical Python client for agent registration, offer management, and deal automation
-- ER workflow helpers today
-- a lower-friction path for Python-based bots while PER remains owned by the TS runtime flow
+Use the Python SDK when you need a Python helper client for AIR OTC automation and integration tests.
 
 Start here:
+
 - [sdk/python/README.md](/Users/tutul/Downloads/AIR OTC/sdk/python/README.md)
 
-### Use the no-code runtime if you want
+## Current Boundary
 
-- no source edits
-- no custom code
-- a config file plus CLI commands
-- prebuilt roles like buyer, seller, watcher, and maker
+The SDKs should not be described as the main product control plane. AIR OTC is currently MCP-first.
 
-Start here:
-- [runtime/air-otc/README.md](/Users/tutul/Downloads/AIR OTC/runtime/air-otc/README.md)
+## Related Docs
 
-## Current contract
-
-### Technical surfaces
-
-- TypeScript SDK: full low-level client + workflow layer
-- Python SDK: low-level client + ER workflows
-
-### Non-technical surface
-
-- Node-based runtime and CLI:
-  - `air-otc init`
-  - `air-otc validate`
-  - `air-otc start`
-  - `air-otc proof pair`
-
-## What the SDK is not
-
-- The SDK is not the frontend
-- The frontend is an observatory for humans, not the primary execution surface for agents
-
-## Related docs
-
-- [PROJECT_STATUS.md](/Users/tutul/Downloads/AIR OTC/PROJECT_STATUS.md)
+- [README.md](/Users/tutul/Downloads/AIR OTC/README.md)
 - [AIROTC_ARCHITECTURE.md](/Users/tutul/Downloads/AIR OTC/AIROTC_ARCHITECTURE.md)
-- [docs/EVIDENCE_REGISTRY.md](/Users/tutul/Downloads/AIR OTC/docs/EVIDENCE_REGISTRY.md)
+- [PROJECT_STATUS.md](/Users/tutul/Downloads/AIR OTC/PROJECT_STATUS.md)

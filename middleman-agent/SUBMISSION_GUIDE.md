@@ -4,7 +4,6 @@
 >
 > This file is a supporting submission-era note, not the canonical AIR OTC project-status document.
 > For the current verified product state and judge reading order, start with:
-> - [NEW_SUBMISSION_CHECKLIST.md](/Users/tutul/Downloads/AIR OTC/NEW_SUBMISSION_CHECKLIST.md)
 > - [PROJECT_STATUS.md](/Users/tutul/Downloads/AIR OTC/PROJECT_STATUS.md)
 > - [docs/EVIDENCE_REGISTRY.md](/Users/tutul/Downloads/AIR OTC/docs/EVIDENCE_REGISTRY.md)
 
