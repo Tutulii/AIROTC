@@ -67,6 +67,7 @@ import { demoRuntimeListenersAllowed } from "./utils/demoMode";
 import { classifyDependencyError } from "./services/dependencyHealthService";
 import { isRetryableError } from "./utils/retry";
 import type { DepositReceivedEvent } from "./types/events";
+import { resolveEscrowTermsForTicket } from "./services/escrowTermsResolver";
 
 // ── Graceful shutdown ────────────────────────────────────────────────
 
@@ -493,6 +494,13 @@ async function main(): Promise<void> {
             timestamp: new Date().toISOString(),
           });
           return;
+        }
+      }
+
+      if (decision.action === "CREATE_ESCROW" && decision.terms) {
+        const ticket = await ticketStore.getTicket(message.ticket_id);
+        if (ticket) {
+          decision.terms = resolveEscrowTermsForTicket(ticket, decision.terms);
         }
       }
 

@@ -46,6 +46,10 @@ class TicketStore {
         rollupMode: ticket.rollup_mode ?? undefined,
         tokenMint: ticket.tokenMint,
         decimals: ticket.decimals,
+        offerAsset: ticket.offer_asset,
+        offerPrice: ticket.offer_price,
+        offerAmount: ticket.offer_amount,
+        offerCollateral: ticket.offer_collateral,
       },
       create: {
         id: ticket.ticket_id,
@@ -54,6 +58,10 @@ class TicketStore {
         rollupMode: ticket.rollup_mode || "NONE",
         tokenMint: ticket.tokenMint,
         decimals: ticket.decimals,
+        offerAsset: ticket.offer_asset,
+        offerPrice: ticket.offer_price,
+        offerAmount: ticket.offer_amount,
+        offerCollateral: ticket.offer_collateral,
         status: ticket.status
       }
     });
@@ -79,6 +87,10 @@ class TicketStore {
       rollup_mode: (dbTicket as any).rollupMode,
       tokenMint: dbTicket.tokenMint ?? undefined,
       decimals: dbTicket.decimals ?? undefined,
+      offer_asset: dbTicket.offerAsset ?? undefined,
+      offer_price: dbTicket.offerPrice === null ? undefined : toNumber(dbTicket.offerPrice, "offerPrice"),
+      offer_amount: dbTicket.offerAmount === null ? undefined : toNumber(dbTicket.offerAmount, "offerAmount"),
+      offer_collateral: dbTicket.offerCollateral === null ? undefined : toNumber(dbTicket.offerCollateral, "offerCollateral"),
       agreed_terms:
         dbTicket.lastProposedPrice !== null &&
         dbTicket.lastCollateralBuyer !== null &&
@@ -111,6 +123,10 @@ class TicketStore {
       rollup_mode: (t as any).rollupMode,
       tokenMint: t.tokenMint ?? undefined,
       decimals: t.decimals ?? undefined,
+      offer_asset: t.offerAsset ?? undefined,
+      offer_price: t.offerPrice === null ? undefined : toNumber(t.offerPrice, "offerPrice"),
+      offer_amount: t.offerAmount === null ? undefined : toNumber(t.offerAmount, "offerAmount"),
+      offer_collateral: t.offerCollateral === null ? undefined : toNumber(t.offerCollateral, "offerCollateral"),
       agreed_terms:
         t.lastProposedPrice !== null &&
         t.lastCollateralBuyer !== null &&

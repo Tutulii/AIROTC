@@ -45,6 +45,7 @@ import { pipelineStateStore } from '../state/pipelineStateStore';
 import { prisma } from '../lib/prisma';
 import { verifyAuditChain } from '../services/auditTrail';
 import dealTimelineRouter from './dealTimeline';
+import { resolveEscrowTermsForTicket } from '../services/escrowTermsResolver';
 
 let server: any;
 
@@ -602,6 +603,10 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 rollup_mode: offer.rollupMode,
                 tokenMint: offer.tokenMint || undefined,
                 decimals: offer.tokenDecimals,
+                offer_asset: offer.asset,
+                offer_price: offer.price,
+                offer_amount: offer.amount,
+                offer_collateral: offer.collateral,
                 status: "active",
                 created_at: new Date().toISOString()
             });
@@ -800,6 +805,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             // same ID the middleman knows.
             const ticketId = externalTicketId || `TCK-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
             const parsedPrice = parseFloat(price) || 0;
+            const parsedAmount = parseFloat(amount) || 0;
             const parsedCol = parseFloat(collateral) || 0;
             const strictPerOpaque = rollupMode === 'PER' && isPerStrictOpaqueModeEnabled();
 
@@ -825,6 +831,10 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                                 : 'NONE',
                 tokenMint,
                 decimals: decimals ? parseInt(decimals) : undefined,
+                offer_asset: asset || 'SOL',
+                offer_price: parsedPrice || undefined,
+                offer_amount: parsedAmount || undefined,
+                offer_collateral: parsedCol || undefined,
                 status: "active",
                 created_at: new Date().toISOString()
             });
@@ -883,7 +893,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                     collateral_seller: parsedCol,
                     agreement_signal: false,
                     agreement_score: 10
-                }, buyerAgent.id, `External matched deal: ${amount || 1} ${asset || 'SOL'} @ ${parsedPrice}`);
+                }, buyerAgent.id, `External matched deal: ${parsedAmount || amount || 1} ${asset || 'SOL'} @ ${parsedPrice}`);
             }
 
             // 5. Publish events so the observability layer knows
@@ -892,8 +902,8 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 type: "buy",
                 creator: buyerWallet,
                 content: strictPerOpaque
-                    ? `Matched PER deal opened for ${(amount || 1)} ${asset || 'SOL'}. Private negotiation continues in rollup mode.`
-                    : `Matched deal: ${amount || 1} ${asset || 'SOL'} @ ${parsedPrice} (Col: ${parsedCol})`,
+                    ? `Matched PER deal opened for ${(parsedAmount || amount || 1)} ${asset || 'SOL'}. Private negotiation continues in rollup mode.`
+                    : `Matched deal: ${parsedAmount || amount || 1} ${asset || 'SOL'} @ ${parsedPrice} (Col: ${parsedCol})`,
                 timestamp: new Date().toISOString()
             });
 
@@ -902,7 +912,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 ticket_id: ticketId,
                 content: strictPerOpaque
                     ? `🤝 PER deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nPrivate negotiation is open. Use the rollup SDK methods to submit and finalize terms. Plain chat is conversation-only in strict PER mode.`
-                    : `🤝 Deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nAsset: ${asset || 'SOL'} | Amount: ${amount || 1} | Price: ${parsedPrice}\n\nBoth parties — please confirm your terms to proceed. The Middleman is ready to create escrow once you agree.`,
+                    : `🤝 Deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nAsset: ${asset || 'SOL'} | Amount: ${parsedAmount || amount || 1} | Price: ${parsedPrice}\n\nBoth parties — please confirm your terms to proceed. The Middleman is ready to create escrow once you agree.`,
                 phase: "negotiation",
                 timestamp: new Date().toISOString()
             });
@@ -927,6 +937,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 hasRewardWallets: !!normalizedBuyerRewardWallet && !!normalizedSellerRewardWallet,
                 asset,
                 price: strictPerOpaque ? "redacted_for_per" : parsedPrice,
+                amount: parsedAmount,
                 rollupMode: rollupMode || 'NONE',
                 externalTicketId
             });
@@ -1150,6 +1161,13 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                     phase: releaseResult.new_phase || deal.phase,
                 });
             } else if (decision.action !== "OBSERVE") {
+                if (decision.action === "CREATE_ESCROW" && decision.terms) {
+                    const ticket = await ticketStore.getTicket(ticketId);
+                    if (ticket) {
+                        decision.terms = resolveEscrowTermsForTicket(ticket, decision.terms);
+                    }
+                }
+
                 // Brain decided to act
                 const result = await dealPhaseManager.handleAction(
                     decision.action,

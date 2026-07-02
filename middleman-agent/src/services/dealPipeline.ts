@@ -34,6 +34,7 @@ import {
   inferNegotiationSource,
   resolvePipelineRoute,
 } from "./pipelineRouting";
+import { resolveEscrowTermsForTicket } from "./escrowTermsResolver";
 import type { AgreementDetectedEvent } from "../types/events";
 import type { Ticket } from "../types/ticket";
 import type {
@@ -282,14 +283,21 @@ export function createDealPipeline(
       throw new Error(`Ticket ${payload.ticketId} not found for pipeline execution`);
     }
 
+    const resolvedTerms = resolveEscrowTermsForTicket(ticket, {
+      price: payload.price,
+      collateral_buyer: payload.collateral_buyer,
+      collateral_seller: payload.collateral_seller,
+      asset_type: payload.asset_type || "data",
+    });
+
     return {
       ticketId: payload.ticketId,
       buyer: payload.buyer || ticket.buyer,
       seller: payload.seller || ticket.seller,
-      price: payload.price,
-      collateralBuyer: payload.collateral_buyer,
-      collateralSeller: payload.collateral_seller,
-      assetType: payload.asset_type || "data",
+      price: resolvedTerms.price,
+      collateralBuyer: resolvedTerms.collateral_buyer,
+      collateralSeller: resolvedTerms.collateral_seller,
+      assetType: resolvedTerms.asset_type || "data",
       tokenMint: ticket.tokenMint,
       decimals: ticket.decimals,
       confidence: payload.confidence,
@@ -427,6 +435,41 @@ export function createDealPipeline(
       collateral_seller: context.collateralSeller,
       asset_type: context.assetType,
     });
+  }
+
+  async function resolveOutcomeAgainstTicket(outcome: NegotiationOutcome): Promise<NegotiationOutcome> {
+    if (outcome.termsVisibility === "REDACTED") {
+      return outcome;
+    }
+
+    const ticket = await deps.ticketStore.getTicket(outcome.ticketId);
+    if (!ticket) {
+      return outcome;
+    }
+
+    const resolvedTerms = resolveEscrowTermsForTicket(ticket, {
+      price: outcome.price,
+      collateral_buyer: outcome.collateralBuyer,
+      collateral_seller: outcome.collateralSeller,
+      asset_type: outcome.assetType,
+    });
+
+    if (
+      resolvedTerms.price === outcome.price
+      && resolvedTerms.collateral_buyer === outcome.collateralBuyer
+      && resolvedTerms.collateral_seller === outcome.collateralSeller
+      && resolvedTerms.asset_type === outcome.assetType
+    ) {
+      return outcome;
+    }
+
+    return {
+      ...outcome,
+      price: resolvedTerms.price,
+      collateralBuyer: resolvedTerms.collateral_buyer,
+      collateralSeller: resolvedTerms.collateral_seller,
+      assetType: resolvedTerms.asset_type || outcome.assetType,
+    };
   }
 
   async function runVerificationStage(context: DealPipelineContext): Promise<void> {
@@ -1340,17 +1383,18 @@ export function createDealPipeline(
     let latestStage: Awaited<ReturnType<typeof deps.pipelineStateStore.getLatestStage>> = null;
 
     try {
-      validateNegotiationOutcome(outcome);
+      const preparedOutcome = await resolveOutcomeAgainstTicket(outcome);
+      validateNegotiationOutcome(preparedOutcome);
       const strictPerOpaque =
-        outcome.rollupMode === "PER" &&
-        outcome.negotiationSource === "PER" &&
+        preparedOutcome.rollupMode === "PER" &&
+        preparedOutcome.negotiationSource === "PER" &&
         isStrictPerOpaqueMode(deps.loadConfig());
       if (strictPerOpaque) {
         logger.info("per_strict_opaque_mode_enabled", {
-          ticket_id: outcome.ticketId,
-          termsVisibility: outcome.termsVisibility || "PLAINTEXT",
+          ticket_id: preparedOutcome.ticketId,
+          termsVisibility: preparedOutcome.termsVisibility || "PLAINTEXT",
         });
-        if (outcome.termsVisibility !== "REDACTED") {
+        if (preparedOutcome.termsVisibility !== "REDACTED") {
           throw new Error(
             "per_strict_opaque_mode_violation:per_runtime_requires_redacted_private_intent"
           );
@@ -1362,9 +1406,9 @@ export function createDealPipeline(
         }
       }
       if (options.rememberTerms) {
-        await rememberOutcome(outcome);
+        await rememberOutcome(preparedOutcome);
       }
-      context = await buildContext(outcome);
+      context = await buildContext(preparedOutcome);
       const pipelineLog = logger.withContext({
         ticket_id: context.ticketId,
         route: context.route,
