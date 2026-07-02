@@ -47,114 +47,83 @@ AIR OTC solves this by giving agents a private OTC workflow for negotiation, esc
 
 ## Pipeline
 
+The pipeline is split into smaller diagrams so GitHub renders it readably.
+
+### System Flow
+
 ```mermaid
 flowchart TB
-  A["AI Agents"] --> A1["Buyer Agent"]
-  A --> A2["Seller Agent"]
-  A1 --> B["AIR OTC Interfaces"]
-  A2 --> B
-  B --> B1["TypeScript SDK"]
-  B --> B2["Python SDK"]
-  B --> B3["MCP Server"]
-  B --> B4["No-code Runtime"]
-  B --> B5["Frontend Observatory"]
-  B1 --> C["API Server"]
-  B2 --> C
-  B3 --> C
-  B4 --> C
-  B5 --> C
-  C --> C1["Offers / Tickets / Policies"]
-  C --> C2["Public Mode Canonical Amounts"]
-  C2 --> C2a["priceRaw / amountRaw / collateralRaw<br/>Normal Mode Only"]
-  C --> C3["Private Deal Commitments"]
-  C3 --> C3a["termsHash"]
-  C3 --> C3b["buyerCommitment"]
-  C3 --> C3c["sellerCommitment"]
-  C3 --> C3d["privateMatchBindingHash"]
-  C3 --> C3e["deliveryHash / policyHash"]
-  C --> C4["Mode Fields"]
-  C4 --> C4a["privacyTier: PUBLIC / PRIVATE"]
-  C4 --> C4b["settlementRail: SOL_ESCROW / UMBRA_dUSDC"]
-  C4 --> C4c["computeProvider: ARCIUM"]
-  C --> C5["Prisma DB + Deterministic Migrations"]
-  C --> D["Signed Bridge To Blind Coordinator"]
-  D --> E["Blind Coordinator"]
-  E --> E1["WebSocket Gateway"]
-  E --> E2["Challenge Auth"]
-  E --> E3["Event Bus"]
-  E --> E4["Deal State Machine"]
-  E --> E5["Proof Builder"]
-  E --> E6["Watcher / Indexer"]
-  E --> E7["Sees Only Hashes + State Signals"]
-  E4 --> F["Mode Router"]
-  F --> G["Normal Mode"]
-  G --> G1["PUBLIC_SOL"]
-  G --> G2["SOL_ESCROW"]
-  G --> G3["Direct Escrow Funding"]
-  G --> G4["Buyer Release Or Timeout Refund"]
-  F --> H["Private Mode"]
-  H --> H1["Encrypted Buyer Terms"]
-  H --> H2["Encrypted Seller Terms"]
-  H --> H3["Arcium Private Negotiation / Match"]
-  H3 --> H3a["YES / NO Verdict Only"]
-  H3 --> H3b["Bound To termsHash"]
-  H3 --> H3c["Bound To privateMatchBindingHash"]
-  H3 --> H3d["Private Collateral / Risk Checks"]
-  H3 --> H3e["No Raw Terms To Coordinator"]
-  H3a -->|NO| X["No Deal / Continue Negotiation"]
-  H3a -->|YES| I["Settlement Truth Layer"]
-  G --> I
-  I --> I1["Solana Escrow Program"]
-  I --> I2["Escrow Invariants"]
-  I2 --> I2a["No Unauthorized Release"]
-  I2 --> I2b["No Double Settlement"]
-  I2 --> I2c["Timeout Refund"]
-  I2 --> I2d["Ticket State Matches Escrow State"]
-  I --> J["Delivery Confirmation"]
-  J -->|Confirmed| K["Release Approved"]
-  J -->|Failed / Timeout| R["Refund / Dispute"]
-  K --> P["Private Payout Layer"]
-  P --> P1["Umbra Stealth Wallet / Address"]
-  P1 --> P2["Umbra dUSDC"]
-  P2 --> P3["Private Claim"]
-  P3 --> P4["Shielded dUSDC Balance"]
-  P4 --> P5["Optional Batch / Delay Exit"]
-  P4 --> P6["Optional Split Payout"]
-  P --> P7["Optional Compliance Viewing Grant"]
-  E5 --> Q["Proof / Audit Layer"]
-  Q --> Q1["Normal Mode Proof Bundle"]
-  Q --> Q2["Private Mode Proof Bundle"]
-  Q --> Q3["Arcium YES / NO Verdict Receipt"]
-  Q --> Q4["Escrow Tx Signatures"]
-  Q --> Q5["Umbra Stealth Payout Evidence"]
-  Q --> Q6["Invariant Verdicts"]
-  Q --> B5
-  S["Governance And Safety"] --> C
-  S --> E
-  S --> I
-  S1["Protocol Admin Squad"] --> S
-  S2["Emergency Pause"] --> S
-  S3["Timelocks"] --> S
-  S4["Bounded Pause / Restore"] --> S
-  S5["Authority Manifest"] --> S
-  M["Phase Gates"] --> M1["Phase 1: Production Contract"]
-  M --> M2["Phase 2: Financial Correctness"]
-  M --> M3["Phase 3: Agent Guardrails"]
-  M --> M4["Phase 4: Arcium Private Negotiation"]
-  M --> M5["Phase 5: Umbra Stealth dUSDC Payout"]
-  M --> M6["Phase 6: Batch / Delay Privacy Hardening"]
-  M --> M7["Phase 7: Capped Mainnet Beta"]
-  M1 --> N["Devnet Complete"]
-  M2 --> N
-  M3 --> N
-  M4 --> N
-  M5 --> N
-  N --> O["Capped Mainnet Beta"]
-  O --> O1["Allowlisted Agents"]
-  O --> O2["Low Caps"]
-  O --> O3["Mainnet Smoke Proofs"]
-  O --> O4["Arcium + Umbra Receipts"]
-  O --> O5["Emergency Pause Proof"]
+  Agents["AI Agents<br/>Buyer + Seller"]
+  MCP["MCP Server<br/>Primary control surface"]
+  Helpers["SDKs + No-code Runtime<br/>Secondary helper surfaces"]
+  API["API Server<br/>Offers / tickets / policies"]
+  Coordinator["Blind Coordinator<br/>State + proof + watcher"]
+  Router["Mode Router"]
+  Escrow["Solana Escrow Program<br/>Settlement truth layer"]
+  Observatory["Frontend Observatory<br/>Read-only proof view"]
+
+  Agents --> MCP
+  Agents --> Helpers
+  MCP --> API
+  Helpers --> API
+  API --> Coordinator
+  Coordinator --> Router
+  Router --> Escrow
+  Coordinator --> Observatory
+```
+
+### Normal Mode
+
+```mermaid
+flowchart TB
+  Offer["Offer / ticket"]
+  Amounts["Public canonical amounts<br/>priceRaw / amountRaw / collateralRaw"]
+  Funding["Direct SOL escrow funding"]
+  Delivery["Delivery confirmation"]
+  Release["Buyer release"]
+  Refund["Timeout refund / dispute"]
+  Proof["Normal Mode proof bundle"]
+
+  Offer --> Amounts --> Funding --> Delivery
+  Delivery -->|Confirmed| Release --> Proof
+  Delivery -->|Failed or timeout| Refund --> Proof
+```
+
+### Private Mode
+
+```mermaid
+flowchart TB
+  Terms["Encrypted buyer + seller terms"]
+  Commitments["Private deal commitments<br/>termsHash / buyerCommitment / sellerCommitment"]
+  Binding["privateMatchBindingHash<br/>deliveryHash / policyHash"]
+  Arcium["Arcium private negotiation<br/>YES / NO verdict"]
+  Escrow["Settlement truth layer<br/>escrow invariants"]
+  Umbra["Umbra private payout layer<br/>stealth address / dUSDC / private claim"]
+  Proof["Private Mode proof bundle<br/>Arcium + escrow + Umbra evidence"]
+
+  Terms --> Commitments --> Binding --> Arcium
+  Arcium -->|YES| Escrow --> Umbra --> Proof
+  Arcium -->|NO| Continue["No deal / continue negotiation"]
+```
+
+### Governance And Phase Gates
+
+```mermaid
+flowchart TB
+  Safety["Governance and safety"]
+  Admin["Protocol admin squad"]
+  Pause["Emergency pause"]
+  Manifest["Authority manifest"]
+  Gates["Phase gates"]
+  Devnet["Devnet complete"]
+  Beta["Capped mainnet beta"]
+  Controls["Allowlisted agents<br/>Low caps<br/>Mainnet smoke proofs<br/>Arcium + Umbra receipts"]
+
+  Admin --> Safety
+  Pause --> Safety
+  Manifest --> Safety
+  Safety --> Gates
+  Gates --> Devnet --> Beta --> Controls
 ```
 
 ## Operating Modes
