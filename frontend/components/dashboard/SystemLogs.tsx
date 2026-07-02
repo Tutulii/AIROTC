@@ -60,7 +60,7 @@ const staticVariant: Variants = {
 export function SystemLogs() {
   const [logs, setLogs] = useState<DisplayLog[]>([]);
   const [connected, setConnected] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
   const reducedMotion = useReducedMotion();
 
   useEffect(() => {
@@ -105,7 +105,9 @@ export function SystemLogs() {
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const logContainer = logContainerRef.current;
+    if (!logContainer) return;
+    logContainer.scrollTop = logContainer.scrollHeight;
   }, [logs]);
 
   return (
@@ -129,7 +131,7 @@ export function SystemLogs() {
           <span className="text-text-disabled">{logs.length} entries</span>
         </div>
       </div>
-      <div className="space-y-1.5 opacity-80 max-h-[180px] overflow-y-auto custom-scrollbar">
+      <div ref={logContainerRef} className="space-y-1.5 opacity-80 max-h-[180px] overflow-y-auto custom-scrollbar">
         <AnimatePresence mode="popLayout" initial={false}>
           {logs.map((log) => (
             <motion.div
@@ -150,7 +152,6 @@ export function SystemLogs() {
             </motion.div>
           ))}
         </AnimatePresence>
-        <div ref={bottomRef} />
       </div>
     </div>
   );
