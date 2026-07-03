@@ -243,6 +243,7 @@ export async function sweepSportSettlement(): Promise<Record<string, unknown>> {
                 scanned: (sportSettlement as any).scanned,
                 settledCount: (sportSettlement as any).settledCount,
                 skippedCount: (sportSettlement as any).skippedCount,
+                skippedReasons: summarizeSportSettlementSkips(sportSettlement),
             });
         }
         return sportSettlement;
@@ -254,6 +255,17 @@ export async function sweepSportSettlement(): Promise<Record<string, unknown>> {
             error: error?.message || 'sport_settlement_monitor_failed',
         };
     }
+}
+
+function summarizeSportSettlementSkips(sportSettlement: Record<string, unknown>): Record<string, number> {
+    const skipped = Array.isArray((sportSettlement as any).skipped) ? (sportSettlement as any).skipped : [];
+    return skipped.reduce((summary: Record<string, number>, item: any) => {
+        const reason = typeof item?.reason === 'string' && item.reason.trim()
+            ? item.reason.trim()
+            : 'unknown';
+        summary[reason] = (summary[reason] || 0) + 1;
+        return summary;
+    }, {});
 }
 
 // ═══════════════════════════════════════════════════════

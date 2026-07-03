@@ -29,6 +29,11 @@ const FINAL_STATUSES = new Set([
     'after_penalties',
 ]);
 
+export function isTrustedOutcomeSource(source: unknown): boolean {
+    const normalized = String(source || '').trim().toLowerCase();
+    return normalized === 'txline' || normalized.startsWith('txline_');
+}
+
 function jsonValue(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(JSON.stringify(value ?? {})) as Prisma.InputJsonValue;
 }
@@ -103,6 +108,8 @@ export function extractScore(raw: Record<string, unknown>, fallback?: { homeScor
 }
 
 export function deriveOutcomeFromScoreUpdate(update: TxlineScoreUpdate): ArenaOutcomeInput | null {
+    if (!isTrustedOutcomeSource(update.source)) return null;
+
     const raw = asRecord(update.raw);
     const normalizedState = asRecord(raw.normalizedScoreState);
     const status = update.status || String(normalizedState.status || raw.GameState || raw.status || 'unknown');
@@ -255,7 +262,7 @@ export async function getOutcomeForFixture(fixtureId: string): Promise<Record<st
     const outcome = await prismaAny.arenaOutcome.findUnique({
         where: { fixtureId },
     });
-    if (!outcome) {
+    if (!outcome || !isTrustedOutcomeSource(outcome.source)) {
         const error = new Error('txline_outcome_not_found');
         (error as any).statusCode = 404;
         throw error;
@@ -266,12 +273,14 @@ export async function getOutcomeForFixture(fixtureId: string): Promise<Record<st
 export async function listOutcomes(limit = 50): Promise<Record<string, unknown>> {
     const boundedLimit = Math.min(Math.max(Math.floor(limit), 1), 500);
     const rows = await prismaAny.arenaOutcome.findMany({
+        where: { source: { startsWith: 'txline' } },
         orderBy: [{ sourceTimestamp: 'desc' }, { updatedAt: 'desc' }],
         take: boundedLimit,
     });
+    const trustedRows = rows.filter((row: any) => isTrustedOutcomeSource(row.source));
     return {
-        count: rows.length,
-        outcomes: rows.map(serializeOutcome),
+        count: trustedRows.length,
+        outcomes: trustedRows.map(serializeOutcome),
     };
 }
 

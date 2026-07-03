@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { createOfferFromStrategySignal } from './strategyOfferBridge';
-import { serializeOutcome } from './outcomeBacktest';
+import { isTrustedOutcomeSource, serializeOutcome } from './outcomeBacktest';
 import { serializeStrategySignal } from './strategyEngine';
 
 const prismaAny = prisma as any;
@@ -423,6 +423,7 @@ export async function getArenaMatchProof(matchId: string): Promise<Record<string
             : prismaAny.arenaOutcome.findUnique({ where: { fixtureId: match.fixtureId } }),
     ]);
 
+    const trustedOutcome = outcome && isTrustedOutcomeSource(outcome.source) ? outcome : null;
     const completeness = {
         hasFixture: Boolean(fixture),
         hasSignal: Boolean(signal || match.signalId),
@@ -431,7 +432,7 @@ export async function getArenaMatchProof(matchId: string): Promise<Record<string
         hasEscrow: Boolean(match.escrowPda),
         buyerDepositConfirmed: Boolean(match.buyerDepositLamports || match.buyerDepositTx),
         sellerDepositConfirmed: Boolean(match.sellerDepositLamports || match.sellerDepositTx),
-        hasOutcome: Boolean(outcome),
+        hasOutcome: Boolean(trustedOutcome),
         settlementRecorded: Boolean(match.settlementAction || match.settlementStatus || match.winnerWallet),
         terminal: TERMINAL_MATCH_STATUSES.has(match.status),
     };
@@ -450,7 +451,7 @@ export async function getArenaMatchProof(matchId: string): Promise<Record<string
                 buyer: completeness.buyerDepositConfirmed,
                 seller: completeness.sellerDepositConfirmed,
             },
-            { stage: 'txline_outcome', complete: completeness.hasOutcome, id: match.outcomeId || outcome?.id },
+            { stage: 'txline_outcome', complete: completeness.hasOutcome, id: trustedOutcome ? match.outcomeId || trustedOutcome.id : undefined },
             { stage: 'settlement', complete: completeness.settlementRecorded, action: match.settlementAction },
         ],
         links: {
@@ -459,7 +460,7 @@ export async function getArenaMatchProof(matchId: string): Promise<Record<string
             strategyOffer,
             offer,
             ticket,
-            outcome: outcome ? serializeOutcome(outcome) : null,
+            outcome: trustedOutcome ? serializeOutcome(trustedOutcome) : null,
         },
     };
 }

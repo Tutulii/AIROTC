@@ -667,6 +667,63 @@ describe('ArenaMatch lifecycle', () => {
         });
     });
 
+    it('skips SPORT escrow execution when the only stored outcome is from an untrusted fallback source', async () => {
+        const { createSportMatchForOffer, runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
+
+        const fallbackOutcome = stored({
+            id: 'outcome-fallback-1',
+            fixtureId: 'fixture-1',
+            status: 'finished',
+            homeScore: 9,
+            awayScore: 0,
+            winner: 'part1',
+            source: 'espn_scoreboard_fallback',
+            sourceUpdateId: 'fallback-final',
+            sourceTimestamp: new Date('2026-07-01T11:00:00.000Z'),
+            settledAt: new Date('2026-07-01T11:00:00.000Z'),
+            raw: { GameState: 'finished' },
+        });
+        outcomeRowsById.clear();
+        outcomeRowsByFixture.clear();
+        outcomeRowsById.set(fallbackOutcome.id, fallbackOutcome);
+        outcomeRowsByFixture.set(fallbackOutcome.fixtureId, fallbackOutcome);
+
+        await createSportMatchForOffer({
+            offerId: 'offer-sport-1',
+            fixtureId: 'fixture-1',
+            makerWallet: 'maker-wallet',
+            mode: 'buy',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+        });
+        Object.assign(matchRows.get('match-1')!, {
+            ticketId: 'ticket-1',
+            takerWallet: 'taker-wallet',
+            status: 'escrow_attached',
+        });
+
+        const result = await runSportSettlement({
+            fixtureId: 'fixture-1',
+            liveSync: false,
+        });
+
+        expect(middlemanForwarderMock.forwardSportSettlement).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            mode: 'SPORT',
+            scanned: 1,
+            settledCount: 0,
+            skippedCount: 1,
+            skipped: [
+                {
+                    matchId: 'match-1',
+                    fixtureId: 'fixture-1',
+                    reason: 'txline_outcome_source_not_trusted',
+                    outcomeSource: 'espn_scoreboard_fallback',
+                },
+            ],
+        });
+    });
+
     it('refreshes a final TxLINE score into an outcome before SPORT settlement', async () => {
         const { createSportMatchForOffer, runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
 

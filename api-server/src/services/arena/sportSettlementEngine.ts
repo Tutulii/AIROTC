@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { middlemanForwarder } from '../middlemanForwarder';
 import { attachArenaTicket, serializeArenaMatch, settleArenaMatch } from './arenaMatch.service';
-import { deriveOutcomesFromStoredScores, syncOutcomeForFixture } from './outcomeBacktest';
+import { deriveOutcomesFromStoredScores, isTrustedOutcomeSource, syncOutcomeForFixture } from './outcomeBacktest';
 
 const prismaAny = prisma as any;
 const SPORT_TERMINAL_STATUSES = ['settled', 'released', 'refunded', 'cancelled', 'failed'];
@@ -180,11 +180,12 @@ export async function runSportSettlement(params: {
         }
 
         const outcome = await prismaAny.arenaOutcome.findUnique({ where: { fixtureId: match.fixtureId } });
-        if (!outcome) {
+        if (!outcome || !isTrustedOutcomeSource(outcome.source)) {
             skipped.push({
                 matchId: match.id,
                 fixtureId: match.fixtureId,
-                reason: 'txline_outcome_not_found_or_not_final',
+                reason: outcome ? 'txline_outcome_source_not_trusted' : 'txline_outcome_not_found_or_not_final',
+                outcomeSource: outcome?.source || null,
                 outcomeRefresh,
             });
             continue;
