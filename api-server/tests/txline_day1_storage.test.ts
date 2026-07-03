@@ -152,7 +152,7 @@ describe('TxLINE Day 1 snapshot storage', () => {
         });
     });
 
-    it('lists active TxLINE fixtures before stale fallback fixtures', async () => {
+    it('excludes stale ESPN fallback fixtures from TxLINE fixture lists', async () => {
         const originalToken = process.env.TXLINE_API_TOKEN;
         const originalAutoSync = process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST;
         process.env.TXLINE_API_TOKEN = 'test-token';
@@ -188,7 +188,7 @@ describe('TxLINE Day 1 snapshot storage', () => {
 
             const { listTxlineFixtures } = await import('../src/services/arena/arena.service');
 
-            const rows = await listTxlineFixtures(1);
+            const rows = await listTxlineFixtures(2);
 
             expect(rows).toHaveLength(1);
             expect(rows[0]).toMatchObject({

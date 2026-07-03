@@ -6,7 +6,6 @@ import {
     readTxlineSseStream,
     txlineActiveFixtureSource,
     txlineAuthConfigured,
-    txlineFallbackEnabled,
 } from './txlineClient';
 import { recordOddsUpdates, recordScoreUpdates, syncFixturesFromTxline } from './arena.service';
 
@@ -25,7 +24,7 @@ interface StreamState {
 
 interface IngestionState {
     running: boolean;
-    mode: 'txline_stream' | 'scoreboard_fallback' | 'unconfigured';
+    mode: 'txline_stream' | 'unconfigured';
     source: string;
     startedAt?: string;
     stoppedAt?: string;
@@ -132,23 +131,15 @@ export function startTxlineIngestion(): IngestionState {
     state.running = true;
     state.startedAt = new Date().toISOString();
     state.stoppedAt = undefined;
-    state.mode = txlineAuthConfigured() ? 'txline_stream' : txlineFallbackEnabled() ? 'scoreboard_fallback' : 'unconfigured';
+    state.mode = txlineAuthConfigured() ? 'txline_stream' : 'unconfigured';
     state.fixtures.lastError = undefined;
     state.odds.lastError = undefined;
     state.scores.lastError = undefined;
 
     if (!txlineAuthConfigured()) {
-        if (!txlineFallbackEnabled()) {
-            state.running = false;
-            state.stoppedAt = new Date().toISOString();
-            state.fixtures.lastError = 'TXLINE_API_TOKEN is required and scoreboard fallback is disabled';
-            return cloneState();
-        }
-
-        void syncFixtureSnapshot();
-        fixtureSyncInterval = setInterval(() => {
-            void syncFixtureSnapshot();
-        }, fixtureSyncIntervalMs());
+        state.running = false;
+        state.stoppedAt = new Date().toISOString();
+        state.fixtures.lastError = 'TXLINE_API_TOKEN is required before starting TxLINE ingestion';
         return cloneState();
     }
 

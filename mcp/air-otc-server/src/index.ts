@@ -910,12 +910,9 @@ const tools: ToolDefinition[] = [
       const response = await httpJson(`/v1/txline/fixtures?limit=${limit}`, {}, config.apiUrl);
       const fixtures = Array.isArray(response?.data) ? response.data : [];
       const filtered = filterSportFixtures(fixtures, args.status);
-      const source = filtered.some((fixture) => fixture?.raw?.source === "espn_scoreboard_fallback")
-        ? "espn_scoreboard_fallback"
-        : "txline";
       return toolOutput({
         success: true,
-        source,
+        source: "txline",
         filter: args.status || "all",
         count: filtered.length,
         data: filtered,

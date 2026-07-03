@@ -17,7 +17,6 @@ vi.mock('../src/services/arena/txlineClient', () => ({
     readTxlineSseStream: readTxlineSseStreamMock,
     txlineActiveFixtureSource: vi.fn(() => 'txline'),
     txlineAuthConfigured: vi.fn(() => true),
-    txlineFallbackEnabled: vi.fn(() => false),
 }));
 
 async function eventually(assertion: () => void): Promise<void> {

@@ -7,13 +7,6 @@ const ODDS_SNAPSHOT_ENDPOINT = '/api/odds/snapshot';
 const SCORES_SNAPSHOT_ENDPOINT = '/api/scores/snapshot';
 export const ODDS_STREAM_ENDPOINT = '/api/odds/stream';
 export const SCORES_STREAM_ENDPOINT = '/api/scores/stream';
-const ESPN_SCOREBOARD_BASE_URL = 'https://site.api.espn.com/apis/site/v2/sports';
-const ESPN_FALLBACK_LEAGUES = [
-    { key: 'mlb', sport: 'baseball', path: 'baseball/mlb' },
-    { key: 'wnba', sport: 'basketball', path: 'basketball/wnba' },
-    { key: 'mls', sport: 'soccer', path: 'soccer/usa.1' },
-    { key: 'epl', sport: 'soccer', path: 'soccer/eng.1' },
-];
 
 let guestJwtCache: { token: string; expiresAt: number } | null = null;
 
@@ -37,18 +30,8 @@ export function txlineAuthConfigured(): boolean {
     return Boolean(process.env.TXLINE_API_KEY || process.env.TXLINE_API_TOKEN);
 }
 
-function envFlag(value: string | undefined, fallback: boolean): boolean {
-    if (value === undefined) return fallback;
-    return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
-}
-
-export function txlineFallbackEnabled(): boolean {
-    return envFlag(process.env.TXLINE_SCOREBOARD_FALLBACK_ENABLED, true);
-}
-
-export function txlineActiveFixtureSource(): 'txline' | 'espn_scoreboard_fallback' | 'unconfigured' {
+export function txlineActiveFixtureSource(): 'txline' | 'unconfigured' {
     if (txlineAuthConfigured()) return 'txline';
-    if (txlineFallbackEnabled()) return 'espn_scoreboard_fallback';
     return 'unconfigured';
 }
 
@@ -174,177 +157,6 @@ function firstArray(payload: unknown, keys: string[]): unknown[] {
         if (Array.isArray(value)) return value;
     }
     return [];
-}
-
-function espnScoreboardUrl(path: string): string {
-    return `${ESPN_SCOREBOARD_BASE_URL}/${path}/scoreboard?limit=100`;
-}
-
-function espnStatusName(event: Record<string, unknown>): string {
-    const type = asRecord(nested(event, 'status.type'));
-    const state = firstString(type, ['state']).toLowerCase();
-    const name = firstString(type, ['name', 'description', 'detail']).toLowerCase();
-    const completed = type.completed === true;
-
-    if (completed || name.includes('final') || name.includes('full time') || state === 'post') return 'final';
-    if (state === 'in' || name.includes('in_progress') || name.includes('live')) return 'live';
-    if (state === 'pre' || name.includes('scheduled') || name.includes('pre')) return 'scheduled';
-    return firstString(type, ['name', 'description'], 'unknown').toLowerCase() || 'unknown';
-}
-
-function espnTeamName(competitor: Record<string, unknown>): string | undefined {
-    const team = asRecord(competitor.team);
-    return firstString(team, ['displayName', 'shortDisplayName', 'name', 'abbreviation']) ||
-        firstString(competitor, ['displayName', 'name', 'abbreviation']) ||
-        undefined;
-}
-
-function espnCompetitors(event: Record<string, unknown>): Record<string, unknown>[] {
-    const competitions = maybeArray(event.competitions).map(asRecord);
-    const competition = competitions[0] || {};
-    return maybeArray(competition.competitors).map(asRecord);
-}
-
-function espnFixtureId(leagueKey: string, eventId: string): string {
-    return `espn:${leagueKey}:${eventId}`;
-}
-
-function parseEspnFixtureId(fixtureId: string): { leagueKey: string; eventId: string } | null {
-    const parts = fixtureId.split(':');
-    if (parts.length !== 3 || parts[0] !== 'espn' || !parts[1] || !parts[2]) return null;
-    return { leagueKey: parts[1], eventId: parts[2] };
-}
-
-function espnEventToFixture(event: unknown, league: typeof ESPN_FALLBACK_LEAGUES[number]): TxlineFixture | null {
-    const raw = asRecord(event);
-    const eventId = firstString(raw, ['id', 'uid']);
-    if (!eventId) return null;
-
-    const competitors = espnCompetitors(raw);
-    const home = competitors.find((competitor) => firstString(competitor, ['homeAway']).toLowerCase() === 'home') || competitors[0] || {};
-    const away = competitors.find((competitor) => firstString(competitor, ['homeAway']).toLowerCase() === 'away') || competitors[1] || {};
-    const startsAt = firstDate(raw, ['date']);
-
-    return {
-        fixtureId: espnFixtureId(league.key, eventId),
-        sport: league.sport,
-        homeTeam: espnTeamName(home),
-        awayTeam: espnTeamName(away),
-        startsAt,
-        status: espnStatusName(raw),
-        raw: {
-            source: 'espn_scoreboard_fallback',
-            fallbackFor: 'txline',
-            league: league.key,
-            sourceEndpoint: espnScoreboardUrl(league.path),
-            espnEventId: eventId,
-            marketSelections: ['part1', 'draw', 'part2'],
-            raw,
-        },
-    };
-}
-
-async function fetchEspnJson(path: string): Promise<unknown> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-        const response = await fetch(espnScoreboardUrl(path), {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-            signal: controller.signal,
-        });
-        if (!response.ok) {
-            throw new Error(`ESPN fallback request failed ${response.status} ${response.statusText}`);
-        }
-        return await response.json();
-    } finally {
-        clearTimeout(timeout);
-    }
-}
-
-export async function fetchEspnFallbackFixturesSnapshot(): Promise<TxlineFixture[]> {
-    const results = await Promise.allSettled(
-        ESPN_FALLBACK_LEAGUES.map(async (league) => {
-            const payload = await fetchEspnJson(league.path);
-            return firstArray(payload, ['events'])
-                .map((event) => espnEventToFixture(event, league))
-                .filter((fixture): fixture is TxlineFixture => Boolean(fixture));
-        })
-    );
-
-    const fixtures = results
-        .flatMap((result) => result.status === 'fulfilled' ? result.value : [])
-        .sort((a, b) => {
-            const left = a.startsAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-            const right = b.startsAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-            return left - right;
-        });
-
-    if (fixtures.length === 0) {
-        const firstError = results.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
-        throw new Error(firstError?.reason?.message || 'espn_scoreboard_fallback_returned_no_fixtures');
-    }
-
-    return fixtures;
-}
-
-function espnScore(competitor: Record<string, unknown>): number | undefined {
-    const value = competitor.score;
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.trim()) {
-        const parsed = Number(value);
-        if (Number.isFinite(parsed)) return parsed;
-    }
-    return undefined;
-}
-
-async function fetchEspnFallbackScoresSnapshot(fixtureId: string): Promise<TxlineScoreUpdate[]> {
-    const parsed = parseEspnFixtureId(fixtureId);
-    if (!parsed) {
-        throw new Error('TXLINE_API_TOKEN is required before calling TxLINE score snapshots for non-fallback fixtures');
-    }
-    const league = ESPN_FALLBACK_LEAGUES.find((candidate) => candidate.key === parsed.leagueKey);
-    if (!league) throw new Error(`unsupported_espn_fallback_league:${parsed.leagueKey}`);
-
-    const payload = await fetchEspnJson(league.path);
-    const event = firstArray(payload, ['events'])
-        .map(asRecord)
-        .find((candidate) => firstString(candidate, ['id', 'uid']) === parsed.eventId);
-    if (!event) throw new Error(`espn_fallback_fixture_not_found:${fixtureId}`);
-
-    const competitors = espnCompetitors(event);
-    const home = competitors.find((competitor) => firstString(competitor, ['homeAway']).toLowerCase() === 'home') || competitors[0] || {};
-    const away = competitors.find((competitor) => firstString(competitor, ['homeAway']).toLowerCase() === 'away') || competitors[1] || {};
-    const homeScore = espnScore(home);
-    const awayScore = espnScore(away);
-    const sourceTimestamp = new Date();
-    const status = espnStatusName(event);
-
-    return [{
-        fixtureId,
-        homeScore,
-        awayScore,
-        status,
-        source: 'espn_scoreboard_fallback',
-        sourceEndpoint: espnScoreboardUrl(league.path),
-        sourceUpdateId: `${fixtureId}:${status}:${homeScore ?? 'na'}:${awayScore ?? 'na'}`,
-        sourceTimestamp,
-        raw: {
-            source: 'espn_scoreboard_fallback',
-            fallbackFor: 'txline',
-            league: league.key,
-            espnEventId: parsed.eventId,
-            normalizedScoreState: {
-                status,
-                action: status,
-                homeScore: homeScore ?? null,
-                awayScore: awayScore ?? null,
-                homeTeam: espnTeamName(home),
-                awayTeam: espnTeamName(away),
-            },
-            raw: event,
-        },
-    }];
 }
 
 function impliedProbability(odds: number): number | undefined {
@@ -574,9 +386,6 @@ export function normalizeScoresPayload(payload: unknown, fallbackFixtureId?: str
 }
 
 export async function fetchFixturesSnapshot(): Promise<TxlineFixture[]> {
-    if (!txlineAuthConfigured() && txlineFallbackEnabled()) {
-        return fetchEspnFallbackFixturesSnapshot();
-    }
     return normalizeFixturesPayload(await fetchJson('/api/fixtures/snapshot'));
 }
 
@@ -585,9 +394,6 @@ export async function fetchOddsSnapshot(fixtureId: string): Promise<TxlineOddsUp
 }
 
 export async function fetchScoresSnapshot(fixtureId: string): Promise<TxlineScoreUpdate[]> {
-    if (!txlineAuthConfigured() && txlineFallbackEnabled()) {
-        return fetchEspnFallbackScoresSnapshot(fixtureId);
-    }
     return normalizeScoresPayload(await fetchJson(`${SCORES_SNAPSHOT_ENDPOINT}/${encodeURIComponent(fixtureId)}`), fixtureId);
 }
 

@@ -10,7 +10,6 @@ import {
     txlineActiveFixtureSource,
     txlineAuthConfigured,
     txlineBaseUrl,
-    txlineFallbackEnabled,
     txlineGuestJwtMode,
     txlineNetwork,
 } from './txlineClient';
@@ -37,7 +36,7 @@ function fixtureAutoSyncIntervalMs(): number {
 
 async function maybeAutoSyncFixtures(): Promise<void> {
     if (!fixtureAutoSyncEnabled()) return;
-    if (!txlineAuthConfigured() && !txlineFallbackEnabled()) return;
+    if (!txlineAuthConfigured()) return;
 
     const now = Date.now();
     if (now - lastFixtureAutoSyncAt < fixtureAutoSyncIntervalMs()) return;
@@ -63,7 +62,7 @@ export function txlineRuntimeConfig(): TxlineRuntimeConfig {
         txlineNetwork: txlineNetwork(),
         txlineConfigured: txlineAuthConfigured(),
         activeFixtureSource: txlineActiveFixtureSource(),
-        scoreboardFallbackEnabled: txlineFallbackEnabled(),
+        scoreboardFallbackEnabled: false,
         txlineGuestJwtMode: txlineGuestJwtMode(),
         requiredSnapshots: [
             '/api/fixtures/snapshot',
@@ -309,6 +308,7 @@ export async function listTxlineFixtures(limit = 50): Promise<any[]> {
         take: Math.max(cappedLimit, 500),
     });
     return candidates
+        .filter((row: any) => String(row?.raw?.source || '') !== 'espn_scoreboard_fallback')
         .sort((left: any, right: any) => {
             const leftSource = String(left?.raw?.source || '');
             const rightSource = String(right?.raw?.source || '');
