@@ -506,23 +506,31 @@ function normalizeSportStatus(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-function sportStatusBucket(value: unknown): "live" | "upcoming" | "final" | "unknown" {
+function sportStatusBucket(value: unknown, startsAt?: unknown): "live" | "upcoming" | "final" | "unknown" {
   const status = normalizeSportStatus(value);
-  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half"].includes(status)) {
+  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half", "2"].includes(status)) {
     return "live";
   }
-  if (["scheduled", "upcoming", "not_started", "pre_match", "pending"].includes(status)) {
+  if (["scheduled", "upcoming", "not_started", "pre_match", "prematch", "pending", "1"].includes(status)) {
     return "upcoming";
   }
-  if (["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft"].includes(status)) {
+  if (["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft", "3", "4"].includes(status)) {
     return "final";
+  }
+  if (startsAt) {
+    const startMs = typeof startsAt === "number" ? startsAt : new Date(String(startsAt)).getTime();
+    if (Number.isFinite(startMs) && startMs > Date.now() - 15 * 60 * 1000) {
+      return "upcoming";
+    }
   }
   return "unknown";
 }
 
 function filterSportFixtures(fixtures: any[], status?: string): any[] {
   if (!status || status === "all") return fixtures;
-  return fixtures.filter((fixture) => sportStatusBucket(fixture?.status || fixture?.raw?.status) === status);
+  return fixtures.filter((fixture) =>
+    sportStatusBucket(fixture?.status || fixture?.raw?.GameState || fixture?.raw?.status, fixture?.startsAt || fixture?.raw?.StartTime) === status
+  );
 }
 
 function sportAsset(args: { fixtureId: string; marketType: string; selection: string; asset?: string }): string {

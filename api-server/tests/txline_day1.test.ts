@@ -35,10 +35,45 @@ describe('TxLINE Day 1 snapshot normalization', () => {
             sport: 'football',
             homeTeam: 'Argentina',
             awayTeam: 'Brazil',
-            status: 'scheduled',
+            status: 'upcoming',
         });
         expect(fixtures[0].startsAt?.toISOString()).toBe('2026-07-01T18:00:00.000Z');
         expect(fixtures[0].raw).toHaveProperty('merkleRoot', 'root-abc');
+    });
+
+    it('maps TxLINE fixture statuses into AIR OTC buckets', () => {
+        const fixtures = normalizeFixturesPayload([
+            {
+                FixtureId: 18175918,
+                Competition: 'World Cup',
+                Participant1: 'Argentina',
+                Participant2: 'Cape Verde',
+                GameState: 1,
+                StartTime: 4102444800000,
+            },
+            {
+                FixtureId: 18176123,
+                Competition: 'World Cup',
+                Participant1: 'Australia',
+                Participant2: 'Egypt',
+                StartTime: 4102452000000,
+            },
+        ]);
+
+        expect(fixtures).toHaveLength(2);
+        expect(fixtures[0]).toMatchObject({
+            fixtureId: '18175918',
+            status: 'upcoming',
+            raw: {
+                GameState: 1,
+                source: 'txline',
+                sourceEndpoint: '/api/fixtures/snapshot',
+            },
+        });
+        expect(fixtures[1]).toMatchObject({
+            fixtureId: '18176123',
+            status: 'upcoming',
+        });
     });
 
     it('normalizes odds snapshots with implied probability', () => {

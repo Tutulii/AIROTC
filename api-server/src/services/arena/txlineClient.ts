@@ -414,6 +414,31 @@ function scoreState(raw: Record<string, unknown>): Record<string, unknown> {
     };
 }
 
+function normalizeStatusToken(value: unknown): string {
+    return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function normalizeFixtureStatus(raw: Record<string, unknown>, startsAt?: Date): string {
+    const rawStatus = firstString(raw, ['GameState', 'status', 'state', 'fixtureStatus'], 'unknown');
+    const status = normalizeStatusToken(rawStatus);
+
+    if (['live', 'in_play', 'in_progress', 'running', 'started', 'first_half', 'second_half', '2'].includes(status)) {
+        return 'live';
+    }
+    if (['scheduled', 'upcoming', 'not_started', 'pre_match', 'prematch', 'pending', '1'].includes(status)) {
+        return 'upcoming';
+    }
+    if (['final', 'finished', 'complete', 'completed', 'closed', 'settled', 'full_time', 'fulltime', 'ft', '3', '4'].includes(status)) {
+        return 'final';
+    }
+
+    if (startsAt && startsAt.getTime() > Date.now() - 15 * 60 * 1000) {
+        return 'upcoming';
+    }
+
+    return 'unknown';
+}
+
 export function normalizeFixturesPayload(payload: unknown): TxlineFixture[] {
     const rows = firstArray(payload, ['fixtures', 'data.fixtures', 'data', 'items', 'results']);
     return rows
@@ -421,13 +446,14 @@ export function normalizeFixturesPayload(payload: unknown): TxlineFixture[] {
             const raw = asRecord(row);
             const fixtureId = firstString(raw, ['FixtureId', 'fixtureId', 'fixture_id', 'id', 'matchId', 'MatchId', 'eventId', 'EventId']);
             if (!fixtureId) return null;
+            const startsAt = firstDate(raw, ['StartTime', 'startsAt', 'startTime', 'start_time', 'scheduledAt']);
             return {
                 fixtureId,
                 sport: firstString(raw, ['sport', 'sportName', 'Sport', 'SportId'], 'football'),
                 homeTeam: firstString(raw, ['Participant1', 'homeTeam', 'home_team', 'home.name', 'teams.home.name']) || undefined,
                 awayTeam: firstString(raw, ['Participant2', 'awayTeam', 'away_team', 'away.name', 'teams.away.name']) || undefined,
-                startsAt: firstDate(raw, ['StartTime', 'startsAt', 'startTime', 'start_time', 'scheduledAt']),
-                status: firstString(raw, ['GameState', 'status', 'state', 'fixtureStatus'], 'unknown'),
+                startsAt,
+                status: normalizeFixtureStatus(raw, startsAt),
                 raw: {
                     ...raw,
                     source: firstString(raw, ['source', 'Source'], 'txline'),
