@@ -293,11 +293,13 @@ export function initObservatoryBridge(): void {
         if (!mapped) return;
 
         const newStatus = mapPhaseToObservatoryStatus(event.to_phase);
+        const deal = dealPhaseManager.getDeal(event.ticket_id);
         await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, {
             status: newStatus,
             phase: event.to_phase,
             fromPhase: event.from_phase,
             source: "phase_changed",
+            escrowPda: deal?.escrow_pda || undefined,
         });
 
         logger.info("observatory_bridge_phase_synced", {
@@ -356,11 +358,13 @@ export function initObservatoryBridge(): void {
         const mapped = await ensureTicketSynced(payload.ticketId);
         if (!mapped) return;
 
+        const deal = dealPhaseManager.getDeal(payload.ticketId);
         await pushToObservatory("PATCH", `/v1/bridge/ticket/${mapped.ticketId}`, {
             status: newStatus,
             phase: payload.stage,
             source: "deal_pipeline_stage_changed",
             pipelineStatus: payload.status,
+            escrowPda: deal?.escrow_pda || undefined,
         });
 
         logger.info("observatory_bridge_pipeline_synced", {

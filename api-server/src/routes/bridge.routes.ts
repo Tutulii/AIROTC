@@ -6,6 +6,7 @@ import { SUCCESSFUL_TICKET_STATUSES } from '../services/ticketStatusPolicy';
 import { calculateVisibleReputation } from '../utils/reputation';
 import { getIO } from '../ws/socket';
 import { webhooks } from '../services/webhookDelivery';
+import { attachSportTicketByOffer } from '../services/arena/sportSettlementEngine';
 
 const router = Router();
 
@@ -48,6 +49,7 @@ type TicketUpdateMetadata = {
     fromPhase?: string;
     source?: string;
     pipelineStatus?: string;
+    escrowPda?: string;
     expiresAt?: string;
     msRemaining?: number;
     warningThresholdMs?: number;
@@ -63,6 +65,36 @@ function parseOptionalNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+async function syncSportArenaEscrowFromBridge(
+    ticket: { id: string; offerId: string },
+    metadata: TicketUpdateMetadata,
+): Promise<void> {
+    const escrowPda = metadata.escrowPda;
+    if (!escrowPda) return;
+
+    try {
+        const offer = await prisma.offer.findUnique({
+            where: { id: ticket.offerId },
+            select: { rollupMode: true },
+        });
+        if ((offer as any)?.rollupMode !== 'SPORT') return;
+
+        await attachSportTicketByOffer({
+            offerId: ticket.offerId,
+            ticketId: ticket.id,
+            escrowPda,
+        });
+    } catch (error: any) {
+        logger.warn('sport_arena_escrow_sync_failed', {
+            ticketId: ticket.id,
+            offerId: ticket.offerId,
+            escrowPda,
+            phase: metadata.phase,
+            error: error?.message || 'unknown',
+        });
+    }
+}
+
 function emitTicketUpdate(
     ticket: { id: string; buyer: string; seller: string; status: string },
     previousStatus: string,
@@ -76,6 +108,7 @@ function emitTicketUpdate(
         fromPhase: metadata.fromPhase ?? previousStatus,
         source: metadata.source ?? 'bridge',
         pipelineStatus: metadata.pipelineStatus,
+        escrowPda: metadata.escrowPda,
         expiresAt: metadata.expiresAt,
         msRemaining: metadata.msRemaining,
         warningThresholdMs: metadata.warningThresholdMs,
@@ -116,6 +149,7 @@ function notifyTicketUpdate(
         fromPhase: metadata.fromPhase ?? previousStatus,
         source: metadata.source ?? 'bridge',
         pipelineStatus: metadata.pipelineStatus,
+        escrowPda: metadata.escrowPda,
         expiresAt: metadata.expiresAt,
         msRemaining: metadata.msRemaining,
         warningThresholdMs: metadata.warningThresholdMs,
@@ -357,6 +391,9 @@ router.patch('/ticket/:id', async (req: Request, res: Response): Promise<void> =
             fromPhase: parseOptionalString(req.body?.fromPhase),
             source: parseOptionalString(req.body?.source),
             pipelineStatus: parseOptionalString(req.body?.pipelineStatus),
+            escrowPda: parseOptionalString(req.body?.escrowPda)
+                || parseOptionalString(req.body?.escrow_pda)
+                || parseOptionalString(req.body?.escrowAddress),
             expiresAt: parseOptionalString(req.body?.expiresAt),
             msRemaining: parseOptionalNumber(req.body?.msRemaining),
             warningThresholdMs: parseOptionalNumber(req.body?.warningThresholdMs),
@@ -370,6 +407,7 @@ router.patch('/ticket/:id', async (req: Request, res: Response): Promise<void> =
         const previousStatus = metadata.fromPhase ?? parseOptionalString(req.body?.previousStatus) ?? ticket.status;
         emitTicketUpdate(ticket, previousStatus, metadata);
         notifyTicketUpdate(ticket, previousStatus, metadata);
+        await syncSportArenaEscrowFromBridge(ticket, metadata);
 
         const dealId = ticket.offerId;
         const alreadyProcessed = await prisma.dealReputationProcessing.findUnique({
