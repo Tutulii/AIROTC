@@ -428,7 +428,11 @@ export function normalizeFixturesPayload(payload: unknown): TxlineFixture[] {
                 awayTeam: firstString(raw, ['Participant2', 'awayTeam', 'away_team', 'away.name', 'teams.away.name']) || undefined,
                 startsAt: firstDate(raw, ['StartTime', 'startsAt', 'startTime', 'start_time', 'scheduledAt']),
                 status: firstString(raw, ['GameState', 'status', 'state', 'fixtureStatus'], 'unknown'),
-                raw,
+                raw: {
+                    ...raw,
+                    source: firstString(raw, ['source', 'Source'], 'txline'),
+                    sourceEndpoint: firstString(raw, ['sourceEndpoint', 'SourceEndpoint'], '/api/fixtures/snapshot'),
+                },
             } satisfies TxlineFixture;
         })
         .filter((item): item is TxlineFixture => Boolean(item));

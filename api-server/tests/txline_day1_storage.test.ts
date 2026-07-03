@@ -151,4 +151,55 @@ describe('TxLINE Day 1 snapshot storage', () => {
             sourceEndpoint: '/api/scores/snapshot/fixture-1',
         });
     });
+
+    it('lists active TxLINE fixtures before stale fallback fixtures', async () => {
+        const originalToken = process.env.TXLINE_API_TOKEN;
+        const originalAutoSync = process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST;
+        process.env.TXLINE_API_TOKEN = 'test-token';
+        process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST = 'false';
+
+        try {
+            fixtures.push(
+                {
+                    id: 'fixture-fallback',
+                    fixtureId: 'espn:mlb:1',
+                    sport: 'baseball',
+                    homeTeam: 'Fallback Home',
+                    awayTeam: 'Fallback Away',
+                    startsAt: new Date('2026-07-01T10:00:00.000Z'),
+                    status: 'final',
+                    raw: { source: 'espn_scoreboard_fallback' },
+                    createdAt: new Date('2026-07-01T09:00:00.000Z'),
+                    updatedAt: new Date('2026-07-01T09:00:00.000Z'),
+                },
+                {
+                    id: 'fixture-txline',
+                    fixtureId: '18175918',
+                    sport: 'football',
+                    homeTeam: 'Argentina',
+                    awayTeam: 'Cape Verde',
+                    startsAt: new Date('2026-07-03T10:00:00.000Z'),
+                    status: '1',
+                    raw: { source: 'txline' },
+                    createdAt: new Date('2026-07-03T09:00:00.000Z'),
+                    updatedAt: new Date('2026-07-03T09:00:00.000Z'),
+                },
+            );
+
+            const { listTxlineFixtures } = await import('../src/services/arena/arena.service');
+
+            const rows = await listTxlineFixtures(1);
+
+            expect(rows).toHaveLength(1);
+            expect(rows[0]).toMatchObject({
+                fixtureId: '18175918',
+                raw: { source: 'txline' },
+            });
+        } finally {
+            if (originalToken === undefined) delete process.env.TXLINE_API_TOKEN;
+            else process.env.TXLINE_API_TOKEN = originalToken;
+            if (originalAutoSync === undefined) delete process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST;
+            else process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST = originalAutoSync;
+        }
+    });
 });

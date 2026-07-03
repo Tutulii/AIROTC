@@ -302,10 +302,27 @@ export async function ingestScoresPayload(fixtureId: string, payload: unknown): 
 
 export async function listTxlineFixtures(limit = 50): Promise<any[]> {
     await maybeAutoSyncFixtures();
-    return prismaAny.arenaFixture.findMany({
+    const cappedLimit = Math.min(Math.max(limit, 1), 100);
+    const activeSource = txlineActiveFixtureSource();
+    const candidates = await prismaAny.arenaFixture.findMany({
         orderBy: [{ startsAt: 'asc' }, { createdAt: 'desc' }],
-        take: Math.min(Math.max(limit, 1), 100),
+        take: Math.max(cappedLimit, 500),
     });
+    return candidates
+        .sort((left: any, right: any) => {
+            const leftSource = String(left?.raw?.source || '');
+            const rightSource = String(right?.raw?.source || '');
+            const leftActive = activeSource !== 'unconfigured' && leftSource === activeSource ? 0 : 1;
+            const rightActive = activeSource !== 'unconfigured' && rightSource === activeSource ? 0 : 1;
+            if (leftActive !== rightActive) return leftActive - rightActive;
+            const leftStart = left?.startsAt ? new Date(left.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
+            const rightStart = right?.startsAt ? new Date(right.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
+            if (leftStart !== rightStart) return leftStart - rightStart;
+            const leftUpdated = left?.updatedAt ? new Date(left.updatedAt).getTime() : 0;
+            const rightUpdated = right?.updatedAt ? new Date(right.updatedAt).getTime() : 0;
+            return rightUpdated - leftUpdated;
+        })
+        .slice(0, cappedLimit);
 }
 
 export async function getTxlineSnapshotProof(fixtureId: string): Promise<Record<string, unknown>> {
