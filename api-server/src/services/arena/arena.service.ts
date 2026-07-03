@@ -5,6 +5,7 @@ import {
     fetchFixturesSnapshot,
     fetchOddsSnapshot,
     fetchScoresSnapshot,
+    normalizeFixtureStatus,
     normalizeOddsPayload,
     normalizeScoresPayload,
     txlineActiveFixtureSource,
@@ -138,6 +139,29 @@ function eventTeams(update: { fixtureId: string; raw: Record<string, unknown> },
     };
 }
 
+function withFixtureMarketMetadata(fixture: any): any {
+    if (!fixture) return fixture;
+    const raw = fixture.raw && typeof fixture.raw === 'object' && !Array.isArray(fixture.raw)
+        ? fixture.raw
+        : {};
+    const marketSelections = Array.isArray(raw.marketSelections) && raw.marketSelections.length > 0
+        ? raw.marketSelections
+        : ['part1', 'draw', 'part2'];
+    const marketTypes = Array.isArray(raw.marketTypes) && raw.marketTypes.length > 0
+        ? raw.marketTypes
+        : ['1X2_PARTICIPANT_RESULT'];
+    return {
+        ...fixture,
+        marketSelections,
+        marketTypes,
+        raw: {
+            ...raw,
+            marketSelections,
+            marketTypes,
+        },
+    };
+}
+
 function timelineEventsFromOdds(updates: TxlineOddsUpdate[], fixtures: Map<string, any>): ArenaTimelineEventInput[] {
     return updates.map((update) => {
         const teams = eventTeams(update, fixtures.get(update.fixtureId));
@@ -230,6 +254,56 @@ export async function upsertFixtures(fixtures: TxlineFixture[]): Promise<number>
     return fixtures.length;
 }
 
+async function updateFixtureStatusesFromScores(updates: TxlineScoreUpdate[]): Promise<void> {
+    const latestByFixture = new Map<string, TxlineScoreUpdate>();
+    for (const update of updates) {
+        const status = normalizeFixtureStatus(update.raw);
+        if (status === 'unknown') continue;
+        const current = latestByFixture.get(update.fixtureId);
+        if (!current || update.sourceTimestamp.getTime() >= current.sourceTimestamp.getTime()) {
+            latestByFixture.set(update.fixtureId, update);
+        }
+    }
+    if (latestByFixture.size === 0) return;
+
+    const fixtures = await fixtureMetadataById([...latestByFixture.keys()]);
+    for (const [fixtureId, update] of latestByFixture.entries()) {
+        const fixture = fixtures.get(fixtureId);
+        if (!fixture) continue;
+        const nextStatus = normalizeFixtureStatus(update.raw);
+        if (fixture.status === 'final' && nextStatus !== 'final') continue;
+        const raw = fixture.raw && typeof fixture.raw === 'object' && !Array.isArray(fixture.raw)
+            ? fixture.raw
+            : {};
+        await prismaAny.arenaFixture.upsert({
+            where: { fixtureId },
+            update: {
+                status: nextStatus,
+                raw: jsonValue({
+                    ...raw,
+                    latestScoreState: update.raw.normalizedScoreState || null,
+                    latestScoreUpdateId: update.sourceUpdateId || null,
+                    latestScoreTimestamp: update.sourceTimestamp.toISOString(),
+                }),
+            },
+            create: {
+                fixtureId,
+                sport: fixture.sport || 'football',
+                homeTeam: fixture.homeTeam || null,
+                awayTeam: fixture.awayTeam || null,
+                startsAt: fixture.startsAt || null,
+                status: nextStatus,
+                raw: jsonValue({
+                    ...raw,
+                    latestScoreState: update.raw.normalizedScoreState || null,
+                    latestScoreUpdateId: update.sourceUpdateId || null,
+                    latestScoreTimestamp: update.sourceTimestamp.toISOString(),
+                }),
+            },
+        });
+    }
+}
+
 export async function syncFixturesFromTxline(): Promise<{ count: number; fixtures: TxlineFixture[] }> {
     const fixtures = await fetchFixturesSnapshot();
     await upsertFixtures(fixtures);
@@ -270,6 +344,7 @@ export async function recordScoreUpdates(updates: TxlineScoreUpdate[]): Promise<
             raw: jsonValue(update.raw),
         })),
     });
+    await updateFixtureStatusesFromScores(updates);
     const fixtures = await fixtureMetadataById(updates.map((update) => update.fixtureId));
     await recordTimelineEvents(timelineEventsFromScores(updates, fixtures));
     return updates.length;
@@ -322,7 +397,8 @@ export async function listTxlineFixtures(limit = 50): Promise<any[]> {
             const rightUpdated = right?.updatedAt ? new Date(right.updatedAt).getTime() : 0;
             return rightUpdated - leftUpdated;
         })
-        .slice(0, cappedLimit);
+        .slice(0, cappedLimit)
+        .map(withFixtureMarketMetadata);
 }
 
 export async function getTxlineSnapshotProof(fixtureId: string): Promise<Record<string, unknown>> {
@@ -354,7 +430,7 @@ export async function getTxlineSnapshotProof(fixtureId: string): Promise<Record<
     return {
         day: 1,
         fixtureId,
-        fixture,
+        fixture: withFixtureMarketMetadata(fixture),
         latestOdds,
         latestScores,
         replayEvents: replayEvents.map((event: any, index: number) => serializeReplayEvent(event, index)),

@@ -27,6 +27,12 @@ const FINAL_STATUSES = new Set([
     'after_extra_time',
     'aet',
     'after_penalties',
+    'finalised',
+    'finalized',
+    'game_finalised',
+    'game_finalized',
+    '3',
+    '4',
 ]);
 
 export function isTrustedOutcomeSource(source: unknown): boolean {
@@ -56,6 +62,22 @@ function firstNumber(source: Record<string, unknown>, keys: string[]): number | 
         }
     }
     return undefined;
+}
+
+function scoreGoalNumber(source: Record<string, unknown>, participant: 'Participant1' | 'Participant2'): number | undefined {
+    const direct = firstNumber(source, [
+        `Score.${participant}.Total.Goals`,
+        `Data.New.Score.${participant}.Total.Goals`,
+        `Data.Score.${participant}.Total.Goals`,
+    ]);
+    if (direct !== undefined) return direct;
+
+    const totalCandidates = [
+        nested(source, `Score.${participant}.Total`),
+        nested(source, `Data.New.Score.${participant}.Total`),
+        nested(source, `Data.Score.${participant}.Total`),
+    ];
+    return totalCandidates.some((candidate) => Object.keys(asRecord(candidate)).length > 0) ? 0 : undefined;
 }
 
 function normalizeStatus(value: unknown): string {
@@ -89,7 +111,7 @@ export function extractScore(raw: Record<string, unknown>, fallback?: { homeScor
             'Data.New.homeScore',
             'Data.homeScore',
             'normalizedScoreState.homeScore',
-        ]),
+        ]) ?? scoreGoalNumber(raw, 'Participant1'),
         awayScore: fallback?.awayScore ?? firstNumber(raw, [
             'awayScore',
             'away_score',
@@ -103,7 +125,7 @@ export function extractScore(raw: Record<string, unknown>, fallback?: { homeScor
             'Data.New.awayScore',
             'Data.awayScore',
             'normalizedScoreState.awayScore',
-        ]),
+        ]) ?? scoreGoalNumber(raw, 'Participant2'),
     };
 }
 
@@ -259,9 +281,15 @@ export function serializeOutcome(row: any): Record<string, unknown> {
 }
 
 export async function getOutcomeForFixture(fixtureId: string): Promise<Record<string, unknown>> {
-    const outcome = await prismaAny.arenaOutcome.findUnique({
-        where: { fixtureId },
-    });
+    let outcome = await prismaAny.arenaOutcome.findUnique({ where: { fixtureId } });
+    if (!outcome || !isTrustedOutcomeSource(outcome.source)) {
+        try {
+            await syncOutcomeForFixture(fixtureId);
+            outcome = await prismaAny.arenaOutcome.findUnique({ where: { fixtureId } });
+        } catch {
+            outcome = await prismaAny.arenaOutcome.findUnique({ where: { fixtureId } });
+        }
+    }
     if (!outcome || !isTrustedOutcomeSource(outcome.source)) {
         const error = new Error('txline_outcome_not_found');
         (error as any).statusCode = 404;

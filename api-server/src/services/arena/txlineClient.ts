@@ -3,6 +3,7 @@ import { TxlineFixture, TxlineOddsUpdate, TxlineScoreUpdate } from './types';
 const DEFAULT_TXLINE_BASE_URL = 'https://txline.txodds.com';
 const REQUEST_TIMEOUT_MS = 12_000;
 const GUEST_JWT_CACHE_MS = 10 * 60 * 1000;
+const ASSUMED_LIVE_WINDOW_MS = 4 * 60 * 60 * 1000;
 const ODDS_SNAPSHOT_ENDPOINT = '/api/odds/snapshot';
 const SCORES_SNAPSHOT_ENDPOINT = '/api/scores/snapshot';
 export const ODDS_STREAM_ENDPOINT = '/api/odds/stream';
@@ -133,6 +134,22 @@ function firstNumber(source: Record<string, unknown>, keys: string[]): number | 
     return undefined;
 }
 
+function goalNumber(source: Record<string, unknown>, participant: 'Participant1' | 'Participant2'): number | undefined {
+    const direct = firstNumber(source, [
+        `Score.${participant}.Total.Goals`,
+        `Data.New.Score.${participant}.Total.Goals`,
+        `Data.Score.${participant}.Total.Goals`,
+    ]);
+    if (direct !== undefined) return direct;
+
+    const totalCandidates = [
+        nested(source, `Score.${participant}.Total`),
+        nested(source, `Data.New.Score.${participant}.Total`),
+        nested(source, `Data.Score.${participant}.Total`),
+    ];
+    return totalCandidates.some((candidate) => Object.keys(asRecord(candidate)).length > 0) ? 0 : undefined;
+}
+
 function firstDate(source: Record<string, unknown>, keys: string[], fallback?: Date): Date | undefined {
     for (const key of keys) {
         const value = key.includes('.') ? nested(source, key) : source[key];
@@ -155,8 +172,27 @@ function firstArray(payload: unknown, keys: string[]): unknown[] {
     for (const key of keys) {
         const value = key.includes('.') ? nested(root, key) : root[key];
         if (Array.isArray(value)) return value;
+        if (looksLikeTxlineRow(value)) return [value];
     }
+    if (looksLikeTxlineRow(root)) return [root];
     return [];
+}
+
+function looksLikeTxlineRow(value: unknown): boolean {
+    const row = asRecord(value);
+    if (Object.keys(row).length === 0) return false;
+    return [
+        'FixtureId',
+        'fixtureId',
+        'fixture_id',
+        'MatchId',
+        'matchId',
+        'MessageId',
+        'GameState',
+        'Prices',
+        'PriceNames',
+        'Score',
+    ].some((key) => row[key] !== undefined);
 }
 
 function impliedProbability(odds: number): number | undefined {
@@ -214,11 +250,11 @@ function scoreState(raw: Record<string, unknown>): Record<string, unknown> {
         'Data.awayScore',
     ]);
     return {
-        status: firstString(raw, ['GameState', 'status', 'state', 'matchStatus'], 'unknown'),
+        status: normalizeFixtureStatus(raw),
         action: firstString(raw, ['Action']),
         clock: raw.Clock || nested(raw, 'Data.New.Clock') || null,
-        homeScore: homeScore ?? null,
-        awayScore: awayScore ?? null,
+        homeScore: homeScore ?? goalNumber(raw, 'Participant1') ?? null,
+        awayScore: awayScore ?? goalNumber(raw, 'Participant2') ?? null,
         score,
         stats: raw.Stats || null,
         possession: raw.Possession || null,
@@ -230,22 +266,29 @@ function normalizeStatusToken(value: unknown): string {
     return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
-function normalizeFixtureStatus(raw: Record<string, unknown>, startsAt?: Date): string {
+export function normalizeFixtureStatus(raw: Record<string, unknown>, startsAt?: Date): string {
     const rawStatus = firstString(raw, ['GameState', 'status', 'state', 'fixtureStatus'], 'unknown');
     const status = normalizeStatusToken(rawStatus);
+    const action = normalizeStatusToken(firstString(raw, ['Action']));
 
+    if (
+        ['final', 'finished', 'complete', 'completed', 'closed', 'settled', 'full_time', 'fulltime', 'ft', 'finalised', 'finalized', 'game_finalised', 'game_finalized', '3', '4'].includes(status) ||
+        ['finalised', 'finalized', 'game_finalised', 'game_finalized'].includes(action)
+    ) {
+        return 'final';
+    }
     if (['live', 'in_play', 'in_progress', 'running', 'started', 'first_half', 'second_half', '2'].includes(status)) {
         return 'live';
     }
     if (['scheduled', 'upcoming', 'not_started', 'pre_match', 'prematch', 'pending', '1'].includes(status)) {
         return 'upcoming';
     }
-    if (['final', 'finished', 'complete', 'completed', 'closed', 'settled', 'full_time', 'fulltime', 'ft', '3', '4'].includes(status)) {
-        return 'final';
-    }
 
-    if (startsAt && startsAt.getTime() > Date.now() - 15 * 60 * 1000) {
-        return 'upcoming';
+    if (startsAt) {
+        const startMs = startsAt.getTime();
+        const now = Date.now();
+        if (startMs > now - 15 * 60 * 1000) return 'upcoming';
+        if (startMs <= now && now - startMs <= ASSUMED_LIVE_WINDOW_MS) return 'live';
     }
 
     return 'unknown';
@@ -268,6 +311,12 @@ export function normalizeFixturesPayload(payload: unknown): TxlineFixture[] {
                 status: normalizeFixtureStatus(raw, startsAt),
                 raw: {
                     ...raw,
+                    marketSelections: maybeArray(raw.marketSelections).length > 0
+                        ? raw.marketSelections
+                        : ['part1', 'draw', 'part2'],
+                    marketTypes: maybeArray(raw.marketTypes).length > 0
+                        ? raw.marketTypes
+                        : ['1X2_PARTICIPANT_RESULT'],
                     source: firstString(raw, ['source', 'Source'], 'txline'),
                     sourceEndpoint: firstString(raw, ['sourceEndpoint', 'SourceEndpoint'], '/api/fixtures/snapshot'),
                 },
@@ -357,7 +406,7 @@ export function normalizeScoresPayload(payload: unknown, fallbackFixtureId?: str
                     'Data.Score.Participant1.Total.Goals',
                     'Data.New.homeScore',
                     'Data.homeScore',
-                ]),
+                ]) ?? goalNumber(raw, 'Participant1'),
                 awayScore: firstNumber(raw, [
                     'awayScore',
                     'away_score',
@@ -370,7 +419,7 @@ export function normalizeScoresPayload(payload: unknown, fallbackFixtureId?: str
                     'Data.Score.Participant2.Total.Goals',
                     'Data.New.awayScore',
                     'Data.awayScore',
-                ]),
+                ]) ?? goalNumber(raw, 'Participant2'),
                 status: firstString(state, ['status'], 'unknown'),
                 source: 'txline',
                 sourceEndpoint: fallbackFixtureId ? `${SCORES_SNAPSHOT_ENDPOINT}/${fallbackFixtureId}` : SCORES_STREAM_ENDPOINT,

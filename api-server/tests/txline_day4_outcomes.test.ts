@@ -107,6 +107,35 @@ describe('TxLINE Day 4 outcomes and backtest', () => {
         });
     });
 
+    it('derives a TxLINE outcome from game_finalised rows with omitted zero-goal fields', async () => {
+        const { deriveOutcomeFromScoreUpdate } = await import('../src/services/arena/outcomeBacktest');
+
+        const outcome = deriveOutcomeFromScoreUpdate({
+            fixtureId: '18179552',
+            status: 'final',
+            source: 'txline',
+            sourceUpdateId: 'score-finalised',
+            sourceTimestamp: new Date('2026-07-03T04:20:05.521Z'),
+            raw: {
+                GameState: 'scheduled',
+                Action: 'game_finalised',
+                Score: {
+                    Participant1: { Total: { Goals: 2, Corners: 4 } },
+                    Participant2: { Total: { YellowCards: 2, Corners: 2 } },
+                },
+            },
+        });
+
+        expect(outcome).toMatchObject({
+            fixtureId: '18179552',
+            homeScore: 2,
+            awayScore: 0,
+            winner: 'part1',
+            source: 'txline',
+            sourceUpdateId: 'score-finalised',
+        });
+    });
+
     it('does not create outcomes for non-final score updates', async () => {
         const { deriveOutcomeFromScoreUpdate } = await import('../src/services/arena/outcomeBacktest');
 

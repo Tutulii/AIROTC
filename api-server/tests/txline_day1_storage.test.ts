@@ -152,6 +152,51 @@ describe('TxLINE Day 1 snapshot storage', () => {
         });
     });
 
+    it('updates fixture status and replay when TxLINE score updates arrive', async () => {
+        const {
+            getTxlineSnapshotProof,
+            recordScoreUpdates,
+            upsertFixtures,
+        } = await import('../src/services/arena/arena.service');
+
+        await upsertFixtures([{
+            fixtureId: 'fixture-live',
+            sport: 'football',
+            homeTeam: 'Australia',
+            awayTeam: 'Egypt',
+            startsAt: new Date('2026-07-01T18:00:00.000Z'),
+            status: 'upcoming',
+            raw: { source: 'txline' },
+        }]);
+        await recordScoreUpdates([{
+            fixtureId: 'fixture-live',
+            homeScore: 1,
+            awayScore: 0,
+            status: 'live',
+            source: 'txline',
+            sourceUpdateId: 'score-live-1',
+            sourceTimestamp: new Date('2026-07-01T18:10:00.000Z'),
+            raw: {
+                GameState: 'live',
+                normalizedScoreState: { status: 'live', homeScore: 1, awayScore: 0 },
+            },
+        }]);
+
+        const proof = await getTxlineSnapshotProof('fixture-live');
+
+        expect(proof.fixture).toMatchObject({
+            fixtureId: 'fixture-live',
+            status: 'live',
+            raw: {
+                latestScoreUpdateId: 'score-live-1',
+            },
+        });
+        expect(proof.acceptance).toMatchObject({
+            scoreSnapshots: 1,
+            replayEvents: 1,
+        });
+    });
+
     it('excludes stale ESPN fallback fixtures from TxLINE fixture lists', async () => {
         const originalToken = process.env.TXLINE_API_TOKEN;
         const originalAutoSync = process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST;

@@ -74,6 +74,26 @@ describe('TxLINE Day 1 snapshot normalization', () => {
             fixtureId: '18176123',
             status: 'upcoming',
         });
+        expect(fixtures[1].raw).toMatchObject({
+            marketSelections: ['part1', 'draw', 'part2'],
+            marketTypes: ['1X2_PARTICIPANT_RESULT'],
+        });
+    });
+
+    it('treats TxLINE fixtures without GameState as live during the early post-kickoff window', () => {
+        const fixtures = normalizeFixturesPayload([{
+            FixtureId: 18176123,
+            Competition: 'World Cup',
+            Participant1: 'Australia',
+            Participant2: 'Egypt',
+            StartTime: Date.now() - 30 * 60 * 1000,
+        }]);
+
+        expect(fixtures).toHaveLength(1);
+        expect(fixtures[0]).toMatchObject({
+            fixtureId: '18176123',
+            status: 'live',
+        });
     });
 
     it('normalizes odds snapshots with implied probability', () => {
@@ -179,6 +199,70 @@ describe('TxLINE Day 1 snapshot normalization', () => {
         expect(scores[0].raw.normalizedScoreState).toMatchObject({
             status: 'live',
             clock: { Running: true, Seconds: 6107 },
+        });
+    });
+
+    it('normalizes single-object TxLINE SSE odds and score messages', () => {
+        const odds = normalizeOddsPayload({
+            FixtureId: 18179549,
+            MessageId: '1836172796:00003:000019-10021-stab',
+            Ts: 1783104139772,
+            Bookmaker: 'TXLineStablePriceDemargined',
+            SuperOddsType: '1X2_PARTICIPANT_RESULT',
+            GameState: null,
+            InRunning: false,
+            MarketParameters: null,
+            MarketPeriod: 'half=1',
+            PriceNames: ['part1', 'draw', 'part2'],
+            Prices: [2065, 3540, 3130],
+        });
+        const scores = normalizeScoresPayload({
+            FixtureId: 18176123,
+            GameState: 'live',
+            StartTime: 1783101600000,
+            Action: 'update',
+            Id: 1,
+            Ts: 1783101601000,
+            Score: {
+                Participant1: { Total: { Goals: 1 } },
+                Participant2: { Total: { Goals: 0 } },
+            },
+        });
+
+        expect(odds).toHaveLength(3);
+        expect(odds[0]).toMatchObject({
+            fixtureId: '18179549',
+            market: '1X2_PARTICIPANT_RESULT:half=1',
+            selection: 'part1',
+            odds: 2.065,
+        });
+        expect(scores).toHaveLength(1);
+        expect(scores[0]).toMatchObject({
+            fixtureId: '18176123',
+            homeScore: 1,
+            awayScore: 0,
+            status: 'live',
+        });
+    });
+
+    it('normalizes TxLINE final score snapshots with omitted zero-goal fields', () => {
+        const scores = normalizeScoresPayload({
+            FixtureId: 18179552,
+            GameState: 'scheduled',
+            Action: 'game_finalised',
+            Ts: 1783054805521,
+            Score: {
+                Participant1: { Total: { Goals: 2, Corners: 4 } },
+                Participant2: { Total: { YellowCards: 2, Corners: 2 } },
+            },
+        });
+
+        expect(scores).toHaveLength(1);
+        expect(scores[0]).toMatchObject({
+            fixtureId: '18179552',
+            homeScore: 2,
+            awayScore: 0,
+            status: 'final',
         });
     });
 
