@@ -33,6 +33,9 @@ AIR_OTC_TS_SDK_PATH="/Users/tutul/Downloads/AIR OTC/sdk/ts/dist/index.mjs"
 # Optional API auth forwarded to AIR OTC services
 AIR_OTC_API_KEY=
 
+# Optional operator secret used by SPORT admin MCP tools when calling API admin endpoints
+AIR_OTC_TXLINE_ADMIN_TOKEN=
+
 # Required only for PER run tools
 AIR_OTC_WALLET_PRIVATE_KEY=
 
@@ -43,10 +46,15 @@ AIR_OTC_MCP_SCOPES=offers:read,offers:write,deals:read,dm:read,dm:write,per:run,
 # Optional multi-token auth. Each entry can have its own scope set.
 AIR_OTC_MCP_TOKENS_JSON='[
   {
-    "name": "manus-lite",
+    "name": "trade-agent",
     "token": "mcp_manus_replace_me",
     "scopes": ["offers:read", "offers:write", "deals:read", "dm:read", "dm:write", "per:run", "proofs:read", "vault:read", "umbra:read"],
     "wallets": ["9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F"]
+  },
+  {
+    "name": "sport-operator",
+    "token": "mcp_sport_operator_replace_me",
+    "scopes": ["offers:read", "offers:write", "deals:read", "sport:admin"]
   }
 ]'
 
@@ -59,6 +67,7 @@ AIR_OTC_MCP_DELEGATION_TOKEN=
 Mutating tools require a bearer token with the required scope. Prefer `Authorization: Bearer <token>` or `X-AIROTC-MCP-Token`; the `authToken` tool argument remains only as a fallback for older clients.
 Generated `airotc_sk` hosted tokens verify as full trade-agent tokens. The signing wallet is used as the default wallet when a tool omits `wallet`; it is not a hard binding for explicit wallet parameters.
 `AIR_OTC_MCP_TOKENS_JSON` supports multiple independent bearer tokens, each with its own scopes and optional wallet binding, without replacing the legacy `AIR_OTC_MCP_TOKEN`.
+SPORT ingestion and manual settlement controls require the operator-only `sport:admin` scope. Normal hosted trade-agent tokens intentionally do not include this scope.
 
 ## Tools
 
@@ -69,6 +78,15 @@ Generated `airotc_sk` hosted tokens verify as full trade-agent tokens. The signi
 - `airotc_ack_agent_event`
 - `airotc_ack_agent_events`
 - `airotc_list_offers`
+- `airotc_sport_list_matches`
+- `airotc_sport_get_fixture`
+- `airotc_sport_create_offer`
+- `airotc_sport_accept_offer`
+- `airotc_sport_get_settlement_status`
+- `airotc_sport_ingestion_status`
+- `airotc_sport_start_ingestion` (`sport:admin`)
+- `airotc_sport_stop_ingestion` (`sport:admin`)
+- `airotc_sport_run_settlement_once` (`sport:admin`)
 - `airotc_create_offer`
 - `airotc_accept_offer`
 - `airotc_list_wallet_tickets`

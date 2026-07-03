@@ -19,7 +19,8 @@ type Scope =
   | "per:run"
   | "proofs:read"
   | "vault:read"
-  | "umbra:read";
+  | "umbra:read"
+  | "sport:admin";
 
 type JsonRpcRequest = {
   jsonrpc?: string;
@@ -83,7 +84,7 @@ type McpTokenPayload = {
   jti: string;
 };
 
-const validScopes = new Set<Scope>([
+const tradeAgentScopes: Scope[] = [
   "offers:read",
   "offers:write",
   "deals:read",
@@ -93,9 +94,14 @@ const validScopes = new Set<Scope>([
   "proofs:read",
   "vault:read",
   "umbra:read",
+];
+
+const validScopes = new Set<Scope>([
+  ...tradeAgentScopes,
+  "sport:admin",
 ]);
 
-const defaultFullScopes = new Set<Scope>(validScopes);
+const defaultFullScopes = new Set<Scope>(tradeAgentScopes);
 const MCP_SHORT_TOKEN_PREFIX = "airotc_sk_";
 const AGENT_EVENT_NAMES = [
   "deal.matched",
@@ -169,7 +175,7 @@ function parseTokenRules(fallbackScopes: Set<Scope>): TokenRule[] {
 
 const defaultScopes = parseScopes(
   process.env.AIR_OTC_MCP_SCOPES ||
-    "offers:read,offers:write,deals:read,dm:read,dm:write,per:run,proofs:read,vault:read,umbra:read",
+    tradeAgentScopes.join(","),
   defaultFullScopes
 );
 
@@ -1082,14 +1088,14 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_start_ingestion",
     title: "Sport Start Ingestion",
     description:
-      "Start TxLINE live odds/scores ingestion for SPORT mode. Requires offers:write scope and API admin authorization in production.",
-    scope: "offers:write",
+      "Start TxLINE live odds/scores ingestion for SPORT mode. Requires sport:admin scope and API admin authorization in production.",
+    scope: "sport:admin",
     inputSchema: objectSchema({
       ...authSchema,
       adminToken: { type: "string" },
     }),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
+      await requireScope(args, "sport:admin");
       return toolOutput(
         await httpJson(
           "/v1/txline/ingestion/start",
@@ -1103,14 +1109,14 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_stop_ingestion",
     title: "Sport Stop Ingestion",
     description:
-      "Stop TxLINE live odds/scores ingestion for SPORT mode. Requires offers:write scope and API admin authorization in production.",
-    scope: "offers:write",
+      "Stop TxLINE live odds/scores ingestion for SPORT mode. Requires sport:admin scope and API admin authorization in production.",
+    scope: "sport:admin",
     inputSchema: objectSchema({
       ...authSchema,
       adminToken: { type: "string" },
     }),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
+      await requireScope(args, "sport:admin");
       return toolOutput(
         await httpJson(
           "/v1/txline/ingestion/stop",
@@ -1124,8 +1130,8 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_run_settlement_once",
     title: "Sport Run Settlement Once",
     description:
-      "Run one SPORT settlement sweep now, refreshing TxLINE outcomes before escrow execution. Requires offers:write scope and API admin authorization in production.",
-    scope: "offers:write",
+      "Run one SPORT settlement sweep now, refreshing TxLINE outcomes before escrow execution. Requires sport:admin scope and API admin authorization in production.",
+    scope: "sport:admin",
     inputSchema: objectSchema({
       ...authSchema,
       adminToken: { type: "string" },
@@ -1136,7 +1142,7 @@ const tools: ToolDefinition[] = [
       liveSync: { type: "boolean", default: true },
     }),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
+      await requireScope(args, "sport:admin");
       const body: Record<string, unknown> = {
         refreshOutcomes: args.refreshOutcomes !== false,
         liveSync: args.liveSync !== false,

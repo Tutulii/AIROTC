@@ -554,6 +554,119 @@ describe('ArenaMatch lifecycle', () => {
         });
     });
 
+    it('executes SPORT escrow refund through the middleman bridge when the maker selection loses', async () => {
+        const { createSportMatchForOffer, runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
+
+        const losingOutcome = stored({
+            id: 'outcome-losing-1',
+            fixtureId: 'fixture-1',
+            status: 'finished',
+            homeScore: 0,
+            awayScore: 1,
+            winner: 'part2',
+            source: 'txline',
+            sourceUpdateId: 'score-final-away',
+            sourceTimestamp: new Date('2026-07-01T11:00:00.000Z'),
+            settledAt: new Date('2026-07-01T11:00:00.000Z'),
+            raw: { GameState: 'finished' },
+        });
+        outcomeRowsById.set(losingOutcome.id, losingOutcome);
+        outcomeRowsByFixture.set(losingOutcome.fixtureId, losingOutcome);
+
+        await createSportMatchForOffer({
+            offerId: 'offer-sport-1',
+            fixtureId: 'fixture-1',
+            makerWallet: 'maker-wallet',
+            mode: 'buy',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+        });
+        Object.assign(matchRows.get('match-1')!, {
+            ticketId: 'ticket-1',
+            takerWallet: 'taker-wallet',
+            status: 'escrow_attached',
+        });
+        middlemanForwarderMock.forwardSportSettlement.mockResolvedValueOnce({
+            success: true,
+            tx: 'bridge-refund-tx',
+            onChainAction: 'refund_on_timeout',
+            status: 'completed',
+        });
+
+        const result = await runSportSettlement({ fixtureId: 'fixture-1' });
+
+        expect(middlemanForwarderMock.forwardSportSettlement).toHaveBeenCalledWith({
+            ticketId: 'ticket-1',
+            settlementAction: 'refund_to_taker',
+            matchId: 'match-1',
+            fixtureId: 'fixture-1',
+            outcomeWinner: 'part2',
+            winnerWallet: 'taker-wallet',
+        });
+        expect(result).toMatchObject({
+            mode: 'SPORT',
+            settledCount: 1,
+            settled: [
+                {
+                    match: {
+                        id: 'match-1',
+                        refundTx: 'bridge-refund-tx',
+                        winnerWallet: 'taker-wallet',
+                        settlementAction: 'refund_to_taker',
+                        settlementStatus: 'tx_recorded',
+                        status: 'refunded',
+                    },
+                    decision: {
+                        makerWins: false,
+                        winnerWallet: 'taker-wallet',
+                        settlementAction: 'refund_to_taker',
+                    },
+                },
+            ],
+        });
+    });
+
+    it('skips SPORT settlement safely when no final TxLINE outcome is available', async () => {
+        const { createSportMatchForOffer, runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
+
+        outcomeRowsById.clear();
+        outcomeRowsByFixture.clear();
+
+        await createSportMatchForOffer({
+            offerId: 'offer-sport-1',
+            fixtureId: 'fixture-1',
+            makerWallet: 'maker-wallet',
+            mode: 'buy',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+        });
+        Object.assign(matchRows.get('match-1')!, {
+            ticketId: 'ticket-1',
+            takerWallet: 'taker-wallet',
+            status: 'escrow_attached',
+        });
+
+        const result = await runSportSettlement({
+            fixtureId: 'fixture-1',
+            liveSync: false,
+        });
+
+        expect(middlemanForwarderMock.forwardSportSettlement).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            mode: 'SPORT',
+            scanned: 1,
+            settledCount: 0,
+            skippedCount: 1,
+            skipped: [
+                {
+                    matchId: 'match-1',
+                    fixtureId: 'fixture-1',
+                    reason: 'txline_outcome_not_found_or_not_final',
+                },
+            ],
+        });
+    });
+
     it('refreshes a final TxLINE score into an outcome before SPORT settlement', async () => {
         const { createSportMatchForOffer, runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
 

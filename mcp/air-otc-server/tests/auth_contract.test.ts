@@ -14,9 +14,9 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_accept_offer", "offers:write"],
   ["airotc_sport_get_settlement_status", "deals:read"],
   ["airotc_sport_ingestion_status", "deals:read"],
-  ["airotc_sport_start_ingestion", "offers:write"],
-  ["airotc_sport_stop_ingestion", "offers:write"],
-  ["airotc_sport_run_settlement_once", "offers:write"],
+  ["airotc_sport_start_ingestion", "sport:admin"],
+  ["airotc_sport_stop_ingestion", "sport:admin"],
+  ["airotc_sport_run_settlement_once", "sport:admin"],
   ["airotc_list_wallet_tickets", "deals:read"],
   ["airotc_get_ticket_messages", "deals:read"],
   ["airotc_send_ticket_message", "offers:write"],
@@ -178,6 +178,14 @@ const fullScopes = __test.parseScopes(
   new Set()
 );
 assert.equal(fullScopes.size, 9, "full trade-agent scope set must include all 9 scopes");
+assert.equal(fullScopes.has("sport:admin"), false, "trade-agent scope set must not include SPORT admin");
+
+const sportAdminScopes = __test.parseScopes("sport:admin", new Set());
+assert.deepEqual(
+  Array.from(sportAdminScopes),
+  ["sport:admin"],
+  "static operator tokens must be able to opt into SPORT admin scope"
+);
 
 const liveConfigTool = __test.tools.find((candidate: any) => candidate.name === "airotc_get_live_config");
 const liveConfig = JSON.parse((await liveConfigTool.handler({})).content[0].text);
