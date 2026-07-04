@@ -554,6 +554,64 @@ describe('ArenaMatch lifecycle', () => {
         });
     });
 
+    it('terminalizes SPORT matches with an already recorded release tx without retrying the middleman bridge', async () => {
+        const { createSportMatchForOffer, runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
+        const { getArenaSettlementStatusByTicket } = await import('../src/services/arena/arenaMatch.service');
+
+        await createSportMatchForOffer({
+            offerId: 'offer-sport-1',
+            fixtureId: 'fixture-1',
+            makerWallet: 'maker-wallet',
+            mode: 'buy',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+        });
+        Object.assign(matchRows.get('match-1')!, {
+            ticketId: 'ticket-1',
+            takerWallet: 'taker-wallet',
+            status: 'escrow_attached',
+            settlementAction: 'release_to_maker',
+            settlementStatus: 'tx_recorded',
+            releaseTx: 'already-recorded-release-tx',
+            settledAt: new Date('2026-07-01T11:01:00.000Z'),
+        });
+
+        const result = await runSportSettlement({ fixtureId: 'fixture-1' });
+
+        expect(middlemanForwarderMock.forwardSportSettlement).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            mode: 'SPORT',
+            settledCount: 1,
+            skippedCount: 0,
+            settled: [
+                {
+                    match: {
+                        id: 'match-1',
+                        releaseTx: 'already-recorded-release-tx',
+                        settlementAction: 'release_to_maker',
+                        settlementStatus: 'tx_recorded',
+                        status: 'released',
+                    },
+                    decision: {
+                        makerWins: true,
+                        winnerWallet: 'maker-wallet',
+                        settlementAction: 'release_to_maker',
+                    },
+                },
+            ],
+        });
+
+        await expect(getArenaSettlementStatusByTicket('ticket-1')).resolves.toMatchObject({
+            status: 'released',
+            settlement: {
+                terminal: true,
+                action: 'release_to_maker',
+                status: 'tx_recorded',
+                releaseTx: 'already-recorded-release-tx',
+            },
+        });
+    });
+
     it('executes SPORT escrow refund through the middleman bridge when the maker selection loses', async () => {
         const { createSportMatchForOffer, runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
 

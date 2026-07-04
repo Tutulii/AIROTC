@@ -203,8 +203,12 @@ export async function runSportSettlement(params: {
         }
 
         const settlementAction = makerWins ? 'release_to_maker' : 'refund_to_taker';
-        let releaseTx = settlementAction === 'release_to_maker' ? trimString(params.releaseTx) : undefined;
-        let refundTx = settlementAction === 'refund_to_taker' ? trimString(params.refundTx) : undefined;
+        let releaseTx = settlementAction === 'release_to_maker'
+            ? trimString(params.releaseTx) || trimString(match.releaseTx)
+            : undefined;
+        let refundTx = settlementAction === 'refund_to_taker'
+            ? trimString(params.refundTx) || trimString(match.refundTx)
+            : undefined;
         let bridgeResult: Awaited<ReturnType<typeof middlemanForwarder.forwardSportSettlement>> | null = null;
 
         if (!releaseTx && !refundTx) {
