@@ -8,6 +8,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_create_offer", "offers:write"],
   ["airotc_accept_offer", "offers:write"],
   ["airotc_list_offers", "offers:read"],
+  ["airotc_get_reputation", "offers:read"],
   ["airotc_sport_list_matches", "offers:read"],
   ["airotc_sport_get_fixture", "offers:read"],
   ["airotc_sport_create_offer", "offers:write"],
@@ -49,7 +50,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_test_notification_channel", "deals:read"],
 ]);
 
-assert.equal(__test.tools.length, 42, "MCP must expose exactly 42 tools");
+assert.equal(__test.tools.length, 43, "MCP must expose exactly 43 tools");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -104,6 +105,18 @@ assert.deepEqual(
   sportListTool.inputSchema.properties.status.enum,
   ["all", "live", "upcoming", "final"],
   "sport_list_matches must expose match status filters"
+);
+
+const reputationTool = __test.tools.find((candidate: any) => candidate.name === "airotc_get_reputation");
+assert.deepEqual(
+  reputationTool.inputSchema.required,
+  ["wallet"],
+  "get_reputation must require a target wallet"
+);
+assert.equal(
+  reputationTool.inputSchema.properties.includeHistory.default,
+  true,
+  "get_reputation should include reputation history by default"
 );
 
 const sportFixtureTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_fixture");

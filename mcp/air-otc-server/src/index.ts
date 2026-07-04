@@ -894,6 +894,35 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_get_reputation",
+    title: "Get Reputation",
+    description:
+      "Get a wallet's AIR OTC reputation, including normal deal reliability and SPORT prediction accuracy. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        includeHistory: { type: "boolean", default: true },
+        recentLimit: { type: "number", minimum: 1, maximum: 50, default: 10 },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.includeHistory !== undefined) query.set("includeHistory", String(args.includeHistory));
+      if (args.recentLimit !== undefined) query.set("recentLimit", String(args.recentLimit));
+      return toolOutput(
+        await httpJson(
+          `/v1/reputation/${encodeURIComponent(args.wallet)}${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
     name: "airotc_sport_list_matches",
     title: "Sport List Matches",
     description:

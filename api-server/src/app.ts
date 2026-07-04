@@ -30,6 +30,7 @@ import mcpRoutes from './routes/mcp.routes';
 import eventsRoutes from './routes/events.routes';
 import txlineRoutes from './routes/txline.routes';
 import arenaRoutes from './routes/arena.routes';
+import reputationRoutes from './routes/reputation.routes';
 
 const app: Application = express();
 const simulationRoutesEnabled = process.env.ENABLE_SIMULATION_ROUTES === 'true';
@@ -104,6 +105,7 @@ app.use('/v1/mcp', mcpRoutes);
 app.use('/', eventsRoutes);
 app.use('/', txlineRoutes);
 app.use('/', arenaRoutes);
+app.use('/', reputationRoutes);
 
 // Stats overview alias (maps /v1/stats/overview → /v1/stats)
 app.get('/v1/stats/overview', (req: Request, res: Response, next) => {
