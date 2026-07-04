@@ -17,6 +17,45 @@ function trimString(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function isLegacyFixtureId(value: unknown): boolean {
+    const fixtureId = trimString(value);
+    return Boolean(fixtureId?.startsWith('espn:') || fixtureId?.startsWith('hosted-smoke-'));
+}
+
+function isNumericTxlineFixtureId(value: unknown): boolean {
+    const fixtureId = trimString(value);
+    return Boolean(fixtureId && /^\d+$/.test(fixtureId));
+}
+
+function fixtureSource(fixture: any): string {
+    return String(asRecord(fixture?.raw).source || '').trim().toLowerCase();
+}
+
+function isSettlementCandidate(match: any, fixture?: any | null): boolean {
+    if (!trimString(match?.fixtureId) || isLegacyFixtureId(match.fixtureId)) return false;
+    const source = fixtureSource(fixture);
+    if (source) return source === 'txline';
+    return isNumericTxlineFixtureId(match.fixtureId);
+}
+
+async function fixtureMapForMatches(matches: any[]): Promise<Map<string, any>> {
+    if (!prismaAny.arenaFixture?.findMany || matches.length === 0) return new Map();
+    const fixtureIds = [...new Set(matches.map((match) => trimString(match.fixtureId)).filter(Boolean))];
+    if (fixtureIds.length === 0) return new Map();
+    try {
+        const fixtures = await prismaAny.arenaFixture.findMany({
+            where: { fixtureId: { in: fixtureIds } },
+        });
+        return new Map(fixtures.map((fixture: any) => [fixture.fixtureId, fixture]));
+    } catch {
+        return new Map();
+    }
+}
+
 function settlementDirectionFromOfferMode(mode: unknown): 'BUY_SELECTION' | 'SELL_SELECTION' {
     return mode === 'sell' ? 'SELL_SELECTION' : 'BUY_SELECTION';
 }
@@ -163,11 +202,30 @@ export async function runSportSettlement(params: {
     if (params.matchId) where.id = params.matchId;
     if (params.fixtureId) where.fixtureId = params.fixtureId;
 
-    const matches = await prismaAny.arenaMatch.findMany({
+    const candidateTake = params.matchId || params.fixtureId
+        ? limit
+        : Math.min(Math.max(limit * 10, 100), 500);
+    const candidateMatches = await prismaAny.arenaMatch.findMany({
         where,
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        take: limit,
+        take: candidateTake,
     });
+    const fixturesById = await fixtureMapForMatches(candidateMatches);
+    const legacyIgnored = params.matchId
+        ? []
+        : candidateMatches
+            .filter((match: any) => !isSettlementCandidate(match, fixturesById.get(match.fixtureId)))
+            .map((match: any) => ({
+                matchId: match.id,
+                fixtureId: match.fixtureId,
+                reason: 'non_txline_sport_fixture_ignored',
+                fixtureSource: fixtureSource(fixturesById.get(match.fixtureId)) || null,
+            }));
+    const matches = params.matchId
+        ? candidateMatches.slice(0, limit)
+        : candidateMatches
+            .filter((match: any) => isSettlementCandidate(match, fixturesById.get(match.fixtureId)))
+            .slice(0, limit);
 
     const settled = [];
     const skipped = [];
@@ -279,10 +337,12 @@ export async function runSportSettlement(params: {
         scanned: matches.length,
         settledCount: settled.length,
         skippedCount: skipped.length,
+        ignoredLegacyCount: legacyIgnored.length,
         refreshOutcomes,
         liveSync,
         outcomeRefreshes,
         settled,
         skipped,
+        ignoredLegacy: legacyIgnored,
     };
 }

@@ -197,6 +197,81 @@ describe('TxLINE Day 1 snapshot storage', () => {
         });
     });
 
+    it('does not downgrade a final fixture when a stale TxLINE snapshot still reports GameState 1', async () => {
+        const {
+            getTxlineSnapshotProof,
+            recordScoreUpdates,
+            upsertFixtures,
+        } = await import('../src/services/arena/arena.service');
+
+        await upsertFixtures([{
+            fixtureId: '18175918',
+            sport: 'football',
+            homeTeam: 'Argentina',
+            awayTeam: 'Cape Verde',
+            startsAt: new Date('2026-07-03T22:00:00.000Z'),
+            status: 'upcoming',
+            raw: {
+                source: 'txline',
+                GameState: 1,
+                Participant1: 'Argentina',
+                Participant2: 'Cape Verde',
+            },
+        }]);
+        await recordScoreUpdates([{
+            fixtureId: '18175918',
+            homeScore: 3,
+            awayScore: 2,
+            status: 'final',
+            source: 'txline',
+            sourceUpdateId: 'arg-cpv-final',
+            sourceTimestamp: new Date('2026-07-04T00:49:00.000Z'),
+            raw: {
+                GameState: 'scheduled',
+                Action: 'game_finalised',
+                normalizedScoreState: {
+                    status: 'final',
+                    action: 'game_finalised',
+                    homeScore: 3,
+                    awayScore: 2,
+                },
+            },
+        }]);
+
+        await upsertFixtures([{
+            fixtureId: '18175918',
+            sport: 'football',
+            homeTeam: 'Argentina',
+            awayTeam: 'Cape Verde',
+            startsAt: new Date('2026-07-03T22:00:00.000Z'),
+            status: 'upcoming',
+            raw: {
+                source: 'txline',
+                GameState: 1,
+                Participant1: 'Argentina',
+                Participant2: 'Cape Verde',
+            },
+        }]);
+
+        const proof = await getTxlineSnapshotProof('18175918');
+
+        expect(proof.fixture).toMatchObject({
+            fixtureId: '18175918',
+            status: 'final',
+            raw: {
+                source: 'txline',
+                GameState: 1,
+                latestScoreUpdateId: 'arg-cpv-final',
+                latestScoreState: {
+                    status: 'final',
+                    homeScore: 3,
+                    awayScore: 2,
+                },
+                statusPreservedFrom: 'score_replay_final',
+            },
+        });
+    });
+
     it('excludes stale ESPN fallback fixtures from TxLINE fixture lists', async () => {
         const originalToken = process.env.TXLINE_API_TOKEN;
         const originalAutoSync = process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST;

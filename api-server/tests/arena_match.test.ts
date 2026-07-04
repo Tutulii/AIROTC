@@ -126,6 +126,13 @@ function seedArenaRows(): void {
 const prismaMock = {
     arenaFixture: {
         findUnique: vi.fn(async ({ where }) => fixtureRows.get(where.fixtureId) || null),
+        findMany: vi.fn(async ({ where }) => {
+            const ids = where?.fixtureId?.in;
+            if (Array.isArray(ids)) {
+                return ids.map((fixtureId: string) => fixtureRows.get(fixtureId)).filter(Boolean);
+            }
+            return [...fixtureRows.values()];
+        }),
     },
     arenaStrategySignal: {
         findUnique: vi.fn(async ({ where }) => signalRows.get(where.id) || null),
@@ -779,6 +786,71 @@ describe('ArenaMatch lifecycle', () => {
                     outcomeSource: 'espn_scoreboard_fallback',
                 },
             ],
+        });
+    });
+
+    it('ignores legacy smoke and non-TxLINE SPORT rows in the default settlement sweep', async () => {
+        const { runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
+
+        fixtureRows.set('espn:wnba:401857034', stored({
+            id: 'fixture-fallback-wnba',
+            fixtureId: 'espn:wnba:401857034',
+            sport: 'basketball',
+            homeTeam: 'Fallback Home',
+            awayTeam: 'Fallback Away',
+            startsAt: new Date('2026-07-01T11:00:00.000Z'),
+            status: 'final',
+            raw: { source: 'espn_scoreboard_fallback' },
+        }));
+        matchRows.set('match-stale-smoke', stored({
+            id: 'match-stale-smoke',
+            fixtureId: 'hosted-smoke-1782991171664',
+            offerId: 'offer-stale-smoke',
+            makerWallet: 'maker-wallet',
+            takerWallet: 'taker-wallet',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+            direction: 'BUY_SELECTION',
+            rollupMode: 'SPORT',
+            status: 'escrow_attached',
+            proof: {},
+        }));
+        matchRows.set('match-stale-espn', stored({
+            id: 'match-stale-espn',
+            fixtureId: 'espn:wnba:401857034',
+            offerId: 'offer-stale-espn',
+            makerWallet: 'maker-wallet',
+            takerWallet: 'taker-wallet',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+            direction: 'BUY_SELECTION',
+            rollupMode: 'SPORT',
+            status: 'escrow_attached',
+            proof: {},
+        }));
+
+        const result = await runSportSettlement({ liveSync: false });
+
+        expect(middlemanForwarderMock.forwardSportSettlement).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            mode: 'SPORT',
+            scanned: 0,
+            settledCount: 0,
+            skippedCount: 0,
+            ignoredLegacyCount: 2,
+            ignoredLegacy: expect.arrayContaining([
+                expect.objectContaining({
+                    matchId: 'match-stale-smoke',
+                    fixtureId: 'hosted-smoke-1782991171664',
+                    reason: 'non_txline_sport_fixture_ignored',
+                }),
+                expect.objectContaining({
+                    matchId: 'match-stale-espn',
+                    fixtureId: 'espn:wnba:401857034',
+                    reason: 'non_txline_sport_fixture_ignored',
+                    fixtureSource: 'espn_scoreboard_fallback',
+                }),
+            ]),
         });
     });
 

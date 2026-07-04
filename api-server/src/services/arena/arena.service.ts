@@ -56,6 +56,38 @@ function jsonValue(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(JSON.stringify(value ?? {})) as Prisma.InputJsonValue;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function hasFinalScoreEvidence(rawValue: unknown): boolean {
+    const raw = asRecord(rawValue);
+    const latestScoreState = asRecord(raw.latestScoreState);
+    if (Object.keys(latestScoreState).length === 0) return false;
+    return normalizeFixtureStatus(latestScoreState) === 'final';
+}
+
+function shouldPreserveFinalStatus(existingFixture: any, nextStatus: string): boolean {
+    if (!existingFixture || nextStatus === 'final') return false;
+    return existingFixture.status === 'final' || hasFinalScoreEvidence(existingFixture.raw);
+}
+
+function mergeFixtureSnapshotRaw(existingRawValue: unknown, nextRawValue: unknown, preserveFinal: boolean): Record<string, unknown> {
+    const existingRaw = asRecord(existingRawValue);
+    const nextRaw = asRecord(nextRawValue);
+    const merged: Record<string, unknown> = { ...nextRaw };
+
+    for (const key of ['latestScoreState', 'latestScoreUpdateId', 'latestScoreTimestamp']) {
+        if (merged[key] === undefined && existingRaw[key] !== undefined) {
+            merged[key] = existingRaw[key];
+        }
+    }
+    if (preserveFinal) {
+        merged.statusPreservedFrom = 'score_replay_final';
+    }
+    return merged;
+}
+
 export function txlineRuntimeConfig(): TxlineRuntimeConfig {
     return {
         day: 4,
@@ -229,7 +261,12 @@ export async function recordTimelineEvents(events: ArenaTimelineEventInput[]): P
 }
 
 export async function upsertFixtures(fixtures: TxlineFixture[]): Promise<number> {
+    const existingFixtures = await fixtureMetadataById(fixtures.map((fixture) => fixture.fixtureId));
     for (const fixture of fixtures) {
+        const existingFixture = existingFixtures.get(fixture.fixtureId);
+        const preserveFinal = shouldPreserveFinalStatus(existingFixture, fixture.status);
+        const status = preserveFinal ? 'final' : fixture.status;
+        const raw = mergeFixtureSnapshotRaw(existingFixture?.raw, fixture.raw, preserveFinal);
         await prismaAny.arenaFixture.upsert({
             where: { fixtureId: fixture.fixtureId },
             update: {
@@ -237,8 +274,8 @@ export async function upsertFixtures(fixtures: TxlineFixture[]): Promise<number>
                 homeTeam: fixture.homeTeam || null,
                 awayTeam: fixture.awayTeam || null,
                 startsAt: fixture.startsAt || null,
-                status: fixture.status,
-                raw: jsonValue(fixture.raw),
+                status,
+                raw: jsonValue(raw),
             },
             create: {
                 fixtureId: fixture.fixtureId,
