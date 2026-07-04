@@ -272,6 +272,85 @@ describe('TxLINE Day 1 snapshot storage', () => {
         });
     });
 
+    it('prefers a final score row over later non-final housekeeping score rows', async () => {
+        const {
+            getTxlineSnapshotProof,
+            recordScoreUpdates,
+            upsertFixtures,
+        } = await import('../src/services/arena/arena.service');
+
+        await upsertFixtures([{
+            fixtureId: '18179549',
+            sport: 'football',
+            homeTeam: 'Colombia',
+            awayTeam: 'Ghana',
+            startsAt: new Date('2026-07-04T01:30:00.000Z'),
+            status: 'upcoming',
+            raw: {
+                source: 'txline',
+                GameState: 1,
+                Participant1: 'Colombia',
+                Participant2: 'Ghana',
+            },
+        }]);
+        await recordScoreUpdates([
+            {
+                fixtureId: '18179549',
+                homeScore: 1,
+                awayScore: 0,
+                status: 'final',
+                source: 'txline',
+                sourceUpdateId: '911:1037',
+                sourceTimestamp: new Date('2026-07-04T03:36:00.000Z'),
+                raw: {
+                    GameState: 'scheduled',
+                    Action: 'game_finalised',
+                    normalizedScoreState: {
+                        status: 'final',
+                        action: 'game_finalised',
+                        homeScore: 1,
+                        awayScore: 0,
+                    },
+                },
+            },
+            {
+                fixtureId: '18179549',
+                homeScore: 1,
+                awayScore: 0,
+                status: 'upcoming',
+                source: 'txline',
+                sourceUpdateId: '912:1038',
+                sourceTimestamp: new Date('2026-07-04T03:39:50.756Z'),
+                raw: {
+                    GameState: 'scheduled',
+                    Action: 'disconnected',
+                    normalizedScoreState: {
+                        status: 'upcoming',
+                        action: 'disconnected',
+                        homeScore: 1,
+                        awayScore: 0,
+                    },
+                },
+            },
+        ]);
+
+        const proof = await getTxlineSnapshotProof('18179549');
+
+        expect(proof.fixture).toMatchObject({
+            fixtureId: '18179549',
+            status: 'final',
+            raw: {
+                latestScoreUpdateId: '911:1037',
+                latestScoreState: {
+                    status: 'final',
+                    action: 'game_finalised',
+                    homeScore: 1,
+                    awayScore: 0,
+                },
+            },
+        });
+    });
+
     it('excludes stale ESPN fallback fixtures from TxLINE fixture lists', async () => {
         const originalToken = process.env.TXLINE_API_TOKEN;
         const originalAutoSync = process.env.TXLINE_FIXTURE_AUTO_SYNC_ON_LIST;

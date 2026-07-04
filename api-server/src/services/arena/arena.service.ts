@@ -297,7 +297,13 @@ async function updateFixtureStatusesFromScores(updates: TxlineScoreUpdate[]): Pr
         const status = normalizeFixtureStatus(update.raw);
         if (status === 'unknown') continue;
         const current = latestByFixture.get(update.fixtureId);
-        if (!current || update.sourceTimestamp.getTime() >= current.sourceTimestamp.getTime()) {
+        const currentStatus = current ? normalizeFixtureStatus(current.raw) : 'unknown';
+        if (currentStatus === 'final' && status !== 'final') continue;
+        if (
+            !current ||
+            (status === 'final' && currentStatus !== 'final') ||
+            update.sourceTimestamp.getTime() >= current.sourceTimestamp.getTime()
+        ) {
             latestByFixture.set(update.fixtureId, update);
         }
     }
