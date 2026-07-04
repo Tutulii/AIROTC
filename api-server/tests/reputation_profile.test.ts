@@ -15,6 +15,9 @@ const prismaMock = {
     arenaOutcome: {
         findMany: vi.fn(),
     },
+    arenaFixture: {
+        findMany: vi.fn(),
+    },
     offer: {
         findMany: vi.fn(),
     },
@@ -34,6 +37,8 @@ describe('reputation profile service', () => {
         prismaMock.agent.findMany.mockReset();
         prismaMock.arenaMatch.findMany.mockReset();
         prismaMock.arenaOutcome.findMany.mockReset();
+        prismaMock.arenaFixture.findMany.mockReset();
+        prismaMock.arenaFixture.findMany.mockResolvedValue([]);
         prismaMock.offer.findMany.mockReset();
         prismaMock.agentEvent.findMany.mockReset();
     });
@@ -139,6 +144,7 @@ describe('reputation profile service', () => {
         expect(profile.registered).toBe(true);
         expect(profile.algorithm.version).toBe('sport_reputation_v2');
         expect(profile.predictionReputation.evaluableSettledPredictions).toBe(3);
+        expect(profile.predictionReputation.ignoredLegacyMatches).toBe(0);
         expect(profile.predictionReputation.correctPredictions).toBe(2);
         expect(profile.predictionReputation.wrongPredictions).toBe(1);
         expect(profile.predictionReputation.accuracyPct).toBe(66.67);
@@ -154,9 +160,126 @@ describe('reputation profile service', () => {
         expect(profile.scoreBreakdown.predictionAccuracyRaw).toBe(66.67);
         expect(profile.riskLevel).toBe('medium');
         expect(profile.riskFlags.some((flag: any) => flag.code === 'low_sport_sample')).toBe(true);
-        expect(profile.recommendedCounterpartyAction).toBe('counter_or_request_more_collateral');
+        expect(profile.recommendedCounterpartyAction).toBe('accept_with_collateral');
         expect(profile.history).toHaveLength(1);
         expect(profile.score).toBeGreaterThan(0);
+    });
+
+    it('does not count legacy fallback SPORT rows as pending reputation matches', async () => {
+        prismaMock.agent.findUnique.mockResolvedValue({
+            wallet: WALLET,
+            totalDeals: 5,
+            successfulDeals: 5,
+            cancelledDeals: 0,
+            disputedDeals: 0,
+            totalVolume: '1000000000',
+            avgSettlementTime: 60,
+        });
+        prismaMock.arenaMatch.findMany.mockResolvedValue([
+            {
+                id: 'legacy-espn',
+                fixtureId: 'espn:mlb:401815979',
+                makerWallet: OTHER,
+                takerWallet: WALLET,
+                buyerWallet: WALLET,
+                sellerWallet: OTHER,
+                offerId: 'legacy-offer',
+                ticketId: 'legacy-ticket',
+                marketType: 'moneyline',
+                selection: 'part1',
+                direction: 'BUY_SELECTION',
+                status: 'ticket_attached',
+                createdAt: new Date('2026-07-03T08:00:00.000Z'),
+            },
+            {
+                id: 'legacy-smoke',
+                fixtureId: 'hosted-smoke-1782991171664',
+                makerWallet: WALLET,
+                takerWallet: COUNTERPARTY,
+                offerId: 'smoke-offer',
+                ticketId: 'smoke-ticket',
+                marketType: '1X2',
+                selection: 'part1',
+                direction: 'BUY_SELECTION',
+                status: 'ticket_attached',
+                createdAt: new Date('2026-07-02T08:00:00.000Z'),
+            },
+            {
+                id: 'txline-pending',
+                fixtureId: '18179549',
+                makerWallet: WALLET,
+                takerWallet: COUNTERPARTY,
+                offerId: 'real-offer',
+                ticketId: 'real-ticket',
+                marketType: '1X2',
+                selection: 'part1',
+                direction: 'BUY_SELECTION',
+                status: 'ticket_attached',
+                createdAt: new Date('2026-07-04T08:00:00.000Z'),
+            },
+        ]);
+        prismaMock.arenaFixture.findMany.mockResolvedValue([
+            { fixtureId: 'espn:mlb:401815979', raw: { source: 'espn_scoreboard_fallback' } },
+            { fixtureId: '18179549', raw: { source: 'txline' } },
+        ]);
+        prismaMock.arenaOutcome.findMany.mockResolvedValue([]);
+        prismaMock.offer.findMany.mockResolvedValue([]);
+        prismaMock.agentEvent.findMany.mockResolvedValue([]);
+
+        const { getReputationProfile } = await import('../src/services/reputationProfile.service');
+        const profile: any = await getReputationProfile(WALLET);
+
+        expect(profile.predictionReputation.totalMatches).toBe(1);
+        expect(profile.predictionReputation.pendingMatches).toBe(1);
+        expect(profile.predictionReputation.ignoredLegacyMatches).toBe(2);
+        expect(profile.predictionReputation.roles).toEqual({ maker: 1, taker: 0 });
+    });
+
+    it('ramps SPORT score impact with settled sample confidence', async () => {
+        prismaMock.agent.findUnique.mockResolvedValue({
+            wallet: WALLET,
+            totalDeals: 5,
+            successfulDeals: 5,
+            cancelledDeals: 0,
+            disputedDeals: 0,
+            totalVolume: '1000000000',
+            avgSettlementTime: 60,
+        });
+        prismaMock.arenaMatch.findMany.mockResolvedValue([
+            {
+                id: 'one-correct',
+                fixtureId: '18176123',
+                makerWallet: WALLET,
+                takerWallet: COUNTERPARTY,
+                offerId: 'offer-1',
+                ticketId: 'ticket-1',
+                marketType: '1X2',
+                selection: 'part2',
+                direction: 'SELL_SELECTION',
+                outcomeWinner: 'draw',
+                status: 'released',
+                settlementAction: 'release_to_maker',
+                winnerWallet: WALLET,
+                settledAt: new Date('2026-07-04T10:00:00.000Z'),
+                createdAt: new Date('2026-07-04T08:00:00.000Z'),
+            },
+        ]);
+        prismaMock.arenaFixture.findMany.mockResolvedValue([
+            { fixtureId: '18176123', raw: { source: 'txline' } },
+        ]);
+        prismaMock.arenaOutcome.findMany.mockResolvedValue([]);
+        prismaMock.offer.findMany.mockResolvedValue([
+            { id: 'offer-1', price: 0.01, amount: 1, collateral: 0.2, asset: 'TXLINE:18176123:1X2:part2' },
+        ]);
+        prismaMock.agentEvent.findMany.mockResolvedValue([]);
+
+        const { getReputationProfile } = await import('../src/services/reputationProfile.service');
+        const profile: any = await getReputationProfile(WALLET);
+
+        expect(profile.predictionReputation.evaluableSettledPredictions).toBe(1);
+        expect(profile.scoreBreakdown.sportWeight).toBeLessThan(20);
+        expect(profile.score).toBeGreaterThanOrEqual(28);
+        expect(profile.algorithm.formula).toContain('Sample-weighted blend');
     });
 
     it('returns a safe fresh-wallet reputation instead of inventing history', async () => {

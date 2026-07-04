@@ -65,6 +65,30 @@ function toNumber(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function trimString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function fixtureSource(fixture: any): string {
+    return String(asRecord(fixture?.raw).source || '').trim().toLowerCase();
+}
+
+function isLegacySportFixtureId(value: unknown): boolean {
+    const fixtureId = trimString(value);
+    return Boolean(fixtureId?.startsWith('espn:') || fixtureId?.startsWith('hosted-smoke-'));
+}
+
+function isReputationSportCandidate(match: any, fixture?: any | null): boolean {
+    if (!trimString(match?.fixtureId) || isLegacySportFixtureId(match.fixtureId)) return false;
+    const source = fixtureSource(fixture);
+    if (source) return source === 'txline';
+    return true;
+}
+
 function asDateMs(value: unknown): number {
     if (!value) return 0;
     const ms = value instanceof Date ? value.getTime() : new Date(String(value)).getTime();
@@ -179,8 +203,15 @@ function buildScore(params: {
     }
 
     const adjustedAccuracyScore = (params.adjustedAccuracy ?? 0) * 100;
-    const sampleScore = calculateSampleConfidence(params.sportEvaluable) * 100;
+    const sampleConfidence = calculateSampleConfidence(params.sportEvaluable);
+    const sampleScore = sampleConfidence * 100;
     const volumeScore = calculateVolumeConfidence(params.sportNotional) * 100;
+    const sportWeight = Math.min(0.65, sampleConfidence);
+    const dealWeight = 1 - sportWeight;
+    const sportComposite =
+        (adjustedAccuracyScore * 0.70) +
+        (sampleScore * 0.20) +
+        (volumeScore * 0.10);
     const cancellationPenalty = params.dealCount > 0
         ? Math.min(15, (params.cancelledDeals / params.dealCount) * 15)
         : 0;
@@ -189,10 +220,8 @@ function buildScore(params: {
         : 0;
 
     const score =
-        (params.dealScore * 0.35) +
-        (adjustedAccuracyScore * 0.40) +
-        (sampleScore * 0.15) +
-        (volumeScore * 0.10) -
+        (params.dealScore * dealWeight) +
+        (sportComposite * sportWeight) -
         cancellationPenalty -
         disputePenalty;
 
@@ -204,6 +233,9 @@ function buildScore(params: {
             predictionAccuracyAdjusted: params.adjustedAccuracy === null ? null : round(params.adjustedAccuracy * 100),
             sampleConfidence: round(sampleScore),
             notionalConfidence: round(volumeScore),
+            sportComposite: round(sportComposite),
+            sportWeight: round(sportWeight * 100),
+            dealWeight: round(dealWeight * 100),
             cancellationPenalty: round(cancellationPenalty),
             disputePenalty: round(disputePenalty),
         },
@@ -352,10 +384,23 @@ export async function getReputationProfile(
     ]);
 
     const scannedMatches = sportMatches.slice(0, MAX_MATCH_SCAN);
-    const fixtureIds: string[] = Array.from(new Set<string>(scannedMatches
+    const rawFixtureIds: string[] = Array.from(new Set<string>(scannedMatches
         .map((match: any) => match.fixtureId)
         .filter((id: unknown): id is string => typeof id === 'string' && Boolean(id))));
-    const offerIds: string[] = Array.from(new Set<string>(scannedMatches
+
+    const fixtures = rawFixtureIds.length > 0 && prismaAny.arenaFixture?.findMany
+        ? await prismaAny.arenaFixture.findMany({ where: { fixtureId: { in: rawFixtureIds } } })
+        : [];
+    const fixturesByFixtureId = new Map<string, any>((fixtures as any[]).map((fixture: any) => [fixture.fixtureId, fixture]));
+    const reputationMatches = scannedMatches.filter((match: any) => (
+        isReputationSportCandidate(match, fixturesByFixtureId.get(match.fixtureId))
+    ));
+    const ignoredLegacyMatches = scannedMatches.length - reputationMatches.length;
+
+    const fixtureIds: string[] = Array.from(new Set<string>(reputationMatches
+        .map((match: any) => match.fixtureId)
+        .filter((id: unknown): id is string => typeof id === 'string' && Boolean(id))));
+    const offerIds: string[] = Array.from(new Set<string>(reputationMatches
         .map((match: any) => match.offerId)
         .filter((id: unknown): id is string => typeof id === 'string' && Boolean(id))));
 
@@ -390,7 +435,7 @@ export async function getReputationProfile(
     let takerCount = 0;
     let totalNotional = 0;
 
-    for (const match of scannedMatches) {
+    for (const match of reputationMatches) {
         const role = roleForWallet(match, wallet);
         if (!role) continue;
         if (role === 'maker') makerCount += 1;
@@ -503,7 +548,7 @@ export async function getReputationProfile(
         algorithm: {
             version: 'sport_reputation_v2',
             formula: evaluated.length > 0
-                ? '35% deal reliability + 40% confidence-adjusted SPORT prediction accuracy + 15% SPORT sample confidence + 10% SPORT notional confidence - cancellation/dispute penalties'
+                ? 'Sample-weighted blend of visible deal reliability and SPORT prediction quality; SPORT weight ramps up with settled sample confidence and is capped at 65%'
                 : 'Visible deal reliability score; fresh wallets score 0 until settled history exists',
             scoreRange: [0, 100],
             accuracyMethod: 'Wilson lower bound at 95% confidence; raw accuracy is shown separately',
@@ -528,9 +573,10 @@ export async function getReputationProfile(
         },
         predictionReputation: {
             rollupMode: 'SPORT',
-            totalMatches: scannedMatches.length,
+            totalMatches: reputationMatches.length,
             scannedLimit: MAX_MATCH_SCAN,
             truncated: sportMatches.length > MAX_MATCH_SCAN,
+            ignoredLegacyMatches,
             evaluableSettledPredictions: evaluated.length,
             correctPredictions: correct,
             wrongPredictions: wrong,
