@@ -2368,7 +2368,7 @@ async function startHttp(): Promise<void> {
   });
   const port = Number(process.env.AIR_OTC_MCP_PORT || process.env.PORT || 8787);
   app.listen(port, () => {
-    console.error(`AIR OTC MCP HTTP listening on http://localhost:${port}/mcp`);
+    console.log(`AIR OTC MCP HTTP listening on http://localhost:${port}/mcp`);
   });
 }
 
