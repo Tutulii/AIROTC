@@ -9,6 +9,8 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_accept_offer", "offers:write"],
   ["airotc_list_offers", "offers:read"],
   ["airotc_get_reputation", "offers:read"],
+  ["airotc_compare_reputations", "offers:read"],
+  ["airotc_get_reputation_leaderboard", "offers:read"],
   ["airotc_sport_list_matches", "offers:read"],
   ["airotc_sport_get_fixture", "offers:read"],
   ["airotc_sport_create_offer", "offers:write"],
@@ -50,7 +52,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_test_notification_channel", "deals:read"],
 ]);
 
-assert.equal(__test.tools.length, 43, "MCP must expose exactly 43 tools");
+assert.equal(__test.tools.length, 45, "MCP must expose exactly 45 tools");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -117,6 +119,25 @@ assert.equal(
   reputationTool.inputSchema.properties.includeHistory.default,
   true,
   "get_reputation should include reputation history by default"
+);
+
+const compareReputationTool = __test.tools.find((candidate: any) => candidate.name === "airotc_compare_reputations");
+assert.deepEqual(
+  compareReputationTool.inputSchema.required,
+  ["wallets"],
+  "compare_reputations must require wallet array"
+);
+assert.equal(
+  compareReputationTool.inputSchema.properties.wallets.maxItems,
+  25,
+  "compare_reputations must cap batch size"
+);
+
+const reputationLeaderboardTool = __test.tools.find((candidate: any) => candidate.name === "airotc_get_reputation_leaderboard");
+assert.equal(
+  reputationLeaderboardTool.inputSchema.properties.limit.maximum,
+  25,
+  "reputation leaderboard must cap page size"
 );
 
 const sportFixtureTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_fixture");

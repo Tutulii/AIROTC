@@ -897,7 +897,7 @@ const tools: ToolDefinition[] = [
     name: "airotc_get_reputation",
     title: "Get Reputation",
     description:
-      "Get a wallet's AIR OTC reputation, including normal deal reliability and SPORT prediction accuracy. Requires offers:read scope.",
+      "Get a wallet's AIR OTC reputation, including deal reliability, SPORT prediction accuracy, confidence-adjusted score, and risk flags. Requires offers:read scope.",
     scope: "offers:read",
     inputSchema: objectSchema(
       {
@@ -916,6 +916,66 @@ const tools: ToolDefinition[] = [
       return toolOutput(
         await httpJson(
           `/v1/reputation/${encodeURIComponent(args.wallet)}${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_compare_reputations",
+    title: "Compare Reputations",
+    description:
+      "Compare multiple AIR OTC wallets before accepting offers. Returns V2 SPORT reputation profiles and rejects invalid wallets cleanly. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallets: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 25 },
+        includeHistory: { type: "boolean", default: false },
+        recentLimit: { type: "number", minimum: 1, maximum: 50, default: 5 },
+      },
+      ["wallets"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      return toolOutput(
+        await httpJson(
+          "/v1/reputation/batch",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              wallets: args.wallets,
+              includeHistory: args.includeHistory,
+              recentLimit: args.recentLimit,
+            }),
+          },
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_get_reputation_leaderboard",
+    title: "Get Reputation Leaderboard",
+    description:
+      "List top AIR OTC counterparties ranked by deal reliability and confidence-adjusted SPORT prediction reputation. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      limit: { type: "number", minimum: 1, maximum: 25, default: 10 },
+      minSettledPredictions: { type: "number", minimum: 0, maximum: 100, default: 0 },
+      recentLimit: { type: "number", minimum: 1, maximum: 50, default: 5 },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      if (args.minSettledPredictions !== undefined) query.set("minSettledPredictions", String(args.minSettledPredictions));
+      if (args.recentLimit !== undefined) query.set("recentLimit", String(args.recentLimit));
+      return toolOutput(
+        await httpJson(
+          `/v1/reputation/leaderboard${query.size ? `?${query}` : ""}`,
           {},
           config.apiUrl
         )

@@ -4,16 +4,30 @@ import { calculateVisibleReputation, getTier } from '../utils/reputation';
 
 const prismaAny = prisma as any;
 
-const TERMINAL_SPORT_STATUSES = new Set(['settled', 'released', 'refunded', 'cancelled', 'failed']);
+const EVALUABLE_SPORT_STATUSES = new Set(['settled', 'released', 'refunded']);
 const DEFAULT_RECENT_LIMIT = 10;
 const MAX_RECENT_LIMIT = 50;
 const MAX_MATCH_SCAN = 5000;
+const MAX_BATCH_WALLETS = 25;
+const DEFAULT_LEADERBOARD_LIMIT = 10;
+const MAX_LEADERBOARD_LIMIT = 25;
+const LEADERBOARD_CANDIDATE_SCAN = 1000;
+const LEADERBOARD_PROFILE_CANDIDATES = 100;
+const MIN_CONFIDENT_SPORT_SAMPLE = 5;
+const MIN_TRUSTED_SPORT_SAMPLE = 10;
 
 type SportRole = 'maker' | 'taker';
+type RiskSeverity = 'info' | 'warning' | 'critical';
+type CounterpartyAction = 'accept' | 'accept_with_collateral' | 'counter_or_request_more_collateral' | 'avoid_or_manual_review';
 
 export interface ReputationProfileOptions {
     includeHistory?: boolean;
     recentLimit?: number;
+}
+
+export interface ReputationLeaderboardOptions extends ReputationProfileOptions {
+    limit?: number;
+    minSettledPredictions?: number;
 }
 
 function httpError(message: string, statusCode: number): Error {
@@ -30,6 +44,15 @@ function validateWallet(walletInput: string): string {
         throw httpError('invalid_wallet', 400);
     }
     return wallet;
+}
+
+function tryNormalizeWallet(walletInput: unknown): { wallet?: string; error?: string; input: string } {
+    const input = typeof walletInput === 'string' ? walletInput.trim() : String(walletInput || '').trim();
+    try {
+        return { wallet: validateWallet(input), input };
+    } catch {
+        return { error: 'invalid_wallet', input };
+    }
 }
 
 function toNumber(value: unknown): number {
@@ -53,6 +76,11 @@ function serializeDate(value: unknown): string | null {
     if (value instanceof Date) return value.toISOString();
     const parsed = new Date(String(value));
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function round(value: number, digits = 2): number {
+    const factor = 10 ** digits;
+    return Math.round(value * factor) / factor;
 }
 
 function inferMakerWins(match: any, outcomeWinner: string | null): boolean | null {
@@ -80,6 +108,13 @@ function normalizeLimit(value: number | undefined): number {
     return Math.min(Math.max(parsed, 1), MAX_RECENT_LIMIT);
 }
 
+function normalizeLeaderboardLimit(value: number | undefined): number {
+    if (value === undefined || value === null) return DEFAULT_LEADERBOARD_LIMIT;
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed)) return DEFAULT_LEADERBOARD_LIMIT;
+    return Math.min(Math.max(parsed, 1), MAX_LEADERBOARD_LIMIT);
+}
+
 function calculateSampleConfidence(evaluable: number): number {
     if (evaluable <= 0) return 0;
     return Math.min(1, Math.log10(evaluable + 1) / Math.log10(51));
@@ -90,51 +125,211 @@ function calculateVolumeConfidence(totalNotional: number): number {
     return Math.min(1, Math.log10(totalNotional + 1) / Math.log10(101));
 }
 
-function formatConfidence(value: number): number {
-    return Number(value.toFixed(4));
+function calculateWilsonLowerBound(successes: number, total: number): number | null {
+    if (total <= 0) return null;
+    const z = 1.96;
+    const p = successes / total;
+    const z2 = z * z;
+    const denominator = 1 + z2 / total;
+    const center = p + z2 / (2 * total);
+    const margin = z * Math.sqrt((p * (1 - p) + z2 / (4 * total)) / total);
+    return Math.max(0, (center - margin) / denominator);
 }
 
-function calculateCombinedScore(params: {
+function formatConfidence(value: number): number {
+    return round(value, 4);
+}
+
+function buildScore(params: {
     dealScore: number;
     dealCount: number;
     cancelledDeals: number;
+    disputedDeals: number;
     sportEvaluable: number;
-    sportAccuracy: number | null;
+    rawAccuracy: number | null;
+    adjustedAccuracy: number | null;
     sportNotional: number;
-}): number {
-    if (params.dealCount <= 0 && params.sportEvaluable <= 0) return 0;
-    if (params.sportEvaluable <= 0) return Math.round(params.dealScore);
+}): { score: number; breakdown: Record<string, unknown> } {
+    if (params.dealCount <= 0 && params.sportEvaluable <= 0) {
+        return {
+            score: 0,
+            breakdown: {
+                dealReliability: 0,
+                predictionAccuracy: 0,
+                sampleConfidence: 0,
+                notionalConfidence: 0,
+                cancellationPenalty: 0,
+                disputePenalty: 0,
+            },
+        };
+    }
 
-    const accuracyScore = (params.sportAccuracy ?? 0) * 100;
+    if (params.sportEvaluable <= 0) {
+        return {
+            score: Math.round(params.dealScore),
+            breakdown: {
+                dealReliability: round(params.dealScore),
+                predictionAccuracy: null,
+                sampleConfidence: 0,
+                notionalConfidence: 0,
+                cancellationPenalty: 0,
+                disputePenalty: 0,
+            },
+        };
+    }
+
+    const adjustedAccuracyScore = (params.adjustedAccuracy ?? 0) * 100;
     const sampleScore = calculateSampleConfidence(params.sportEvaluable) * 100;
     const volumeScore = calculateVolumeConfidence(params.sportNotional) * 100;
     const cancellationPenalty = params.dealCount > 0
         ? Math.min(15, (params.cancelledDeals / params.dealCount) * 15)
         : 0;
+    const disputePenalty = params.dealCount > 0
+        ? Math.min(20, (params.disputedDeals / params.dealCount) * 20)
+        : 0;
 
     const score =
         (params.dealScore * 0.35) +
-        (accuracyScore * 0.40) +
+        (adjustedAccuracyScore * 0.40) +
         (sampleScore * 0.15) +
         (volumeScore * 0.10) -
-        cancellationPenalty;
+        cancellationPenalty -
+        disputePenalty;
 
-    return Math.max(0, Math.min(100, Math.round(score)));
+    return {
+        score: Math.max(0, Math.min(100, Math.round(score))),
+        breakdown: {
+            dealReliability: round(params.dealScore),
+            predictionAccuracyRaw: params.rawAccuracy === null ? null : round(params.rawAccuracy * 100),
+            predictionAccuracyAdjusted: params.adjustedAccuracy === null ? null : round(params.adjustedAccuracy * 100),
+            sampleConfidence: round(sampleScore),
+            notionalConfidence: round(volumeScore),
+            cancellationPenalty: round(cancellationPenalty),
+            disputePenalty: round(disputePenalty),
+        },
+    };
 }
 
-function trustSummary(tier: string, sportEvaluable: number, sportAccuracy: number | null): string {
+function buildRiskFlags(params: {
+    registered: boolean;
+    dealCount: number;
+    cancelledDeals: number;
+    disputedDeals: number;
+    sportEvaluable: number;
+    rawAccuracy: number | null;
+    adjustedAccuracy: number | null;
+    pending: number;
+    failed: number;
+    unevaluableSettled: number;
+    truncated: boolean;
+}): Array<{ code: string; severity: RiskSeverity; message: string }> {
+    const flags: Array<{ code: string; severity: RiskSeverity; message: string }> = [];
+    if (!params.registered && params.sportEvaluable === 0) {
+        flags.push({
+            code: 'fresh_wallet',
+            severity: 'warning',
+            message: 'Wallet has no AIR OTC deal or settled SPORT prediction history.',
+        });
+    }
+    if (params.sportEvaluable === 0) {
+        flags.push({
+            code: 'no_sport_settlements',
+            severity: 'info',
+            message: 'No settled SPORT predictions are available for this wallet yet.',
+        });
+    } else if (params.sportEvaluable < MIN_CONFIDENT_SPORT_SAMPLE) {
+        flags.push({
+            code: 'low_sport_sample',
+            severity: 'warning',
+            message: `Only ${params.sportEvaluable} settled SPORT prediction(s); treat accuracy as low-confidence.`,
+        });
+    } else if (params.sportEvaluable < MIN_TRUSTED_SPORT_SAMPLE) {
+        flags.push({
+            code: 'medium_sport_sample',
+            severity: 'info',
+            message: `Only ${params.sportEvaluable} settled SPORT predictions; confidence is still building.`,
+        });
+    }
+    if (params.rawAccuracy !== null && params.sportEvaluable >= MIN_CONFIDENT_SPORT_SAMPLE && params.rawAccuracy < 0.45) {
+        flags.push({
+            code: 'low_prediction_accuracy',
+            severity: 'warning',
+            message: `SPORT prediction accuracy is ${round(params.rawAccuracy * 100)}% across ${params.sportEvaluable} settled prediction(s).`,
+        });
+    }
+    if (params.dealCount > 0 && params.cancelledDeals / params.dealCount > 0.25) {
+        flags.push({
+            code: 'high_cancellation_rate',
+            severity: 'warning',
+            message: 'Cancellation rate is above 25% of historical AIR OTC deals.',
+        });
+    }
+    if (params.dealCount > 0 && params.disputedDeals / params.dealCount > 0.1) {
+        flags.push({
+            code: 'dispute_history',
+            severity: 'critical',
+            message: 'Dispute rate is above 10% of historical AIR OTC deals.',
+        });
+    }
+    if (params.pending >= 5) {
+        flags.push({
+            code: 'open_sport_exposure',
+            severity: 'info',
+            message: `${params.pending} SPORT match(es) are still pending settlement.`,
+        });
+    }
+    if (params.failed > 0) {
+        flags.push({
+            code: 'settlement_failures',
+            severity: 'warning',
+            message: `${params.failed} SPORT match(es) ended in failed settlement state.`,
+        });
+    }
+    if (params.unevaluableSettled > 0) {
+        flags.push({
+            code: 'missing_outcome_link',
+            severity: 'warning',
+            message: `${params.unevaluableSettled} settled SPORT match(es) could not be evaluated because outcome/direction data was missing.`,
+        });
+    }
+    if (params.truncated) {
+        flags.push({
+            code: 'history_truncated',
+            severity: 'info',
+            message: `Only the most recent ${MAX_MATCH_SCAN} SPORT matches were scanned.`,
+        });
+    }
+    return flags;
+}
+
+function summarizeRisk(flags: Array<{ severity: RiskSeverity }>): 'low' | 'medium' | 'high' | 'critical' {
+    if (flags.some((flag) => flag.severity === 'critical')) return 'critical';
+    if (flags.filter((flag) => flag.severity === 'warning').length >= 2) return 'high';
+    if (flags.some((flag) => flag.severity === 'warning')) return 'medium';
+    return 'low';
+}
+
+function recommendedAction(score: number, riskLevel: string, sportEvaluable: number): CounterpartyAction {
+    if (riskLevel === 'critical' || score < 25) return 'avoid_or_manual_review';
+    if (score < 50) return 'counter_or_request_more_collateral';
+    if (score < 75 || sportEvaluable < MIN_CONFIDENT_SPORT_SAMPLE) return 'accept_with_collateral';
+    return 'accept';
+}
+
+function trustSummary(tier: string, sportEvaluable: number, rawAccuracy: number | null, adjustedAccuracy: number | null): string {
     if (sportEvaluable <= 0) return 'No settled SPORT prediction history yet';
-    const accuracyPct = Math.round((sportAccuracy ?? 0) * 100);
-    if (tier === 'elite') return `Elite counterparty with ${accuracyPct}% SPORT prediction accuracy`;
-    if (tier === 'trusted') return `Reliable counterparty with ${accuracyPct}% SPORT prediction accuracy`;
-    if (tier === 'neutral') return `Some SPORT history with ${accuracyPct}% prediction accuracy`;
-    return `Risky or unproven SPORT counterparty with ${accuracyPct}% prediction accuracy`;
+    const accuracyPct = Math.round((rawAccuracy ?? 0) * 100);
+    const adjustedPct = Math.round((adjustedAccuracy ?? 0) * 100);
+    if (tier === 'elite') return `Elite counterparty: ${accuracyPct}% raw SPORT accuracy, ${adjustedPct}% confidence-adjusted`;
+    if (tier === 'trusted') return `Reliable counterparty: ${accuracyPct}% raw SPORT accuracy, ${adjustedPct}% confidence-adjusted`;
+    if (tier === 'neutral') return `Some SPORT history: ${accuracyPct}% raw SPORT accuracy, ${adjustedPct}% confidence-adjusted`;
+    return `Risky or unproven SPORT counterparty: ${accuracyPct}% raw SPORT accuracy, ${adjustedPct}% confidence-adjusted`;
 }
 
 export async function getReputationProfile(
     walletInput: string,
     options: ReputationProfileOptions = {},
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, any>> {
     const wallet = validateWallet(walletInput);
     const recentLimit = normalizeLimit(options.recentLimit);
     const includeHistory = options.includeHistory !== false;
@@ -190,6 +385,7 @@ export async function getReputationProfile(
     let pending = 0;
     let cancelled = 0;
     let failed = 0;
+    let unevaluableSettled = 0;
     let makerCount = 0;
     let takerCount = 0;
     let totalNotional = 0;
@@ -201,19 +397,28 @@ export async function getReputationProfile(
         if (role === 'taker') takerCount += 1;
 
         const status = typeof match.status === 'string' ? match.status : 'unknown';
-        if (!TERMINAL_SPORT_STATUSES.has(status)) {
+        if (status === 'cancelled') {
+            cancelled += 1;
+            continue;
+        }
+        if (status === 'failed') {
+            failed += 1;
+            continue;
+        }
+        if (!EVALUABLE_SPORT_STATUSES.has(status)) {
             pending += 1;
             continue;
         }
-        if (status === 'cancelled') cancelled += 1;
-        if (status === 'failed') failed += 1;
 
         const outcome = outcomesByFixture.get(match.fixtureId);
         const outcomeWinner = typeof match.outcomeWinner === 'string'
             ? match.outcomeWinner
             : typeof outcome?.winner === 'string' ? outcome.winner : null;
         const makerWins = inferMakerWins(match, outcomeWinner);
-        if (makerWins === null) continue;
+        if (makerWins === null) {
+            unevaluableSettled += 1;
+            continue;
+        }
 
         const correct = role === 'maker' ? makerWins : !makerWins;
         const offer = match.offerId ? offersById.get(match.offerId) : null;
@@ -245,7 +450,8 @@ export async function getReputationProfile(
     evaluated.sort((a, b) => b.settledMs - a.settledMs);
     const correct = evaluated.filter((item) => item.correct).length;
     const wrong = evaluated.length - correct;
-    const accuracy = evaluated.length > 0 ? correct / evaluated.length : null;
+    const rawAccuracy = evaluated.length > 0 ? correct / evaluated.length : null;
+    const adjustedAccuracy = calculateWilsonLowerBound(correct, evaluated.length);
     const sampleConfidence = calculateSampleConfidence(evaluated.length);
     const volumeConfidence = calculateVolumeConfidence(totalNotional);
     const currentStreak = evaluated.reduce((streak, item, index) => {
@@ -255,40 +461,70 @@ export async function getReputationProfile(
     }, 0);
 
     const dealScore = agent ? calculateVisibleReputation(agent as any) : 0;
-    const dealCount = agent?.totalDeals || 0;
-    const combinedScore = calculateCombinedScore({
+    const dealCount = toNumber(agent?.totalDeals);
+    const successfulDeals = toNumber(agent?.successfulDeals);
+    const cancelledDeals = toNumber(agent?.cancelledDeals);
+    const disputedDeals = toNumber(agent?.disputedDeals);
+    const scoreResult = buildScore({
         dealScore,
         dealCount,
-        cancelledDeals: agent?.cancelledDeals || 0,
+        cancelledDeals,
+        disputedDeals,
         sportEvaluable: evaluated.length,
-        sportAccuracy: accuracy,
+        rawAccuracy,
+        adjustedAccuracy,
         sportNotional: totalNotional,
     });
-    const tier = getTier(combinedScore, dealCount + evaluated.length);
+    const tier = getTier(scoreResult.score, dealCount + evaluated.length);
+    const riskFlags = buildRiskFlags({
+        registered: Boolean(agent),
+        dealCount,
+        cancelledDeals,
+        disputedDeals,
+        sportEvaluable: evaluated.length,
+        rawAccuracy,
+        adjustedAccuracy,
+        pending,
+        failed,
+        unevaluableSettled,
+        truncated: sportMatches.length > MAX_MATCH_SCAN,
+    });
+    const riskLevel = summarizeRisk(riskFlags);
+    const action = recommendedAction(scoreResult.score, riskLevel, evaluated.length);
 
     return {
         wallet,
         registered: Boolean(agent),
-        score: combinedScore,
+        score: scoreResult.score,
         tier,
-        trustSummary: trustSummary(tier, evaluated.length, accuracy),
+        riskLevel,
+        recommendedCounterpartyAction: action,
+        trustSummary: trustSummary(tier, evaluated.length, rawAccuracy, adjustedAccuracy),
         algorithm: {
-            version: 'sport_reputation_v1',
+            version: 'sport_reputation_v2',
             formula: evaluated.length > 0
-                ? '35% deal reliability + 40% SPORT prediction accuracy + 15% SPORT sample confidence + 10% SPORT notional confidence - cancellation penalty'
+                ? '35% deal reliability + 40% confidence-adjusted SPORT prediction accuracy + 15% SPORT sample confidence + 10% SPORT notional confidence - cancellation/dispute penalties'
                 : 'Visible deal reliability score; fresh wallets score 0 until settled history exists',
             scoreRange: [0, 100],
+            accuracyMethod: 'Wilson lower bound at 95% confidence; raw accuracy is shown separately',
             computedFrom: ['Agent deal counters', 'ArenaMatch SPORT settlements', 'ArenaOutcome TxLINE winners'],
             eventHistorySource: 'AgentEvent where event = reputation.update',
+            minimumConfidentSportSample: MIN_CONFIDENT_SPORT_SAMPLE,
+            minimumTrustedSportSample: MIN_TRUSTED_SPORT_SAMPLE,
         },
+        scoreBreakdown: scoreResult.breakdown,
+        riskFlags,
         dealReputation: {
             score: dealScore,
-            totalDeals: agent?.totalDeals || 0,
-            successfulDeals: agent?.successfulDeals || 0,
-            cancelledDeals: agent?.cancelledDeals || 0,
-            disputedDeals: agent?.disputedDeals || 0,
+            totalDeals: dealCount,
+            successfulDeals,
+            cancelledDeals,
+            disputedDeals,
             totalVolume: agent?.totalVolume || '0',
             avgSettlementTime: agent?.avgSettlementTime || 0,
+            successRate: dealCount > 0 ? round(successfulDeals / dealCount, 4) : null,
+            cancellationRate: dealCount > 0 ? round(cancelledDeals / dealCount, 4) : null,
+            disputeRate: dealCount > 0 ? round(disputedDeals / dealCount, 4) : null,
         },
         predictionReputation: {
             rollupMode: 'SPORT',
@@ -298,13 +534,16 @@ export async function getReputationProfile(
             evaluableSettledPredictions: evaluated.length,
             correctPredictions: correct,
             wrongPredictions: wrong,
-            accuracy,
-            accuracyPct: accuracy === null ? null : Number((accuracy * 100).toFixed(2)),
+            accuracy: rawAccuracy,
+            accuracyPct: rawAccuracy === null ? null : round(rawAccuracy * 100),
+            adjustedAccuracy,
+            adjustedAccuracyPct: adjustedAccuracy === null ? null : round(adjustedAccuracy * 100),
             pendingMatches: pending,
             cancelledMatches: cancelled,
             failedMatches: failed,
+            unevaluableSettledMatches: unevaluableSettled,
             sampleConfidence: formatConfidence(sampleConfidence),
-            notional: Number(totalNotional.toFixed(6)),
+            notional: round(totalNotional, 6),
             volumeConfidence: formatConfidence(volumeConfidence),
             currentStreak: evaluated.length > 0
                 ? { result: evaluated[0].correct ? 'correct' : 'wrong', count: currentStreak }
@@ -325,6 +564,131 @@ export async function getReputationProfile(
                 createdAt: serializeDate(event.createdAt),
             }))
             : undefined,
+        generatedAt: new Date().toISOString(),
+    };
+}
+
+export async function getReputationBatch(
+    walletInputs: unknown[],
+    options: ReputationProfileOptions = {},
+): Promise<Record<string, unknown>> {
+    if (!Array.isArray(walletInputs)) {
+        throw httpError('wallets_must_be_array', 400);
+    }
+    if (walletInputs.length > MAX_BATCH_WALLETS) {
+        throw httpError(`too_many_wallets:max_${MAX_BATCH_WALLETS}`, 400);
+    }
+
+    const seen = new Set<string>();
+    const validWallets: string[] = [];
+    const rejected: Array<{ wallet: string; error: string }> = [];
+
+    for (const input of walletInputs) {
+        const normalized = tryNormalizeWallet(input);
+        if (!normalized.wallet) {
+            rejected.push({ wallet: normalized.input, error: normalized.error || 'invalid_wallet' });
+            continue;
+        }
+        if (seen.has(normalized.wallet)) continue;
+        seen.add(normalized.wallet);
+        validWallets.push(normalized.wallet);
+    }
+
+    const profiles = await Promise.all(
+        validWallets.map((wallet) => getReputationProfile(wallet, {
+            includeHistory: options.includeHistory,
+            recentLimit: options.recentLimit,
+        })),
+    );
+
+    return {
+        success: true,
+        count: profiles.length,
+        rejected,
+        maxWallets: MAX_BATCH_WALLETS,
+        data: profiles,
+        generatedAt: new Date().toISOString(),
+    };
+}
+
+export async function getReputationLeaderboard(
+    options: ReputationLeaderboardOptions = {},
+): Promise<Record<string, unknown>> {
+    const limit = normalizeLeaderboardLimit(options.limit);
+    const minSettledPredictions = Math.max(0, Math.floor(Number(options.minSettledPredictions || 0)));
+
+    const [sportMatches, topAgents] = await Promise.all([
+        prismaAny.arenaMatch.findMany({
+            where: { rollupMode: 'SPORT' },
+            orderBy: [{ settledAt: 'desc' }, { createdAt: 'desc' }],
+            take: LEADERBOARD_CANDIDATE_SCAN,
+            select: { makerWallet: true, takerWallet: true, buyerWallet: true, sellerWallet: true },
+        }),
+        prisma.agent.findMany({
+            orderBy: [{ successfulDeals: 'desc' }, { totalDeals: 'desc' }],
+            take: LEADERBOARD_PROFILE_CANDIDATES,
+            select: { wallet: true },
+        }),
+    ]);
+
+    const walletSet = new Set<string>();
+    for (const match of sportMatches as any[]) {
+        for (const candidate of [match.makerWallet, match.takerWallet, match.buyerWallet, match.sellerWallet]) {
+            if (typeof candidate === 'string' && candidate) walletSet.add(candidate);
+        }
+    }
+    for (const agent of topAgents as any[]) {
+        if (typeof agent.wallet === 'string' && agent.wallet) walletSet.add(agent.wallet);
+    }
+
+    const candidateWallets = Array.from(walletSet).slice(0, LEADERBOARD_PROFILE_CANDIDATES);
+    const profiles = await Promise.all(
+        candidateWallets.map((wallet) => getReputationProfile(wallet, {
+            includeHistory: false,
+            recentLimit: options.recentLimit,
+        })),
+    );
+
+    const ranked = profiles
+        .filter((profile: any) => profile.predictionReputation.evaluableSettledPredictions >= minSettledPredictions)
+        .sort((a: any, b: any) => {
+            if (b.score !== a.score) return b.score - a.score;
+            const bAdjusted = b.predictionReputation.adjustedAccuracy ?? -1;
+            const aAdjusted = a.predictionReputation.adjustedAccuracy ?? -1;
+            if (bAdjusted !== aAdjusted) return bAdjusted - aAdjusted;
+            return b.predictionReputation.evaluableSettledPredictions - a.predictionReputation.evaluableSettledPredictions;
+        })
+        .slice(0, limit)
+        .map((profile: any, index) => ({
+            rank: index + 1,
+            wallet: profile.wallet,
+            score: profile.score,
+            tier: profile.tier,
+            riskLevel: profile.riskLevel,
+            recommendedCounterpartyAction: profile.recommendedCounterpartyAction,
+            predictionReputation: {
+                evaluableSettledPredictions: profile.predictionReputation.evaluableSettledPredictions,
+                correctPredictions: profile.predictionReputation.correctPredictions,
+                wrongPredictions: profile.predictionReputation.wrongPredictions,
+                accuracyPct: profile.predictionReputation.accuracyPct,
+                adjustedAccuracyPct: profile.predictionReputation.adjustedAccuracyPct,
+                notional: profile.predictionReputation.notional,
+            },
+            dealReputation: {
+                totalDeals: profile.dealReputation.totalDeals,
+                successfulDeals: profile.dealReputation.successfulDeals,
+                cancelledDeals: profile.dealReputation.cancelledDeals,
+                disputedDeals: profile.dealReputation.disputedDeals,
+            },
+            trustSummary: profile.trustSummary,
+        }));
+
+    return {
+        success: true,
+        data: ranked,
+        limit,
+        minSettledPredictions,
+        candidateWallets: candidateWallets.length,
         generatedAt: new Date().toISOString(),
     };
 }

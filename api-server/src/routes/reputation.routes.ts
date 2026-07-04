@@ -1,5 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { getReputationProfile } from '../services/reputationProfile.service';
+import {
+    getReputationBatch,
+    getReputationLeaderboard,
+    getReputationProfile,
+} from '../services/reputationProfile.service';
 import { logger } from '../lib/logger';
 
 const router = Router();
@@ -19,6 +23,43 @@ function parseLimit(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function handleReputationError(res: Response, error: any, context: Record<string, unknown>): void {
+    const status = Number(error?.statusCode) || Number(error?.name) || 500;
+    if (status >= 500) {
+        logger.error('reputation_request_failed', context, error);
+    }
+    res.status(status >= 400 && status < 600 ? status : 500).json({
+        success: false,
+        error: error?.message || 'reputation_request_failed',
+    });
+}
+
+router.get('/v1/reputation/leaderboard', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await getReputationLeaderboard({
+            includeHistory: false,
+            recentLimit: parseLimit(req.query.recentLimit),
+            limit: parseLimit(req.query.limit),
+            minSettledPredictions: parseLimit(req.query.minSettledPredictions),
+        });
+        res.json(data);
+    } catch (error: any) {
+        handleReputationError(res, error, { route: 'leaderboard' });
+    }
+});
+
+router.post('/v1/reputation/batch', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await getReputationBatch(req.body?.wallets, {
+            includeHistory: parseBoolean(req.body?.includeHistory, false),
+            recentLimit: parseLimit(req.body?.recentLimit),
+        });
+        res.json(data);
+    } catch (error: any) {
+        handleReputationError(res, error, { route: 'batch' });
+    }
+});
+
 router.get('/v1/reputation/:wallet', async (req: Request, res: Response): Promise<void> => {
     try {
         const data = await getReputationProfile(String(req.params.wallet || ''), {
@@ -27,14 +68,7 @@ router.get('/v1/reputation/:wallet', async (req: Request, res: Response): Promis
         });
         res.json({ success: true, data });
     } catch (error: any) {
-        const status = Number(error?.statusCode) || Number(error?.name) || 500;
-        if (status >= 500) {
-            logger.error('reputation_profile_failed', { wallet: req.params.wallet }, error);
-        }
-        res.status(status >= 400 && status < 600 ? status : 500).json({
-            success: false,
-            error: error?.message || 'reputation_profile_failed',
-        });
+        handleReputationError(res, error, { route: 'profile', wallet: req.params.wallet });
     }
 });
 

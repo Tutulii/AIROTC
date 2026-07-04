@@ -7,6 +7,7 @@ const OTHER = '9nqd6aAWQ7DK3fj9fDpk6saaZS5yfXwJ86jgnz7Nbv9F';
 const prismaMock = {
     agent: {
         findUnique: vi.fn(),
+        findMany: vi.fn(),
     },
     arenaMatch: {
         findMany: vi.fn(),
@@ -30,6 +31,7 @@ describe('reputation profile service', () => {
     beforeEach(() => {
         vi.resetModules();
         prismaMock.agent.findUnique.mockReset();
+        prismaMock.agent.findMany.mockReset();
         prismaMock.arenaMatch.findMany.mockReset();
         prismaMock.arenaOutcome.findMany.mockReset();
         prismaMock.offer.findMany.mockReset();
@@ -135,11 +137,12 @@ describe('reputation profile service', () => {
 
         expect(profile.wallet).toBe(WALLET);
         expect(profile.registered).toBe(true);
-        expect(profile.algorithm.version).toBe('sport_reputation_v1');
+        expect(profile.algorithm.version).toBe('sport_reputation_v2');
         expect(profile.predictionReputation.evaluableSettledPredictions).toBe(3);
         expect(profile.predictionReputation.correctPredictions).toBe(2);
         expect(profile.predictionReputation.wrongPredictions).toBe(1);
         expect(profile.predictionReputation.accuracyPct).toBe(66.67);
+        expect(profile.predictionReputation.adjustedAccuracyPct).toBeLessThan(66.67);
         expect(profile.predictionReputation.pendingMatches).toBe(1);
         expect(profile.predictionReputation.roles).toEqual({ maker: 3, taker: 1 });
         expect(profile.predictionReputation.recent).toHaveLength(3);
@@ -148,6 +151,10 @@ describe('reputation profile service', () => {
             role: 'maker',
             correct: true,
         });
+        expect(profile.scoreBreakdown.predictionAccuracyRaw).toBe(66.67);
+        expect(profile.riskLevel).toBe('medium');
+        expect(profile.riskFlags.some((flag: any) => flag.code === 'low_sport_sample')).toBe(true);
+        expect(profile.recommendedCounterpartyAction).toBe('counter_or_request_more_collateral');
         expect(profile.history).toHaveLength(1);
         expect(profile.score).toBeGreaterThan(0);
     });
@@ -167,5 +174,135 @@ describe('reputation profile service', () => {
         expect(profile.tier).toBe('new');
         expect(profile.predictionReputation.evaluableSettledPredictions).toBe(0);
         expect(profile.predictionReputation.accuracy).toBeNull();
+        expect(profile.riskFlags.some((flag: any) => flag.code === 'fresh_wallet')).toBe(true);
+    });
+
+    it('does not count cancelled, failed, or missing-outcome SPORT matches as prediction accuracy', async () => {
+        prismaMock.agent.findUnique.mockResolvedValue(null);
+        prismaMock.arenaMatch.findMany.mockResolvedValue([
+            {
+                id: 'cancelled',
+                fixtureId: 'fixture-cancelled',
+                makerWallet: WALLET,
+                takerWallet: COUNTERPARTY,
+                selection: 'part1',
+                direction: 'BUY_SELECTION',
+                outcomeWinner: 'part1',
+                status: 'cancelled',
+                createdAt: new Date('2026-07-04T08:00:00.000Z'),
+            },
+            {
+                id: 'failed',
+                fixtureId: 'fixture-failed',
+                makerWallet: WALLET,
+                takerWallet: COUNTERPARTY,
+                selection: 'part1',
+                direction: 'BUY_SELECTION',
+                outcomeWinner: 'part1',
+                status: 'failed',
+                createdAt: new Date('2026-07-04T08:00:00.000Z'),
+            },
+            {
+                id: 'missing-outcome',
+                fixtureId: 'fixture-missing',
+                makerWallet: WALLET,
+                takerWallet: COUNTERPARTY,
+                selection: 'part1',
+                direction: 'BUY_SELECTION',
+                status: 'released',
+                createdAt: new Date('2026-07-04T08:00:00.000Z'),
+            },
+        ]);
+        prismaMock.arenaOutcome.findMany.mockResolvedValue([]);
+        prismaMock.offer.findMany.mockResolvedValue([]);
+        prismaMock.agentEvent.findMany.mockResolvedValue([]);
+
+        const { getReputationProfile } = await import('../src/services/reputationProfile.service');
+        const profile: any = await getReputationProfile(WALLET);
+
+        expect(profile.predictionReputation.evaluableSettledPredictions).toBe(0);
+        expect(profile.predictionReputation.cancelledMatches).toBe(1);
+        expect(profile.predictionReputation.failedMatches).toBe(1);
+        expect(profile.predictionReputation.unevaluableSettledMatches).toBe(1);
+        expect(profile.riskFlags.some((flag: any) => flag.code === 'missing_outcome_link')).toBe(true);
+        expect(profile.riskFlags.some((flag: any) => flag.code === 'settlement_failures')).toBe(true);
+    });
+
+    it('batch reputation rejects invalid wallets and dedupes valid wallets', async () => {
+        prismaMock.agent.findUnique.mockResolvedValue(null);
+        prismaMock.arenaMatch.findMany.mockResolvedValue([]);
+        prismaMock.arenaOutcome.findMany.mockResolvedValue([]);
+        prismaMock.offer.findMany.mockResolvedValue([]);
+        prismaMock.agentEvent.findMany.mockResolvedValue([]);
+
+        const { getReputationBatch } = await import('../src/services/reputationProfile.service');
+        const result: any = await getReputationBatch([WALLET, WALLET, 'not-a-wallet'], { includeHistory: false });
+
+        expect(result.count).toBe(1);
+        expect(result.data).toHaveLength(1);
+        expect(result.rejected).toEqual([{ wallet: 'not-a-wallet', error: 'invalid_wallet' }]);
+        expect(prismaMock.agent.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaderboard ranks wallets by confidence-adjusted SPORT reputation', async () => {
+        prismaMock.arenaMatch.findMany
+            .mockResolvedValueOnce([
+                { makerWallet: WALLET, takerWallet: COUNTERPARTY, buyerWallet: null, sellerWallet: null },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    id: 'maker-win',
+                    fixtureId: 'fixture-1',
+                    makerWallet: WALLET,
+                    takerWallet: COUNTERPARTY,
+                    offerId: 'offer-1',
+                    selection: 'part1',
+                    direction: 'BUY_SELECTION',
+                    outcomeWinner: 'part1',
+                    status: 'released',
+                    settledAt: new Date('2026-07-04T10:00:00.000Z'),
+                    createdAt: new Date('2026-07-04T08:00:00.000Z'),
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    id: 'taker-loss',
+                    fixtureId: 'fixture-1',
+                    makerWallet: WALLET,
+                    takerWallet: COUNTERPARTY,
+                    offerId: 'offer-1',
+                    selection: 'part1',
+                    direction: 'BUY_SELECTION',
+                    outcomeWinner: 'part1',
+                    status: 'released',
+                    settledAt: new Date('2026-07-04T10:00:00.000Z'),
+                    createdAt: new Date('2026-07-04T08:00:00.000Z'),
+                },
+            ]);
+        prismaMock.agent.findMany.mockResolvedValue([]);
+        prismaMock.agent.findUnique.mockImplementation(({ where }: any) => Promise.resolve({
+            wallet: where.wallet,
+            totalDeals: 1,
+            successfulDeals: 1,
+            cancelledDeals: 0,
+            disputedDeals: 0,
+            totalVolume: '1000000000',
+            avgSettlementTime: 60,
+        }));
+        prismaMock.arenaOutcome.findMany.mockResolvedValue([
+            { id: 'outcome-1', fixtureId: 'fixture-1', winner: 'part1' },
+        ]);
+        prismaMock.offer.findMany.mockResolvedValue([
+            { id: 'offer-1', price: 0.1, amount: 1, collateral: 0.2, asset: 'TXLINE:fixture-1:1X2:part1' },
+        ]);
+        prismaMock.agentEvent.findMany.mockResolvedValue([]);
+
+        const { getReputationLeaderboard } = await import('../src/services/reputationProfile.service');
+        const result: any = await getReputationLeaderboard({ limit: 2 });
+
+        expect(result.data).toHaveLength(2);
+        expect(result.data[0].wallet).toBe(WALLET);
+        expect(result.data[0].score).toBeGreaterThan(result.data[1].score);
+        expect(result.data[0].predictionReputation.evaluableSettledPredictions).toBe(1);
     });
 });
