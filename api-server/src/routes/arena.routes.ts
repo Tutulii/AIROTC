@@ -9,6 +9,7 @@ import {
     startArenaMatch,
 } from '../services/arena/arenaMatch.service';
 import { runSportSettlement } from '../services/arena/sportSettlementEngine';
+import { getSportSettlementMonitorStatus } from '../services/transactionMonitor';
 
 const router = Router();
 
@@ -102,6 +103,10 @@ router.post('/v1/arena/settlement/run', requireArenaAdmin, async (req: Request, 
     } catch (error: any) {
         sendError(res, error, 'Failed to run SPORT settlement');
     }
+});
+
+router.get('/v1/arena/settlement/automation', (_req: Request, res: Response) => {
+    res.json({ success: true, data: getSportSettlementMonitorStatus() });
 });
 
 router.get('/v1/arena/matches/:id/proof', async (req: Request, res: Response) => {

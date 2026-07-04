@@ -31,6 +31,7 @@ import eventsRoutes from './routes/events.routes';
 import txlineRoutes from './routes/txline.routes';
 import arenaRoutes from './routes/arena.routes';
 import reputationRoutes from './routes/reputation.routes';
+import sportRoutes from './routes/sport.routes';
 
 const app: Application = express();
 const simulationRoutesEnabled = process.env.ENABLE_SIMULATION_ROUTES === 'true';
@@ -106,6 +107,7 @@ app.use('/', eventsRoutes);
 app.use('/', txlineRoutes);
 app.use('/', arenaRoutes);
 app.use('/', reputationRoutes);
+app.use('/v1/sport', sportRoutes);
 
 // Stats overview alias (maps /v1/stats/overview → /v1/stats)
 app.get('/v1/stats/overview', (req: Request, res: Response, next) => {

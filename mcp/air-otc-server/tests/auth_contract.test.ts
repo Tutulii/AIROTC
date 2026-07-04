@@ -16,6 +16,13 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_create_offer", "offers:write"],
   ["airotc_sport_accept_offer", "offers:write"],
   ["airotc_sport_get_settlement_status", "deals:read"],
+  ["airotc_sport_get_my_history", "deals:read"],
+  ["airotc_sport_discover_agents", "offers:read"],
+  ["airotc_sport_list_strategy_templates", "offers:read"],
+  ["airotc_sport_save_strategy_template", "offers:write"],
+  ["airotc_sport_delete_strategy_template", "offers:write"],
+  ["airotc_sport_create_offer_from_template", "offers:write"],
+  ["airotc_sport_settlement_automation_status", "deals:read"],
   ["airotc_sport_ingestion_status", "deals:read"],
   ["airotc_sport_start_ingestion", "sport:admin"],
   ["airotc_sport_stop_ingestion", "sport:admin"],
@@ -52,7 +59,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_test_notification_channel", "deals:read"],
 ]);
 
-assert.equal(__test.tools.length, 45, "MCP must expose exactly 45 tools");
+assert.equal(__test.tools.length, 52, "MCP must expose exactly 52 tools");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -159,6 +166,54 @@ assert.deepEqual(
   sportSettlementTool.inputSchema.required,
   ["ticketId"],
   "sport_get_settlement_status must be ticket based"
+);
+
+const sportHistoryTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_my_history");
+assert.deepEqual(
+  sportHistoryTool.inputSchema.required,
+  ["wallet"],
+  "sport_get_my_history must require wallet"
+);
+assert.equal(
+  sportHistoryTool.inputSchema.properties.limit.maximum,
+  200,
+  "sport_get_my_history must cap page size"
+);
+
+const sportDiscoveryTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_discover_agents");
+assert.equal(
+  sportDiscoveryTool.inputSchema.properties.limit.maximum,
+  50,
+  "sport_discover_agents must cap directory page size"
+);
+
+const sportTemplateListTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_list_strategy_templates");
+assert.deepEqual(
+  sportTemplateListTool.inputSchema.required,
+  ["wallet"],
+  "sport_list_strategy_templates must require wallet"
+);
+
+const sportTemplateSaveTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_save_strategy_template");
+assert.deepEqual(
+  sportTemplateSaveTool.inputSchema.required,
+  ["wallet", "name", "defaults"],
+  "sport_save_strategy_template must require wallet, template name, and defaults"
+);
+
+const sportTemplateOfferTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_create_offer_from_template");
+assert.deepEqual(
+  sportTemplateOfferTool.inputSchema.required,
+  ["wallet", "name", "fixtureId"],
+  "sport_create_offer_from_template must require wallet, template name, and fixture"
+);
+
+const sportAutomationTool = __test.tools.find(
+  (candidate: any) => candidate.name === "airotc_sport_settlement_automation_status"
+);
+assert.ok(
+  sportAutomationTool.inputSchema.properties.authToken,
+  "sport_settlement_automation_status must accept normal MCP auth"
 );
 
 const sportIngestionStatusTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_ingestion_status");

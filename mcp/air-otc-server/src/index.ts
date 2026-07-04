@@ -1167,6 +1167,213 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_get_my_history",
+    title: "Sport My Trades History",
+    description:
+      "Get the calling wallet's SPORT trade history, win/loss record, market performance, and estimated SOL PnL. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 100 },
+        includeLegacy: { type: "boolean", default: false },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      if (args.includeLegacy !== undefined) query.set("includeLegacy", String(args.includeLegacy));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/me/history${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_discover_agents",
+    title: "Sport Discover Agents",
+    description:
+      "Discover active SPORT counterparties by active offers, reputation, markets, and fixture filters. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      limit: { type: "number", minimum: 1, maximum: 50, default: 25 },
+      fixtureId: { type: "string" },
+      marketType: { type: "string" },
+      minSettledPredictions: { type: "number", minimum: 0, maximum: 100, default: 0 },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      if (args.fixtureId) query.set("fixtureId", args.fixtureId);
+      if (args.marketType) query.set("marketType", args.marketType);
+      if (args.minSettledPredictions !== undefined) {
+        query.set("minSettledPredictions", String(args.minSettledPredictions));
+      }
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/agents/discovery${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_list_strategy_templates",
+    title: "Sport List Strategy Templates",
+    description:
+      "List reusable SPORT offer templates for the calling wallet. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/strategy-templates",
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_save_strategy_template",
+    title: "Sport Save Strategy Template",
+    description:
+      "Create or replace a reusable SPORT offer template such as standard_sell. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        name: { type: "string" },
+        description: { type: "string" },
+        enabled: { type: "boolean", default: true },
+        defaults: {
+          type: "object",
+          additionalProperties: true,
+          description:
+            "Template defaults: mode, amount, price, collateral, marketType, selection, optional asset/settlementWallet/rewardWallet/fundingWallet.",
+        },
+      },
+      ["wallet", "name", "defaults"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/strategy-templates/${encodeURIComponent(args.name)}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              description: args.description,
+              enabled: args.enabled !== false,
+              defaults: args.defaults,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_delete_strategy_template",
+    title: "Sport Delete Strategy Template",
+    description: "Delete one reusable SPORT offer template. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        name: { type: "string" },
+      },
+      ["wallet", "name"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/strategy-templates/${encodeURIComponent(args.name)}`,
+          { method: "DELETE" },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_create_offer_from_template",
+    title: "Sport Create Offer From Template",
+    description:
+      "Create a SPORT offer from a saved strategy template, overriding fixtureId/market/selection/price when needed. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        name: { type: "string" },
+        fixtureId: { type: "string" },
+        overrides: {
+          type: "object",
+          additionalProperties: true,
+          description: "Optional overrides for marketType, selection, mode, amount, price, collateral, asset, and wallets.",
+        },
+      },
+      ["wallet", "name", "fixtureId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/strategy-templates/${encodeURIComponent(args.name)}/offers`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              overrides: args.overrides || {},
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_settlement_automation_status",
+    title: "Sport Settlement Automation Status",
+    description:
+      "Check whether SPORT settlement is running automatically and see the last sweep result. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema({ ...authSchema }),
+    handler: async (args) => {
+      await requireScope(args, "deals:read");
+      return toolOutput(await httpJson("/v1/arena/settlement/automation", {}, config.apiUrl));
+    },
+  },
+  {
     name: "airotc_sport_ingestion_status",
     title: "Sport Ingestion Status",
     description:

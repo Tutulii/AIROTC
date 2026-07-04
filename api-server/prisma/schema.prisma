@@ -64,6 +64,21 @@ model AgentNotificationChannel {
   @@index([wallet, type])
 }
 
+model AgentStrategyTemplate {
+  id          String   @id @default(uuid())
+  wallet      String
+  name        String
+  description String?
+  enabled     Boolean  @default(true)
+  defaults    Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([wallet, name])
+  @@index([wallet, enabled])
+  @@index([wallet, updatedAt])
+}
+
 model ArenaFixture {
   id        String   @id @default(uuid())
   fixtureId String  @unique
