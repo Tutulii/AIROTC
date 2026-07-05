@@ -46,6 +46,7 @@ import { prisma } from '../lib/prisma';
 import { verifyAuditChain } from '../services/auditTrail';
 import dealTimelineRouter from './dealTimeline';
 import { resolveEscrowTermsForTicket } from '../services/escrowTermsResolver';
+import { dealPipeline } from '../services/dealPipeline';
 
 let server: any;
 
@@ -812,6 +813,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             const parsedAmount = parseFloat(amount) || 0;
             const parsedCol = parseFloat(collateral) || 0;
             const strictPerOpaque = rollupMode === 'PER' && isPerStrictOpaqueModeEnabled();
+            const isSportMode = rollupMode === 'SPORT';
 
             // 1. Register both wallets in the internal registry
             const { walletRegistry } = await import('../state/walletRegistry');
@@ -889,8 +891,10 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             // 3. Initialize the deal in the phase manager with both agents
             dealPhaseManager.initDeal(ticketId, buyerWallet, sellerWallet);
 
-            // 4. Seed initial negotiation terms so the brain has context
-            if (!strictPerOpaque) {
+            // 4. Seed initial terms for normal negotiation modes only. SPORT is
+            // math-only: the immutable offer terms open escrow immediately and
+            // chat is never used to create, alter, or release the wager.
+            if (!strictPerOpaque && !isSportMode) {
                 await negotiationStore.addNegotiationStep(ticketId, {
                     price: parsedPrice,
                     collateral_buyer: parsedCol,
@@ -900,26 +904,59 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 }, buyerAgent.id, `External matched deal: ${parsedAmount || amount || 1} ${asset || 'SOL'} @ ${parsedPrice}`);
             }
 
+            let sportPipelineResult: Awaited<ReturnType<typeof dealPipeline.start>> | null = null;
+            if (isSportMode) {
+                sportPipelineResult = await dealPipeline.start({
+                    ticketId,
+                    buyer: buyerWallet,
+                    seller: sellerWallet,
+                    price: parsedAmount || parsedPrice,
+                    collateralBuyer: parsedCol,
+                    collateralSeller: parsedCol,
+                    assetType: asset || tokenMint || 'SOL',
+                    tokenMint,
+                    decimals: decimals ? parseInt(decimals) : undefined,
+                    confidence: 100,
+                    rollupMode: 'SPORT',
+                    negotiationSource: 'OFFCHAIN',
+                });
+
+                if (!sportPipelineResult.success || !sportPipelineResult.dealPda) {
+                    throw new Error(sportPipelineResult.error || "sport_escrow_creation_failed");
+                }
+            }
+
             // 5. Publish events so the observability layer knows
             eventBus.publish("offer_detected", {
                 offer_id: `OFF-${crypto.randomBytes(4).toString("hex").toUpperCase()}`,
                 type: "buy",
                 creator: buyerWallet,
-                content: strictPerOpaque
+                content: isSportMode
+                    ? `SPORT wager matched. Escrow is live at ${sportPipelineResult?.dealPda}. Chat is conversation-only; TxLINE final outcome decides settlement automatically.`
+                    : strictPerOpaque
                     ? `Matched PER deal opened for ${(parsedAmount || amount || 1)} ${asset || 'SOL'}. Private negotiation continues in rollup mode.`
                     : `Matched deal: ${parsedAmount || amount || 1} ${asset || 'SOL'} @ ${parsedPrice} (Col: ${parsedCol})`,
                 timestamp: new Date().toISOString()
             });
 
             // 6. Notify both agents the negotiation is open
-            eventBus.publish("middleman_response", {
-                ticket_id: ticketId,
-                content: strictPerOpaque
-                    ? `🤝 PER deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nPrivate negotiation is open. Use the rollup SDK methods to submit and finalize terms. Plain chat is conversation-only in strict PER mode.`
-                    : `🤝 Deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nAsset: ${asset || 'SOL'} | Amount: ${parsedAmount || amount || 1} | Price: ${parsedPrice}\n\nBoth parties — please confirm your terms to proceed. The Middleman is ready to create escrow once you agree.`,
-                phase: "negotiation",
-                timestamp: new Date().toISOString()
-            });
+            if (isSportMode) {
+                eventBus.publish("middleman_response", {
+                    ticket_id: ticketId,
+                    content: `SPORT wager locked from offer terms. Escrow: ${sportPipelineResult?.dealPda}. Buyer deposits ${parsedAmount || parsedPrice} ${asset || 'SOL'} plus ${parsedCol} collateral; seller deposits ${parsedCol} collateral. Settlement runs automatically from TxLINE final result.`,
+                    phase: "awaiting_deposits",
+                    timestamp: new Date().toISOString()
+                });
+            } else {
+                eventBus.publish("middleman_response", {
+                    ticket_id: ticketId,
+                    content: strictPerOpaque
+                        ? `🤝 PER deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nPrivate negotiation is open. Use the rollup SDK methods to submit and finalize terms. Plain chat is conversation-only in strict PER mode.`
+                        : `🤝 Deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nAsset: ${asset || 'SOL'} | Amount: ${parsedAmount || amount || 1} | Price: ${parsedPrice}\n\nBoth parties — please confirm your terms to proceed. The Middleman is ready to create escrow once you agree.`,
+                    phase: "negotiation",
+                    timestamp: new Date().toISOString()
+                });
+            }
 
             if (rollupMode === 'ER' || rollupMode === 'PER') {
                 eventBus.publish("negotiation_ready", {
@@ -951,7 +988,22 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 status: "matched",
                 buyer: buyerWallet,
                 seller: sellerWallet,
-                phase: "negotiation"
+                phase: isSportMode ? "awaiting_deposits" : "negotiation",
+                dealPda: sportPipelineResult?.dealPda || null,
+                depositInstructions: sportPipelineResult?.dealPda ? {
+                    escrowPda: sportPipelineResult.dealPda,
+                    buyer: {
+                        wallet: buyerWallet,
+                        payment: parsedAmount || parsedPrice,
+                        collateral: parsedCol,
+                        total: (parsedAmount || parsedPrice) + parsedCol,
+                    },
+                    seller: {
+                        wallet: sellerWallet,
+                        collateral: parsedCol,
+                        total: parsedCol,
+                    },
+                } : null,
             });
 
         } catch (e: any) {
@@ -1045,7 +1097,9 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
         })();
     });
 
-    // Bridge: Forward a message to the brain for processing
+    // Bridge: Forward a message to the brain for processing. SPORT tickets are
+    // explicitly excluded below because their settlement is deterministic from
+    // offer terms + TxLINE outcome, not chat interpretation.
     // CRITICAL: Must mirror the WebSocket pipeline (index.ts:440-510)
     //   1. Resolve wallet → agent UUID
     //   2. Parse negotiation signals from message text
@@ -1069,6 +1123,26 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             const ticket = await ticketStore.getTicket(ticketId);
             const strictPerOpaque =
                 ticket?.rollup_mode === 'PER' && isPerStrictOpaqueModeEnabled();
+            const sportMathOnly = ticket?.rollup_mode === 'SPORT';
+
+            if (sportMathOnly) {
+                const deal = await dealPhaseManager.getDealWithFallback(ticketId);
+                logger.info("sport_rest_message_observed_without_brain", {
+                    ticketId,
+                    sender: agentId,
+                    senderWallet,
+                });
+                res.json({
+                    response: deal?.escrow_pda
+                        ? `SPORT message recorded. Settlement is math-only from TxLINE outcome; escrow ${deal.escrow_pda} remains the source of funds.`
+                        : "SPORT message recorded. Settlement is math-only from TxLINE outcome; escrow/deposit state is handled by the SPORT pipeline.",
+                    action: "OBSERVE",
+                    phase: deal?.phase || "awaiting_deposits",
+                    escrow_pda: deal?.escrow_pda || null,
+                    mathOnly: true,
+                });
+                return;
+            }
 
             if (strictPerOpaque) {
                 logger.info("per_strict_rest_message_observed_without_plaintext_analysis", {

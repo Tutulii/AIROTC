@@ -60,7 +60,28 @@ export const middlemanForwarder = {
         collateral: number | null;
         tokenMint?: string | null;
         rollupMode?: string | null;
-    }): Promise<{ success: boolean; middlemanTicketId?: string; error?: string }> {
+    }): Promise<{
+        success: boolean;
+        middlemanTicketId?: string;
+        phase?: string;
+        dealPda?: string | null;
+        status?: string;
+        depositInstructions?: {
+            escrowPda: string;
+            buyer: {
+                wallet: string;
+                payment: number;
+                collateral: number;
+                total: number;
+            };
+            seller: {
+                wallet: string;
+                collateral: number;
+                total: number;
+            };
+        } | null;
+        error?: string;
+    }> {
         try {
             const path = '/v1/deals/create-matched';
             const redactPrivateTerms =
@@ -83,11 +104,12 @@ export const middlemanForwarder = {
                 sellerFundingWallet: params.sellerFundingWallet || null,
             });
 
+            const timeoutMs = params.rollupMode === 'SPORT' ? 60_000 : 5_000;
             const res = await fetch(`${MIDDLEMAN_URL}${path}`, {
                 method: 'POST',
                 headers: buildSignedHeaders('POST', path, body),
                 body,
-                signal: AbortSignal.timeout(5000),
+                signal: AbortSignal.timeout(timeoutMs),
             });
 
             if (!res.ok) {
@@ -95,11 +117,44 @@ export const middlemanForwarder = {
                 return { success: false, error: errBody };
             }
 
-            const data = await res.json() as { ticketId?: string; status?: string };
-            return {
+            const data = await res.json() as {
+                ticketId?: string;
+                status?: string;
+                phase?: string;
+                dealPda?: string | null;
+                depositInstructions?: {
+                    escrowPda: string;
+                    buyer: {
+                        wallet: string;
+                        payment: number;
+                        collateral: number;
+                        total: number;
+                    };
+                    seller: {
+                        wallet: string;
+                        collateral: number;
+                        total: number;
+                    };
+                } | null;
+            };
+            const result: {
+                success: boolean;
+                middlemanTicketId?: string;
+                phase?: string;
+                dealPda?: string | null;
+                status?: string;
+                depositInstructions?: typeof data.depositInstructions;
+            } = {
                 success: true,
                 middlemanTicketId: data.ticketId,
             };
+            if (data.phase) result.phase = data.phase;
+            if (Object.prototype.hasOwnProperty.call(data, 'dealPda')) result.dealPda = data.dealPda || null;
+            if (data.status) result.status = data.status;
+            if (Object.prototype.hasOwnProperty.call(data, 'depositInstructions')) {
+                result.depositInstructions = data.depositInstructions || null;
+            }
+            return result;
         } catch (err: any) {
             return { success: false, error: err.message };
         }
