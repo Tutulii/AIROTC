@@ -85,6 +85,15 @@ async function syncSportArenaEscrowFromBridge(
             escrowPda,
         });
     } catch (error: any) {
+        if (error?.message === 'arena_match_terminal') {
+            logger.info('sport_arena_escrow_sync_skipped_terminal', {
+                ticketId: ticket.id,
+                offerId: ticket.offerId,
+                escrowPda,
+                phase: metadata.phase,
+            });
+            return;
+        }
         logger.warn('sport_arena_escrow_sync_failed', {
             ticketId: ticket.id,
             offerId: ticket.offerId,
