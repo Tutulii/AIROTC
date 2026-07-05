@@ -783,6 +783,118 @@ export async function executeReleaseFunds(ticketId: string): Promise<ExecutionRe
 }
 
 // ==========================================
+// 4a. SETTLE TO BUYER
+// ==========================================
+
+export async function executeSettleToBuyer(ticketId: string): Promise<ExecutionResult> {
+  try {
+    const ctx = await getDealContextSafe(ticketId);
+    if (!ctx) return { success: false, error: "No deal context", step: "settle_to_buyer" };
+
+    const executionLogger = logger.withContext({ ticket_id: ticketId });
+    executionLogger.info("tx_sent", { step: "settle_to_buyer" });
+
+    const tx = await withRetry(
+      async () => {
+        const { program, wallet } = getAnchorProgram();
+        if (!(program.methods as any).settleToBuyer) {
+          throw new Error("settle_to_buyer_unsupported_by_idl");
+        }
+
+        const preInstructions = [
+          await getPriorityFeeIx((program.provider as any).connection),
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })
+        ];
+
+        const supportsTokenEscrowAbi = instructionHasAccount(program, "settle_to_buyer", "deal_ata");
+        let methodBuilder;
+        if (supportsTokenEscrowAbi) {
+          const mint = ctx.tokenMint || NATIVE_MINT;
+          const tokenAccounts = buildTokenEscrowAccounts(ctx, mint);
+          preInstructions.push(...buildReleaseAtaPreInstructions(wallet.publicKey, ctx, mint, tokenAccounts));
+          methodBuilder = (program.methods as any).settleToBuyer().accounts({
+            deal: ctx.dealPda,
+            middleman: ctx.middleman,
+            buyer: ctx.buyer,
+            seller: ctx.seller,
+            feeReceiver: ctx.middleman,
+            dealAta: tokenAccounts.dealAta,
+            buyerAta: tokenAccounts.buyerAta,
+            sellerAta: tokenAccounts.sellerAta,
+            feeAta: tokenAccounts.feeAta,
+            config: ctx.configPda,
+            systemProgram: SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          });
+        } else {
+          methodBuilder = (program.methods as any).settleToBuyer().accounts({
+            deal: ctx.dealPda,
+            middleman: ctx.middleman,
+            buyer: ctx.buyer,
+            seller: ctx.seller,
+            feeReceiver: ctx.middleman,
+            config: ctx.configPda,
+            systemProgram: SystemProgram.programId,
+          });
+        }
+        return await methodBuilder.preInstructions(preInstructions).signers([]).rpc();
+      },
+      { label: "settle_to_buyer", ticketId, step: "settle_to_buyer" }
+    );
+
+    await dealTracker.updateStatus(ticketId, "refunded");
+    await executionStore.markSuccess(ticketId, "settle_to_buyer", tx);
+
+    await prisma.executionContext.update({
+      where: { ticketId },
+      data: { lastSuccessfulStep: "settle_to_buyer", status: "refunded" }
+    });
+
+    const ticket = await ticketStore.getTicket(ticketId);
+    if (ticket) {
+      walletRegistry.recordTradeComplete(ticket.buyer, true);
+      walletRegistry.recordTradeComplete(ticket.seller, true);
+    }
+
+    executionLogger.info("tx_confirmed", { step: "settle_to_buyer", tx });
+    return { success: true, tx, step: "settle_to_buyer" };
+
+  } catch (error: any) {
+    const executionLogger = logger.withContext({ ticket_id: ticketId });
+    executionLogger.error("tx_failed", { step: "settle_to_buyer" }, error);
+    await dealTracker.updateStatus(ticketId, "failed", error.message);
+    await executionStore.markFailed(ticketId, "settle_to_buyer", error.message);
+    return { success: false, error: error.message, step: "settle_to_buyer" };
+  }
+}
+
+export async function executeSettleToBuyerPhase(ticketId: string): Promise<ExecutionResult> {
+  const settlementResult = await executeSettleToBuyer(ticketId);
+  if (!settlementResult.success) return settlementResult;
+
+  const onChainCheck = await verifyOnChainState(ticketId);
+  if (onChainCheck.verified && onChainCheck.onChainStatus !== "refunded") {
+    logger.error("on_chain_state_mismatch_settle_to_buyer", {
+      ticket_id: ticketId,
+      expected: "refunded",
+      actual: onChainCheck.onChainStatus,
+    });
+    return { success: false, error: `Settle-to-buyer state mismatch: chain=${onChainCheck.onChainStatus}`, step: "settle_to_buyer" };
+  }
+
+  const closeResult = await executeCloseDeal(ticketId);
+  if (!closeResult.success) {
+    logger.warn("close_after_settle_to_buyer_failed", {
+      ticket_id: ticketId,
+      error: closeResult.error,
+      settlement_tx: settlementResult.tx,
+    });
+  }
+
+  return settlementResult;
+}
+
+// ==========================================
 // 4b. FRACTIONAL SPLIT
 // ==========================================
 

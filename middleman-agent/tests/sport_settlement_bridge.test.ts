@@ -5,14 +5,14 @@ const {
   getDealWithFallbackMock,
   syncTerminalPhaseMock,
   executeReleasePhaseMock,
-  executeCancelDealMock,
+  executeSettleToBuyerPhaseMock,
   appendAuditLogMock,
 } = vi.hoisted(() => ({
   ticketStoreGetMock: vi.fn(),
   getDealWithFallbackMock: vi.fn(),
   syncTerminalPhaseMock: vi.fn(),
   executeReleasePhaseMock: vi.fn(),
-  executeCancelDealMock: vi.fn(),
+  executeSettleToBuyerPhaseMock: vi.fn(),
   appendAuditLogMock: vi.fn(),
 }));
 
@@ -31,7 +31,7 @@ vi.mock("../core/dealPhaseManager", () => ({
 
 vi.mock("../src/services/onChainExecutionService", () => ({
   executeReleasePhase: executeReleasePhaseMock,
-  executeCancelDeal: executeCancelDealMock,
+  executeSettleToBuyerPhase: executeSettleToBuyerPhaseMock,
 }));
 
 vi.mock("../src/services/auditTrail", () => ({
@@ -72,10 +72,10 @@ describe("sportSettlementBridge", () => {
       tx: "release-tx",
       step: "release_funds",
     });
-    executeCancelDealMock.mockResolvedValue({
+    executeSettleToBuyerPhaseMock.mockResolvedValue({
       success: true,
       tx: "refund-tx",
-      step: "cancel_deal",
+      step: "settle_to_buyer",
     });
   });
 
@@ -107,7 +107,7 @@ describe("sportSettlementBridge", () => {
     });
 
     expect(executeReleasePhaseMock).toHaveBeenCalledWith("ticket-sport");
-    expect(executeCancelDealMock).not.toHaveBeenCalled();
+    expect(executeSettleToBuyerPhaseMock).not.toHaveBeenCalled();
     expect(syncTerminalPhaseMock).toHaveBeenCalledWith("ticket-sport", "completed");
     expect(result).toMatchObject({
       success: true,
@@ -130,14 +130,14 @@ describe("sportSettlementBridge", () => {
       winnerWallet: "taker-wallet",
     });
 
-    expect(executeCancelDealMock).toHaveBeenCalledWith("ticket-sport");
+    expect(executeSettleToBuyerPhaseMock).toHaveBeenCalledWith("ticket-sport");
     expect(executeReleasePhaseMock).not.toHaveBeenCalled();
     expect(syncTerminalPhaseMock).toHaveBeenCalledWith("ticket-sport", "refunded");
     expect(result).toMatchObject({
       success: true,
       ticketId: "ticket-sport",
       settlementAction: "refund_to_taker",
-      onChainAction: "cancel_deal",
+      onChainAction: "settle_to_buyer",
       tx: "refund-tx",
       status: "refunded",
     });

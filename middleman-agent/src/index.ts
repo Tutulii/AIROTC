@@ -10,7 +10,7 @@ import { initAgentMessageListener } from "./listeners/agentMessageListener";
 import { parseMessage } from "./services/parserService";
 import { negotiationStore } from "./state/negotiationStore";
 import { executeDeal, executeRelease } from "./services/executionService";
-import { executeCancelDeal } from "./services/onChainExecutionService";
+import { executeCancelDeal, executeSettleToBuyerPhase } from "./services/onChainExecutionService";
 import { initEscrowListener } from "./listeners/escrowListener";
 import { initRollupListener } from "./listeners/rollupListener";
 import { ticketStore } from "./state/ticketStore";
@@ -561,6 +561,10 @@ async function main(): Promise<void> {
       } else if (result.on_chain_action === "cancel_deal") {
         executeCancelDeal(message.ticket_id).catch((err: any) => {
           logger.error("cancel_unhandled_failure", { ticket_id: message.ticket_id }, err);
+        });
+      } else if (result.on_chain_action === "settle_to_buyer") {
+        executeSettleToBuyerPhase(message.ticket_id).catch((err: any) => {
+          logger.error("settle_to_buyer_unhandled_failure", { ticket_id: message.ticket_id }, err);
         });
       }
     } catch (handlerError: any) {

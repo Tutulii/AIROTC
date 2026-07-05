@@ -797,92 +797,6 @@
       "args": []
     },
     {
-      "name": "initialize_governance_config",
-      "docs": [
-        "Initializes Phase 4C governance roles without reallocating Config."
-      ],
-      "discriminator": [
-        15,
-        40,
-        42,
-        141,
-        94,
-        104,
-        27,
-        201
-      ],
-      "accounts": [
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "governance",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  103,
-                  111,
-                  118,
-                  101,
-                  114,
-                  110,
-                  97,
-                  110,
-                  99,
-                  101
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "authority",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "protocol_admin_authority",
-          "type": "pubkey"
-        },
-        {
-          "name": "pause_authority",
-          "type": "pubkey"
-        },
-        {
-          "name": "treasury_authority",
-          "type": "pubkey"
-        },
-        {
-          "name": "unpause_delay_seconds",
-          "type": "i64"
-        }
-      ]
-    },
-    {
       "name": "lock_collateral",
       "docs": [
         "Locks collateral for the calling party (buyer or seller).",
@@ -2290,88 +2204,6 @@
       ]
     },
     {
-      "name": "set_governance_authorities",
-      "docs": [
-        "Updates Phase 4C governance roles. The current Config authority or the",
-        "configured Protocol Admin authority may rotate these roles."
-      ],
-      "discriminator": [
-        176,
-        224,
-        97,
-        63,
-        100,
-        187,
-        20,
-        34
-      ],
-      "accounts": [
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "governance",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  103,
-                  111,
-                  118,
-                  101,
-                  114,
-                  110,
-                  97,
-                  110,
-                  99,
-                  101
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "protocol_admin_authority",
-          "type": "pubkey"
-        },
-        {
-          "name": "pause_authority",
-          "type": "pubkey"
-        },
-        {
-          "name": "treasury_authority",
-          "type": "pubkey"
-        },
-        {
-          "name": "unpause_delay_seconds",
-          "type": "i64"
-        }
-      ]
-    },
-    {
       "name": "set_paused",
       "docs": [
         "Toggles the paused state. Only the config authority can call this."
@@ -2419,96 +2251,431 @@
       ]
     },
     {
-      "name": "set_paused_governed",
+      "name": "settle_to_buyer",
       "docs": [
-        "Bounded pause controlled by Phase 4C governance. Emergency Pause may",
-        "pause immediately; unpause is delayed unless Protocol Admin approves."
+        "Resolves a funded prediction-style deal in favor of the buyer.",
+        "Buyer receives their price minus fee, their collateral, and seller collateral."
       ],
       "discriminator": [
-        186,
-        3,
-        99,
-        9,
-        85,
-        206,
-        109,
-        15
+        151,
+        101,
+        25,
+        119,
+        252,
+        123,
+        246,
+        183
       ],
       "accounts": [
         {
-          "name": "config",
+          "name": "deal",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "governance",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  103,
-                  111,
-                  118,
+                  100,
                   101,
-                  114,
-                  110,
                   97,
-                  110,
-                  99,
-                  101
+                  108
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.buyer",
+                "account": "Deal"
+              },
+              {
+                "kind": "account",
+                "path": "deal.deal_id",
+                "account": "Deal"
               }
             ]
           }
         },
         {
-          "name": "authority",
+          "name": "middleman",
           "signer": true
-        }
-      ],
-      "args": [
+        },
         {
-          "name": "paused",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "transfer_config_authority",
-      "docs": [
-        "Transfers legacy Config authority to a governed authority such as a",
-        "Squads Protocol Admin vault."
-      ],
-      "discriminator": [
-        105,
-        153,
-        105,
-        110,
-        203,
-        141,
-        163,
-        235
-      ],
-      "accounts": [
+          "name": "buyer",
+          "writable": true
+        },
+        {
+          "name": "seller",
+          "writable": true
+        },
+        {
+          "name": "fee_receiver",
+          "writable": true
+        },
+        {
+          "name": "deal_ata",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "deal"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.mint",
+                "account": "Deal"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "buyer_ata",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "buyer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.mint",
+                "account": "Deal"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "seller_ata",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "seller"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.mint",
+                "account": "Deal"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "fee_ata",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "fee_receiver"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "deal.mint",
+                "account": "Deal"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
         {
           "name": "config",
-          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -2526,16 +2693,11 @@
           }
         },
         {
-          "name": "authority",
-          "signer": true
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
-      "args": [
-        {
-          "name": "new_authority",
-          "type": "pubkey"
-        }
-      ]
+      "args": []
     }
   ],
   "accounts": [
@@ -2564,22 +2726,22 @@
         182,
         219
       ]
-    },
-    {
-      "name": "GovernanceConfig",
-      "discriminator": [
-        81,
-        63,
-        124,
-        107,
-        210,
-        100,
-        145,
-        70
-      ]
     }
   ],
   "events": [
+    {
+      "name": "BuyerSettlementReleased",
+      "discriminator": [
+        46,
+        53,
+        23,
+        11,
+        53,
+        188,
+        114,
+        236
+      ]
+    },
     {
       "name": "CollateralLockedEvent",
       "discriminator": [
@@ -2591,19 +2753,6 @@
         239,
         147,
         125
-      ]
-    },
-    {
-      "name": "ConfigAuthorityTransferred",
-      "discriminator": [
-        116,
-        152,
-        24,
-        23,
-        117,
-        176,
-        34,
-        143
       ]
     },
     {
@@ -2682,45 +2831,6 @@
         104,
         210,
         210
-      ]
-    },
-    {
-      "name": "GovernanceAuthoritiesUpdated",
-      "discriminator": [
-        149,
-        244,
-        221,
-        178,
-        44,
-        4,
-        8,
-        161
-      ]
-    },
-    {
-      "name": "GovernanceInitialized",
-      "discriminator": [
-        41,
-        187,
-        103,
-        26,
-        42,
-        44,
-        30,
-        15
-      ]
-    },
-    {
-      "name": "GovernedPauseToggled",
-      "discriminator": [
-        202,
-        26,
-        88,
-        234,
-        210,
-        127,
-        166,
-        136
       ]
     },
     {
@@ -2894,19 +3004,33 @@
       "code": 6020,
       "name": "DealNotCompleted",
       "msg": "Deal must be completed before revealing terms"
-    },
-    {
-      "code": 6021,
-      "name": "DefaultAuthority",
-      "msg": "Authority cannot be the default public key"
-    },
-    {
-      "code": 6022,
-      "name": "UnpauseDelayActive",
-      "msg": "Unpause delay has not elapsed"
     }
   ],
   "types": [
+    {
+      "name": "BuyerSettlementReleased",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deal_id",
+            "type": "u64"
+          },
+          {
+            "name": "buyer_received",
+            "type": "u64"
+          },
+          {
+            "name": "seller_forfeited",
+            "type": "u64"
+          },
+          {
+            "name": "middleman_fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
     {
       "name": "CollateralLockedEvent",
       "type": {
@@ -2959,22 +3083,6 @@
               "PDA bump seed"
             ],
             "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "ConfigAuthorityTransferred",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "previous_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "new_authority",
-            "type": "pubkey"
           }
         ]
       }
@@ -3358,132 +3466,6 @@
           {
             "name": "middleman_fee",
             "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "GovernanceAuthoritiesUpdated",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "protocol_admin_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "pause_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "treasury_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "unpause_delay_seconds",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "GovernanceConfig",
-      "docs": [
-        "Phase 4C governance roles. This PDA is separate from Config so existing",
-        "devnet Config accounts can migrate without reallocating account data."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "protocol_admin_authority",
-            "docs": [
-              "Squads Protocol Admin vault: upgrades/config/treasury/cap authority."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "pause_authority",
-            "docs": [
-              "Squads Emergency Pause vault: bounded pause authority only."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "treasury_authority",
-            "docs": [
-              "Fee treasury authority/vault."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "last_paused_at",
-            "docs": [
-              "Timestamp of the latest governed pause."
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "unpause_delay_seconds",
-            "docs": [
-              "Minimum delay before pause authority can unpause."
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "docs": [
-              "PDA bump seed."
-            ],
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "GovernanceInitialized",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "protocol_admin_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "pause_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "treasury_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "unpause_delay_seconds",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "GovernedPauseToggled",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "paused",
-            "type": "bool"
-          },
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "pause_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "protocol_admin_authority",
-            "type": "pubkey"
           }
         ]
       }

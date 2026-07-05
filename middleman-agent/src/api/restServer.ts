@@ -37,7 +37,7 @@ import { settlementTargetStore } from '../state/settlementTargetStore';
 import { rewardTargetStore } from '../state/rewardTargetStore';
 import { getAgentDWallet, isConfidentialEscrowReady } from '../services/confidentialExecutionService';
 import { executeDeal, executeRelease } from '../services/executionService';
-import { executeCancelDeal, executeFractionalSplit } from '../services/onChainExecutionService';
+import { executeCancelDeal, executeFractionalSplit, executeSettleToBuyerPhase } from '../services/onChainExecutionService';
 import { executeSportSettlement } from '../services/sportSettlementBridge';
 import { loadConfig } from '../config';
 import { registerObservatoryTicketMapping } from '../services/observatoryBridge';
@@ -103,6 +103,10 @@ function scheduleOnChainAction(ticketId: string, result: OnChainActionResult): v
     } else if (result.on_chain_action === "cancel_deal") {
         executeCancelDeal(ticketId).catch((err: any) => {
             logger.error("rest_cancel_unhandled_failure", { ticketId }, err);
+        });
+    } else if (result.on_chain_action === "settle_to_buyer") {
+        executeSettleToBuyerPhase(ticketId).catch((err: any) => {
+            logger.error("rest_settle_to_buyer_unhandled_failure", { ticketId }, err);
         });
     }
 }

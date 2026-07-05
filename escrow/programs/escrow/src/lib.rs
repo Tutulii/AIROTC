@@ -94,6 +94,14 @@ pub struct FundsReleased {
 }
 
 #[event]
+pub struct BuyerSettlementReleased {
+    pub deal_id: u64,
+    pub buyer_received: u64,
+    pub seller_forfeited: u64,
+    pub middleman_fee: u64,
+}
+
+#[event]
 pub struct Refunded {
     pub deal_id: u64,
     pub buyer_refunded: u64,
@@ -477,6 +485,65 @@ pub struct LockPayment<'info> {
 
 #[derive(Accounts)]
 pub struct ReleaseFunds<'info> {
+    #[account(
+        mut,
+        seeds = [b"deal", deal.buyer.as_ref(), deal.deal_id.to_le_bytes().as_ref()],
+        bump = deal.bump,
+    )]
+    pub deal: Account<'info, Deal>,
+    #[account(
+        constraint = middleman.key() == deal.middleman @ EscrowError::Unauthorized
+    )]
+    pub middleman: Signer<'info>,
+    /// CHECK: Validated against deal.buyer
+    #[account(
+        mut,
+        constraint = buyer.key() == deal.buyer @ EscrowError::Unauthorized
+    )]
+    pub buyer: UncheckedAccount<'info>,
+    /// CHECK: Validated against deal.seller
+    #[account(
+        mut,
+        constraint = seller.key() == deal.seller @ EscrowError::Unauthorized
+    )]
+    pub seller: UncheckedAccount<'info>,
+    /// CHECK: Validated against deal.middleman
+    #[account(
+        mut,
+        constraint = fee_receiver.key() == deal.middleman @ EscrowError::Unauthorized
+    )]
+    pub fee_receiver: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        associated_token::mint = deal.mint,
+        associated_token::authority = deal
+    )]
+    pub deal_ata: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        associated_token::mint = deal.mint,
+        associated_token::authority = buyer
+    )]
+    pub buyer_ata: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        associated_token::mint = deal.mint,
+        associated_token::authority = seller
+    )]
+    pub seller_ata: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        associated_token::mint = deal.mint,
+        associated_token::authority = fee_receiver
+    )]
+    pub fee_ata: Account<'info, TokenAccount>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct SettleToBuyer<'info> {
     #[account(
         mut,
         seeds = [b"deal", deal.buyer.as_ref(), deal.deal_id.to_le_bytes().as_ref()],
@@ -1017,6 +1084,89 @@ pub mod escrow {
             deal_id: deal.deal_id,
             seller_received: seller_total,
             buyer_refunded: buyer_total,
+            middleman_fee: fee,
+        });
+
+        Ok(())
+    }
+
+    /// Resolves a funded prediction-style deal in favor of the buyer.
+    /// Buyer receives their price minus fee, their collateral, and seller collateral.
+    pub fn settle_to_buyer(ctx: Context<SettleToBuyer>) -> Result<()> {
+        // ── Pause guard ──
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+
+        let deal_info = ctx.accounts.deal.to_account_info();
+        let deal = &mut ctx.accounts.deal;
+
+        // ── State guards ──
+        require!(deal.status == DealStatus::PaymentLocked, EscrowError::PaymentNotLocked);
+        require!(
+            deal.buyer_collateral_locked && deal.seller_collateral_locked,
+            EscrowError::CollateralNotLocked
+        );
+        require!(deal.payment_locked, EscrowError::PaymentNotLocked);
+
+        // ── Calculate fee with checked arithmetic ──
+        let fee = (deal.price as u128)
+            .checked_mul(deal.middleman_fee_bps as u128)
+            .ok_or(EscrowError::ArithmeticOverflow)?
+            .checked_div(10_000)
+            .ok_or(EscrowError::ArithmeticOverflow)? as u64;
+
+        let buyer_payment = deal.price
+            .checked_sub(fee)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+        let buyer_total = buyer_payment
+            .checked_add(deal.collateral_buyer)
+            .ok_or(EscrowError::ArithmeticOverflow)?
+            .checked_add(deal.collateral_seller)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+
+        let total_out = buyer_total
+            .checked_add(fee)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+
+        if is_native_sol_mint(&deal.mint) {
+            assert_rent_safe(&deal_info, total_out)?;
+            transfer_lamports_from_pda(
+                &deal_info,
+                &ctx.accounts.buyer.to_account_info(),
+                buyer_total,
+            )?;
+            transfer_lamports_from_pda(
+                &deal_info,
+                &ctx.accounts.fee_receiver.to_account_info(),
+                fee,
+            )?;
+        } else {
+            require!(ctx.accounts.deal_ata.amount >= total_out, EscrowError::InsufficientFunds);
+
+            deal.transfer_tokens_from_pda(
+                ctx.accounts.deal_ata.to_account_info(),
+                ctx.accounts.buyer_ata.to_account_info(),
+                deal.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                buyer_total,
+                deal.bump,
+            )?;
+
+            deal.transfer_tokens_from_pda(
+                ctx.accounts.deal_ata.to_account_info(),
+                ctx.accounts.fee_ata.to_account_info(),
+                deal.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                fee,
+                deal.bump,
+            )?;
+        }
+
+        deal.status = DealStatus::Refunded;
+
+        emit!(BuyerSettlementReleased {
+            deal_id: deal.deal_id,
+            buyer_received: buyer_total,
+            seller_forfeited: deal.collateral_seller,
             middleman_fee: fee,
         });
 

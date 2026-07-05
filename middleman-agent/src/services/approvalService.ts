@@ -86,6 +86,7 @@ const ACTION_RISK_MAP: Record<string, RiskLevel> = {
     
     // Settlement
     'release_funds': 'critical',
+    'settle_to_buyer': 'critical',
     'refund_escrow': 'critical',
 };
 

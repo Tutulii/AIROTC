@@ -1,7 +1,7 @@
 import { dealPhaseManager } from "../../core/dealPhaseManager";
 import { ticketStore } from "../state/ticketStore";
 import { appendAuditLog } from "./auditTrail";
-import { executeCancelDeal, executeReleasePhase } from "./onChainExecutionService";
+import { executeReleasePhase, executeSettleToBuyerPhase } from "./onChainExecutionService";
 import { logger } from "../utils/logger";
 
 export type SportSettlementAction = "release_to_maker" | "refund_to_taker";
@@ -19,7 +19,7 @@ export interface ExecuteSportSettlementResult {
   success: boolean;
   ticketId: string;
   settlementAction: SportSettlementAction;
-  onChainAction: "release_funds" | "cancel_deal";
+  onChainAction: "release_funds" | "settle_to_buyer";
   tx?: string;
   status?: "completed" | "refunded";
   error?: string;
@@ -79,11 +79,11 @@ export async function executeSportSettlement(
   });
 
   const onChainAction =
-    input.settlementAction === "release_to_maker" ? "release_funds" : "cancel_deal";
+    input.settlementAction === "release_to_maker" ? "release_funds" : "settle_to_buyer";
   const execution =
     onChainAction === "release_funds"
       ? await executeReleasePhase(ticketId)
-      : await executeCancelDeal(ticketId);
+      : await executeSettleToBuyerPhase(ticketId);
 
   if (!execution.success) {
     await appendAuditLog(ticketId, "sport_settlement_execution_failed", {

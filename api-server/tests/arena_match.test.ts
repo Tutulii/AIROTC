@@ -654,7 +654,7 @@ describe('ArenaMatch lifecycle', () => {
         middlemanForwarderMock.forwardSportSettlement.mockResolvedValueOnce({
             success: true,
             tx: 'bridge-refund-tx',
-            onChainAction: 'refund_on_timeout',
+            onChainAction: 'settle_to_buyer',
             status: 'completed',
         });
 
