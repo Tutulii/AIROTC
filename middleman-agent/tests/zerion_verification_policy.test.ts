@@ -24,6 +24,7 @@ function buildDeps(overrides?: {
   zerionVerificationMode?: "hybrid" | "strict" | "rpc_only";
   zerionApiKey?: string | undefined;
   httpGetImpl?: () => Promise<any>;
+  validateEconomicSafety?: ReturnType<typeof vi.fn>;
 }) {
   return {
     getConnection: () =>
@@ -42,11 +43,13 @@ function buildDeps(overrides?: {
         zerionVerificationMode: overrides?.zerionVerificationMode ?? "hybrid",
       }) as any,
     httpGet: overrides?.httpGetImpl ?? vi.fn(),
-    validateEconomicSafety: async () => ({
-      valid: true,
-      errors: [],
-      warnings: [],
-    }),
+    validateEconomicSafety:
+      overrides?.validateEconomicSafety ??
+      vi.fn().mockResolvedValue({
+        valid: true,
+        errors: [],
+        warnings: [],
+      }),
   };
 }
 
@@ -141,5 +144,38 @@ describe("Zerion verification policy", () => {
     expect(summary.verificationScope).toBe("balance_readiness");
     expect(summary.validationSources).toEqual(["ZERION_API", "SOLANA_RPC"]);
     expect(summary.reason).toBe("zerion_strict_verification_confirmed_by_rpc_backstop");
+  });
+
+  it("uses SPORT equal-stake collateral policy for math-only SPORT escrows", async () => {
+    const validateEconomicSafety = vi.fn().mockResolvedValue({
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    const verifier = createNegotiationVerifier(
+      buildDeps({
+        network: "devnet",
+        zerionVerificationMode: "hybrid",
+        zerionApiKey: "redacted",
+        validateEconomicSafety,
+      }) as any
+    );
+
+    await verifier.verifyNegotiationForExecution({
+      ...baseContext,
+      rollupMode: "SPORT",
+      negotiationSource: "OFFCHAIN",
+      collateralBuyer: 0.000000001,
+      collateralSeller: 0.001,
+    });
+
+    expect(validateEconomicSafety).toHaveBeenCalledWith(
+      expect.objectContaining({
+        priceSol: 0.001,
+        collateralBuyerSol: 0.000000001,
+        collateralSellerSol: 0.001,
+        collateralPolicy: "sport_equal_stake",
+      })
+    );
   });
 });

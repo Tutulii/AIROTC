@@ -454,6 +454,7 @@ export function createNegotiationVerifier(deps: VerificationDeps = defaultDeps) 
         priceSol: context.price,
         collateralBuyerSol: context.collateralBuyer,
         collateralSellerSol: context.collateralSeller,
+        collateralPolicy: context.rollupMode === "SPORT" ? "sport_equal_stake" : "standard",
       });
 
       if (!econCheck.valid) {

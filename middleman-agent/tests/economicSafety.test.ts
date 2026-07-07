@@ -84,6 +84,19 @@ describe('validateDeal', () => {
         expect(result.errors.some(e => e.includes('Buyer collateral ratio'))).toBe(true);
     });
 
+    it('allows SPORT equal-stake economics without standard buyer collateral ratio', async () => {
+        const result = await economicSafety.validateDeal({
+            buyerAgentId: 'buyer-sport-' + Date.now(),
+            sellerAgentId: 'seller-sport-' + Date.now(),
+            priceSol: 0.001,
+            collateralBuyerSol: 0.000000001,
+            collateralSellerSol: 0.001,
+            collateralPolicy: 'sport_equal_stake',
+        });
+        expect(result.valid).toBe(true);
+        expect(result.errors).toHaveLength(0);
+    });
+
     it('rejects insufficient seller collateral ratio', async () => {
         const result = await economicSafety.validateDeal({
             buyerAgentId: 'buyer-ok',
