@@ -208,6 +208,38 @@ describe("deposit watcher historical reconciliation", () => {
     expect(transactionCreateMock).toHaveBeenCalledTimes(3);
   });
 
+  it("does not treat escrow rent/baseline balance as user deposits", async () => {
+    const rentOnlyBalance = 3_633_120;
+    const connection = {
+      getBalance: vi.fn()
+        .mockResolvedValueOnce(rentOnlyBalance)
+        .mockResolvedValue(rentOnlyBalance),
+      getSignaturesForAddress: vi.fn().mockResolvedValue([]),
+      getTransaction: vi.fn(),
+      removeAccountChangeListener: vi.fn(),
+    };
+
+    const { watchForDeposits, reconcileDepositWatcherFromHistory } = await import("../src/listeners/depositWatcher");
+    await watchForDeposits(
+      connection as any,
+      ticketId,
+      dealPda,
+      1,
+      0.001 * LAMPORTS_PER_SOL,
+      0.001 * LAMPORTS_PER_SOL,
+    );
+
+    const result = await reconcileDepositWatcherFromHistory(connection as any, ticketId, "rent-baseline-test");
+
+    expect(result.reconciled).toBe(false);
+    expect(result.reason).toBe("no_matching_deposits");
+    expect(result.buyerDeposited).toBe(false);
+    expect(result.sellerDeposited).toBe(false);
+    expect(result.paymentDeposited).toBe(false);
+    expect(publishMock).not.toHaveBeenCalled();
+    expect(transactionCreateMock).not.toHaveBeenCalled();
+  });
+
   it("auto-confirms zero buyer collateral for SPORT equal-stake escrows", async () => {
     const connection = {
       getBalance: vi.fn().mockResolvedValue(0),
