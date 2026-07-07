@@ -6,6 +6,7 @@ const { createOfferFromStrategySignalMock } = vi.hoisted(() => ({
 const { middlemanForwarderMock } = vi.hoisted(() => ({
     middlemanForwarderMock: {
         forwardSportSettlement: vi.fn(),
+        getDealStatus: vi.fn(),
     },
 }));
 
@@ -253,6 +254,10 @@ describe('ArenaMatch lifecycle', () => {
             tx: 'middleman-sport-tx',
             onChainAction: 'release_funds',
             status: 'completed',
+        });
+        middlemanForwarderMock.getDealStatus.mockResolvedValue({
+            success: false,
+            error: 'not_configured_for_test',
         });
         seedArenaRows();
     });
@@ -558,6 +563,81 @@ describe('ArenaMatch lifecycle', () => {
                     terminal: true,
                 },
             },
+        });
+    });
+
+    it('hydrates SPORT deposit status from middleman payment lock', async () => {
+        const { createSportMatchForOffer } = await import('../src/services/arena/sportSettlementEngine');
+        const { getArenaSettlementStatusByTicket } = await import('../src/services/arena/arenaMatch.service');
+
+        await createSportMatchForOffer({
+            offerId: 'offer-sport-1',
+            fixtureId: 'fixture-1',
+            makerWallet: 'maker-wallet',
+            mode: 'buy',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+            proof: { makerSide: 'back', stakeLamports: '1000000' },
+        });
+        Object.assign(matchRows.get('match-1')!, {
+            ticketId: 'ticket-1',
+            takerWallet: 'taker-wallet',
+            buyerWallet: 'maker-wallet',
+            sellerWallet: 'taker-wallet',
+            escrowPda: 'sport-escrow-pda',
+            rollupMode: 'SPORT',
+            status: 'escrow_attached',
+            stakeLamports: '1000000',
+        });
+        middlemanForwarderMock.getDealStatus.mockResolvedValueOnce({
+            success: true,
+            deal: {
+                ticketId: 'ticket-1',
+                phase: 'awaiting_result',
+                payment_locked: true,
+                terms: {
+                    price: 0.001,
+                    collateral_buyer: 0.000000001,
+                    collateral_seller: 0.001,
+                    asset_type: 'SOL',
+                },
+            },
+        });
+
+        await expect(getArenaSettlementStatusByTicket('ticket-1')).resolves.toMatchObject({
+            ticketId: 'ticket-1',
+            status: 'awaiting_result',
+            depositStatus: {
+                escrowPda: 'sport-escrow-pda',
+                buyerDepositConfirmed: true,
+                sellerDepositConfirmed: true,
+                fullyFunded: true,
+            },
+            proof: {
+                completeness: {
+                    buyerDepositConfirmed: true,
+                    sellerDepositConfirmed: true,
+                },
+                stages: [
+                    expect.any(Object),
+                    expect.any(Object),
+                    expect.any(Object),
+                    expect.any(Object),
+                    expect.objectContaining({
+                        stage: 'deposits',
+                        complete: true,
+                        buyer: true,
+                        seller: true,
+                    }),
+                    expect.any(Object),
+                    expect.any(Object),
+                ],
+            },
+        });
+        expect(matchRows.get('match-1')).toMatchObject({
+            status: 'awaiting_result',
+            buyerDepositLamports: '1000001',
+            sellerDepositLamports: '1000000',
         });
     });
 

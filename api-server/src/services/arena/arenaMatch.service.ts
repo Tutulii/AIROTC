@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
+import { middlemanForwarder } from '../middlemanForwarder';
 import { createOfferFromStrategySignal } from './strategyOfferBridge';
 import { isTrustedOutcomeSource, serializeOutcome } from './outcomeBacktest';
 import { serializeStrategySignal } from './strategyEngine';
@@ -105,6 +106,87 @@ function lamportsToSol(value: unknown): number | undefined {
     } catch {
         return undefined;
     }
+}
+
+function solToLamportsString(value: unknown): string | undefined {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) return undefined;
+    return String(Math.round(amount * LAMPORTS_PER_SOL));
+}
+
+function middlemanPhaseImpliesSportFunding(phase: unknown): boolean {
+    const normalized = trimString(phase);
+    return Boolean(normalized && [
+        'awaiting_result',
+        'settlement',
+        'completed',
+        'released',
+        'refunded',
+    ].includes(normalized));
+}
+
+function middlemanDealData(result: Awaited<ReturnType<typeof middlemanForwarder.getDealStatus>>): Record<string, any> | null {
+    if (!result.success || !result.deal) return null;
+    const deal = result.deal as any;
+    if (deal.data && typeof deal.data === 'object') return deal.data;
+    return deal && typeof deal === 'object' ? deal : null;
+}
+
+function depositLamportsFromMiddlemanTerms(match: any, deal: Record<string, any>, side: 'buyer' | 'seller'): string | undefined {
+    const terms = asRecord(deal.terms);
+    const price = Number(terms.price ?? 0);
+    const buyerCollateral = Number(terms.collateral_buyer ?? terms.collateralBuyer ?? 0);
+    const sellerCollateral = Number(terms.collateral_seller ?? terms.collateralSeller ?? 0);
+    if (side === 'buyer') {
+        return solToLamportsString(price + buyerCollateral) || trimString(match.stakeLamports);
+    }
+    return solToLamportsString(sellerCollateral || price) || trimString(match.stakeLamports);
+}
+
+async function hydrateArenaMatchDepositsFromMiddleman(match: any): Promise<any> {
+    if (!match?.ticketId || TERMINAL_MATCH_STATUSES.has(match.status)) return match;
+
+    let deal: Record<string, any> | null = null;
+    try {
+        deal = middlemanDealData(await middlemanForwarder.getDealStatus(match.ticketId));
+    } catch {
+        deal = null;
+    }
+    if (!deal) return match;
+
+    const phase = trimString(deal.phase);
+    const paymentLocked = Boolean(deal.payment_locked || deal.paymentLocked);
+    const fullyFunded = paymentLocked || middlemanPhaseImpliesSportFunding(phase);
+    if (!fullyFunded) return match;
+
+    const data: Record<string, any> = {};
+    if (!match.buyerDepositLamports) {
+        data.buyerDepositLamports = depositLamportsFromMiddlemanTerms(match, deal, 'buyer') || '1';
+    }
+    if (!match.sellerDepositLamports) {
+        data.sellerDepositLamports = depositLamportsFromMiddlemanTerms(match, deal, 'seller') || '1';
+    }
+    if (!match.buyerDepositedAt) data.buyerDepositedAt = new Date();
+    if (!match.sellerDepositedAt) data.sellerDepositedAt = new Date();
+    if (phase && match.status !== phase) data.status = phase;
+
+    if (Object.keys(data).length === 0) return match;
+
+    return prismaAny.arenaMatch.update({
+        where: { id: match.id },
+        data: {
+            ...data,
+            lastError: null,
+            proof: mergeProof(match.proof, {
+                depositSync: {
+                    source: 'middleman',
+                    phase: phase || null,
+                    paymentLocked,
+                    syncedAt: new Date().toISOString(),
+                },
+            }),
+        },
+    });
 }
 
 export function serializeArenaMatch(row: any): Record<string, unknown> {
@@ -220,9 +302,10 @@ export async function getArenaSettlementStatusByTicket(ticketIdInput: string): P
     const ticketId = trimString(ticketIdInput);
     if (!ticketId) throw httpError('arena_ticket_id_required', 400);
 
-    const match = await prismaAny.arenaMatch.findFirst({ where: { ticketId } });
-    if (!match) throw httpError('arena_match_not_found_for_ticket', 404);
+    const storedMatch = await prismaAny.arenaMatch.findFirst({ where: { ticketId } });
+    if (!storedMatch) throw httpError('arena_match_not_found_for_ticket', 404);
 
+    const match = await hydrateArenaMatchDepositsFromMiddleman(storedMatch);
     const proof = await getArenaMatchProof(match.id);
     const links = asRecord(proof.links);
     const outcome = asRecord(links.outcome);
