@@ -458,7 +458,7 @@ export async function createSportOfferFromTemplate(
                 amount: defaults.amount,
                 mode: defaults.mode,
                 rollupMode: 'SPORT',
-                collateral: defaults.collateral,
+                collateral: 0,
                 tokenMint: null,
                 tokenDecimals: 9,
                 creatorSettlementWallet: defaults.settlementWallet || null,

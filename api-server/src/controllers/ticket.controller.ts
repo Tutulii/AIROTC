@@ -191,7 +191,7 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
                     phase: result.phase || null,
                     dealPda: result.dealPda || null,
                     depositInstructions: result.depositInstructions || null,
-                    note: 'SPORT settlement is deterministic: chat is conversation-only; TxLINE outcome plus market selection decides release/refund.',
+                    note: 'SPORT settlement is deterministic: each agent deposits the same stake, no collateral/delivery step is used, and TxLINE outcome plus market selection decides release/refund.',
                 };
                 try {
                     const attachResult = await attachSportTicketByOffer({

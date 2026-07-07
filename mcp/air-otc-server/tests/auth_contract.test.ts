@@ -157,8 +157,8 @@ assert.deepEqual(
 const sportCreateTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_create_offer");
 assert.deepEqual(
   sportCreateTool.inputSchema.required,
-  ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price", "collateral"],
-  "sport_create_offer must require SPORT fixture and market terms"
+  ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price"],
+  "sport_create_offer must require SPORT fixture, market terms, and stake but no separate collateral"
 );
 
 const sportSettlementTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_settlement_status");

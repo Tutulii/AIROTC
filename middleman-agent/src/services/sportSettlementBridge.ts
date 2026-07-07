@@ -57,7 +57,7 @@ export async function executeSportSettlement(
     deal.buyer_deposited &&
     deal.seller_deposited &&
     deal.payment_locked &&
-    (deal.phase === "delivery" || deal.phase === "awaiting_release");
+    (deal.phase === "awaiting_result" || deal.phase === "delivery" || deal.phase === "awaiting_release");
   if (!escrowFunded) {
     throw bridgeError("sport_escrow_not_funded", 409);
   }

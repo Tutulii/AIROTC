@@ -4,6 +4,9 @@ import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 const publishMock = vi.fn();
 const confirmedDeposits = new Set<string>();
 const transactionCreateMock = vi.fn().mockResolvedValue({});
+const executeConfirmDepositMock = vi.fn();
+const recordDepositMock = vi.fn();
+const recordPaymentLockedMock = vi.fn();
 
 const ticketId = "5f3ce9f6-c351-4b1c-8758-88a1a1975ab5";
 const dealPda = new PublicKey("5JMyHXRoY81o2L4h616jQFah3hwntJ4T9RN3hySdUvoN");
@@ -66,6 +69,7 @@ vi.mock("../src/services/onChainExecutionService", () => ({
       seller,
     },
   },
+  executeConfirmDeposit: executeConfirmDepositMock,
   getAnchorProgram: () => ({
     program: {
       account: {
@@ -84,7 +88,8 @@ vi.mock("../src/services/onChainExecutionService", () => ({
 vi.mock("../core/dealPhaseManager", () => ({
   dealPhaseManager: {
     getDealWithFallback: vi.fn().mockResolvedValue(null),
-    recordDeposit: vi.fn().mockResolvedValue({ success: true }),
+    recordDeposit: recordDepositMock,
+    recordPaymentLocked: recordPaymentLockedMock,
     persistDealPublic: vi.fn(),
   },
 }));
@@ -108,6 +113,13 @@ describe("deposit watcher historical reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     confirmedDeposits.clear();
+    executeConfirmDepositMock.mockResolvedValue({
+      success: true,
+      tx: "zero-buyer-collateral-tx",
+      step: "confirm_deposit_buyer_collateral",
+    });
+    recordDepositMock.mockResolvedValue({ success: true });
+    recordPaymentLockedMock.mockResolvedValue({ success: true, new_phase: "awaiting_result" });
     process.env.AIROTC_ENABLE_DEPOSIT_WS_WATCHER = "false";
   });
 
@@ -194,5 +206,37 @@ describe("deposit watcher historical reconciliation", () => {
       "buyer_payment",
     ]);
     expect(transactionCreateMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("auto-confirms zero buyer collateral for SPORT equal-stake escrows", async () => {
+    const connection = {
+      getBalance: vi.fn().mockResolvedValue(0),
+      getSignaturesForAddress: vi.fn().mockResolvedValue([]),
+      getTransaction: vi.fn(),
+      removeAccountChangeListener: vi.fn(),
+    };
+
+    const { watchForDeposits } = await import("../src/listeners/depositWatcher");
+    await watchForDeposits(
+      connection as any,
+      ticketId,
+      dealPda,
+      0,
+      3 * LAMPORTS_PER_SOL,
+      3 * LAMPORTS_PER_SOL,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(executeConfirmDepositMock).toHaveBeenCalledWith(ticketId, "buyer_collateral");
+    expect(recordDepositMock).toHaveBeenCalledWith(ticketId, "buyer");
+    expect(transactionCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "buyer_collateral",
+          txSignature: "zero-buyer-collateral-tx",
+          status: "confirmed",
+        }),
+      }),
+    );
   });
 });

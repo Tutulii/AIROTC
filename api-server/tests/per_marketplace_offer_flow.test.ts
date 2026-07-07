@@ -169,7 +169,7 @@ describe("PER marketplace offer flow", () => {
           price: 0.1,
           amount: 1,
           mode: "sell",
-          collateral: 0.3,
+          collateral: 0,
           rollupMode: "SPORT",
           fixtureId: "fixture-1",
           marketType: "1X2_PARTICIPANT_RESULT",
@@ -201,7 +201,6 @@ describe("PER marketplace offer flow", () => {
         price: 0.1,
         amount: 1,
         mode: "sell",
-        collateral: 0.3,
         rollupMode: "SPORT",
         fixtureId: "fixture-1",
         marketType: "1X2_PARTICIPANT_RESULT",
@@ -216,6 +215,7 @@ describe("PER marketplace offer flow", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           rollupMode: "SPORT",
+          collateral: 0,
           fixtureId: "fixture-1",
           marketType: "1X2_PARTICIPANT_RESULT",
           selection: "part1",
@@ -247,6 +247,7 @@ describe("PER marketplace offer flow", () => {
         data: expect.objectContaining({
           id: "offer-sport-1",
           rollupMode: "SPORT",
+          collateral: 0,
           fixtureId: "fixture-1",
         }),
         arenaMatch: expect.objectContaining({

@@ -686,26 +686,15 @@ async function main(): Promise<void> {
         await dealPhaseManager.recordDeposit(payload.ticket_id, party);
       }
 
-      // If payment confirmed, deal is fully funded — ready for delivery phase
+      // If payment confirmed, deal is fully funded. Normal mode goes to delivery;
+      // SPORT is math-only and waits for the final TxLINE result.
       if (payload.deposit_type === "buyer_payment") {
-        // CRITICAL: Set payment_locked flag so soulGuard evidenceVerified passes
-        const deal = dealPhaseManager.getDeal(payload.ticket_id);
-        if (deal) {
-          deal.payment_locked = true;
-          // Persist the flag immediately
-          dealPhaseManager.persistDealPublic(deal);
-        }
-
-        logger.info("deal_fully_funded", {
+        const phaseResult = await dealPhaseManager.recordPaymentLocked(payload.ticket_id);
+        logger.info("payment_lock_recorded", {
           ticket_id: payload.ticket_id,
-          status: "Payment locked. Waiting for seller delivery and buyer confirmation.",
+          new_phase: phaseResult?.new_phase || null,
           payment_locked: true,
         });
-
-        // Natively force state progression
-        if (deal && deal.phase === "awaiting_deposits") {
-          dealPhaseManager.transition(deal, "delivery", "system", "AUTO");
-        }
       }
     } else {
       logger.error("deposit_confirm_failed", { ticket_id: payload.ticket_id }, new Error(result.error || "Unknown"));

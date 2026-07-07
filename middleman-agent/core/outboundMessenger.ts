@@ -131,8 +131,22 @@ Current Deal Phase: ${phase}
 export async function dealCreatedMessage(
   ticket_id: string,
   terms: DealTerms,
-  escrowPda?: string
+  escrowPda?: string,
+  options: { sport?: boolean } = {},
 ): Promise<MiddlemanMessage> {
+  if (options.sport) {
+    const rawData = escrowPda
+      ? `ACTION: SPORT escrow created on-chain.
+Escrow PDA: \`${escrowPda}\`
+TERMS: Equal stake=${terms.price} SOL from buyer and seller. No separate collateral.
+INSTRUCTION: Both agents send exactly ${terms.price} SOL to the escrow. Settlement waits for the final TxLINE result.`
+      : `ACTION: SPORT escrow creation requested.
+STATUS: Waiting for the on-chain escrow PDA before deposits can begin.
+TERMS: Equal stake=${terms.price} SOL from buyer and seller. No separate collateral.
+INSTRUCTION: Do not send funds yet. Wait until Meridian publishes the escrow address.`;
+    return generateConversationalResponse(ticket_id, "escrow_created", rawData);
+  }
+
   const rawData = escrowPda
     ? `ACTION: Deal created on-chain.
 Escrow PDA: \`${escrowPda}\`
@@ -148,8 +162,21 @@ INSTRUCTION: Do not send funds yet. Do not use personal wallets. Wait until Meri
 export async function depositInstructionMessage(
   ticket_id: string,
   terms: DealTerms,
-  escrowPda?: string
+  escrowPda?: string,
+  options: { sport?: boolean } = {},
 ): Promise<MiddlemanMessage> {
+  if (options.sport) {
+    const rawData = escrowPda
+      ? `ACTION: Awaiting SPORT stakes.
+ESCROW ADDRESS: \`${escrowPda}\`
+Send SOL directly to this address as a plain transfer.
+INSTRUCTION: Buyer sends ${terms.price} SOL. Seller sends ${terms.price} SOL. No collateral and no delivery step. Meridian confirms deposits on-chain and then waits for the final TxLINE result.`
+      : `ACTION: SPORT deposit instructions blocked.
+STATUS: No escrow address is available yet.
+INSTRUCTION: Do not send funds. Wait for the on-chain escrow address.`;
+    return generateConversationalResponse(ticket_id, "awaiting_deposits", rawData);
+  }
+
   const rawData = escrowPda
     ? `ACTION: Awaiting Deposits.
 ESCROW ADDRESS: \`${escrowPda}\`
@@ -161,10 +188,16 @@ INSTRUCTION: Do not send funds. Do not send to a personal wallet. Wait for the o
   return generateConversationalResponse(ticket_id, "awaiting_deposits", rawData);
 }
 
-export async function depositsReceivedMessage(ticket_id: string): Promise<MiddlemanMessage> {
-  const rawData = `ACTION: All deposits received! Escrow is locked.
+export async function depositsReceivedMessage(
+  ticket_id: string,
+  phase: "delivery" | "awaiting_result" = "delivery",
+): Promise<MiddlemanMessage> {
+  const rawData = phase === "awaiting_result"
+    ? `ACTION: SPORT stakes locked. Escrow is fully funded.
+INSTRUCTION: No delivery message or middleman judgment is needed. Settlement waits for the final TxLINE result, then releases the pot to the winning side automatically.`
+    : `ACTION: All deposits received! Escrow is locked.
 INSTRUCTION: Seller must deliver the credentials/goods via DM. Buyer must review and then type "@middleman release funds" to confirm receipt. If any problem, type "@middleman dispute".`;
-  return generateConversationalResponse(ticket_id, "delivery", rawData);
+  return generateConversationalResponse(ticket_id, phase, rawData);
 }
 
 export async function fundsReleasedMessage(

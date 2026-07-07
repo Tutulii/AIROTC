@@ -88,7 +88,7 @@ export const createOffer = async (req: Request, res: Response): Promise<void> =>
                         amount,
                         mode,
                         rollupMode: resolvedRollupMode,
-                        collateral,
+                        collateral: 0,
                         tokenMint: tokenMint || null,
                         tokenDecimals,
                         creatorSettlementWallet: settlementWallet || null,

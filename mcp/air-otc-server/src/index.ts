@@ -1045,7 +1045,7 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_create_offer",
     title: "Sport Create Offer",
     description:
-      "Create an AIR OTC SPORT offer bound to a TxLINE fixture, market, and selection. Requires offers:write scope.",
+      "Create an AIR OTC SPORT offer bound to a TxLINE fixture, market, and selection. SPORT is equal-stake with no separate collateral. Requires offers:write scope.",
     scope: "offers:write",
     inputSchema: objectSchema(
       {
@@ -1058,12 +1058,12 @@ const tools: ToolDefinition[] = [
         mode: { type: "string", enum: ["buy", "sell"] },
         amount: { type: "number", exclusiveMinimum: 0 },
         price: { type: "number", exclusiveMinimum: 0 },
-        collateral: { type: "number", minimum: 0 },
+        collateral: { type: "number", minimum: 0, description: "Deprecated for SPORT; accepted for old clients but ignored." },
         settlementWallet: { type: "string" },
         rewardWallet: { type: "string" },
         fundingWallet: { type: "string" },
       },
-      ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price", "collateral"]
+      ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price"]
     ),
     handler: async (args) => {
       const auth = await requireScope(args, "offers:write");
@@ -1079,7 +1079,7 @@ const tools: ToolDefinition[] = [
               mode: args.mode,
               amount: args.amount,
               price: args.price,
-              collateral: args.collateral,
+              collateral: args.collateral ?? 0,
               rollupMode: "SPORT",
               fixtureId: args.fixtureId,
               marketType: args.marketType,
@@ -1271,7 +1271,7 @@ const tools: ToolDefinition[] = [
           type: "object",
           additionalProperties: true,
           description:
-            "Template defaults: mode, amount, price, collateral, marketType, selection, optional asset/settlementWallet/rewardWallet/fundingWallet.",
+            "Template defaults: mode, amount, price, marketType, selection, optional deprecated collateral, asset/settlementWallet/rewardWallet/fundingWallet.",
         },
       },
       ["wallet", "name", "defaults"]
@@ -1337,7 +1337,7 @@ const tools: ToolDefinition[] = [
         overrides: {
           type: "object",
           additionalProperties: true,
-          description: "Optional overrides for marketType, selection, mode, amount, price, collateral, asset, and wallets.",
+          description: "Optional overrides for marketType, selection, mode, amount, price, deprecated collateral, asset, and wallets.",
         },
       },
       ["wallet", "name", "fixtureId"]
@@ -1479,7 +1479,7 @@ const tools: ToolDefinition[] = [
         mode: { type: "string", enum: ["buy", "sell"] },
         amount: { type: "number", exclusiveMinimum: 0 },
         price: { type: "number", exclusiveMinimum: 0 },
-        collateral: { type: "number", minimum: 0 },
+        collateral: { type: "number", minimum: 0, description: "Required outside SPORT; SPORT ignores separate collateral and uses equal stake." },
         rollupMode: { type: "string", enum: ["ER", "PER", "NONE", "SPORT"], default: "NONE" },
         fixtureId: { type: "string" },
         marketType: { type: "string" },
@@ -1488,7 +1488,7 @@ const tools: ToolDefinition[] = [
         rewardWallet: { type: "string" },
         fundingWallet: { type: "string" },
       },
-      ["wallet", "asset", "mode", "amount", "price", "collateral"]
+      ["wallet", "asset", "mode", "amount", "price"]
     ),
     handler: async (args) => {
       const auth = await requireScope(args, "offers:write");
@@ -1502,7 +1502,7 @@ const tools: ToolDefinition[] = [
             mode: args.mode,
             amount: args.amount,
             price: args.price,
-            collateral: args.collateral,
+            collateral: args.collateral ?? (args.rollupMode === "SPORT" ? 0 : undefined),
             rollupMode: args.rollupMode || "NONE",
             fixtureId: args.fixtureId,
             marketType: args.marketType,

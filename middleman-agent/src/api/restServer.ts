@@ -156,6 +156,8 @@ function mapPersistedDealStatusToPublicPhase(status: string | null | undefined):
             return 'escrow_created';
         case 'collateral_locked':
             return 'awaiting_deposits';
+        case 'awaiting_result':
+            return 'awaiting_result';
         case 'payment_locked':
             return 'delivery';
         default:
@@ -217,7 +219,9 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
 
     const escrowPda = persistedDeal?.dealIdOnChain || legacyDeal?.escrow_pda || null;
     const onChainPhase = escrowPda ? await resolveOnChainPublicPhase(escrowPda) : null;
+    const sportAwaitingResultPhase = legacyDeal?.phase === 'awaiting_result' ? 'awaiting_result' : null;
     const publicPhase =
+        sportAwaitingResultPhase ||
         onChainPhase ||
         legacyDeal?.phase ||
         mapPersistedDealStatusToPublicPhase(persistedDeal?.status) ||
@@ -230,6 +234,7 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
         seller: legacyDeal?.seller || null,
         escrow_pda: escrowPda,
         payment_locked:
+            publicPhase === 'awaiting_result' ||
             publicPhase === 'delivery' ||
             publicPhase === 'awaiting_buyer_release_confirmation' ||
             publicPhase === 'seller_dispute_window',
@@ -814,6 +819,11 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             const parsedCol = parseFloat(collateral) || 0;
             const strictPerOpaque = rollupMode === 'PER' && isPerStrictOpaqueModeEnabled();
             const isSportMode = rollupMode === 'SPORT';
+            const sportStake = parsedAmount || parsedPrice;
+            if (isSportMode && sportStake <= 0) {
+                res.status(400).json({ error: "SPORT stake must be greater than zero." });
+                return;
+            }
 
             // 1. Register both wallets in the internal registry
             const { walletRegistry } = await import('../state/walletRegistry');
@@ -840,7 +850,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 offer_asset: asset || 'SOL',
                 offer_price: parsedPrice || undefined,
                 offer_amount: parsedAmount || undefined,
-                offer_collateral: parsedCol || undefined,
+                offer_collateral: isSportMode ? 0 : parsedCol || undefined,
                 status: "active",
                 created_at: new Date().toISOString()
             });
@@ -910,9 +920,9 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                     ticketId,
                     buyer: buyerWallet,
                     seller: sellerWallet,
-                    price: parsedAmount || parsedPrice,
-                    collateralBuyer: parsedCol,
-                    collateralSeller: parsedCol,
+                    price: sportStake,
+                    collateralBuyer: 0,
+                    collateralSeller: sportStake,
                     assetType: asset || tokenMint || 'SOL',
                     tokenMint,
                     decimals: decimals ? parseInt(decimals) : undefined,
@@ -943,7 +953,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             if (isSportMode) {
                 eventBus.publish("middleman_response", {
                     ticket_id: ticketId,
-                    content: `SPORT wager locked from offer terms. Escrow: ${sportPipelineResult?.dealPda}. Buyer deposits ${parsedAmount || parsedPrice} ${asset || 'SOL'} plus ${parsedCol} collateral; seller deposits ${parsedCol} collateral. Settlement runs automatically from TxLINE final result.`,
+                    content: `SPORT wager locked from offer terms. Escrow: ${sportPipelineResult?.dealPda}. Buyer deposits ${sportStake} ${asset || 'SOL'} and seller deposits ${sportStake} ${asset || 'SOL'}. No collateral or delivery step is used; settlement runs automatically from TxLINE final result.`,
                     phase: "awaiting_deposits",
                     timestamp: new Date().toISOString()
                 });
@@ -994,14 +1004,16 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                     escrowPda: sportPipelineResult.dealPda,
                     buyer: {
                         wallet: buyerWallet,
-                        payment: parsedAmount || parsedPrice,
-                        collateral: parsedCol,
-                        total: (parsedAmount || parsedPrice) + parsedCol,
+                        stake: sportStake,
+                        payment: sportStake,
+                        collateral: 0,
+                        total: sportStake,
                     },
                     seller: {
                         wallet: sellerWallet,
-                        collateral: parsedCol,
-                        total: parsedCol,
+                        stake: sportStake,
+                        collateral: 0,
+                        total: sportStake,
                     },
                 } : null,
             });

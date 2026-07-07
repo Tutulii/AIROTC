@@ -70,12 +70,14 @@ export const middlemanForwarder = {
             escrowPda: string;
             buyer: {
                 wallet: string;
+                stake?: number;
                 payment: number;
                 collateral: number;
                 total: number;
             };
             seller: {
                 wallet: string;
+                stake?: number;
                 collateral: number;
                 total: number;
             };
@@ -126,12 +128,14 @@ export const middlemanForwarder = {
                     escrowPda: string;
                     buyer: {
                         wallet: string;
+                        stake?: number;
                         payment: number;
                         collateral: number;
                         total: number;
                     };
                     seller: {
                         wallet: string;
+                        stake?: number;
                         collateral: number;
                         total: number;
                     };

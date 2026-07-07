@@ -176,7 +176,7 @@ describe('SPORT agent tools service', () => {
                     mode: 'sell',
                     amount: 1,
                     price: 0.1,
-                    collateral: 0.2,
+                    collateral: 0,
                     rollupMode: 'SPORT',
                     fixtureId: '18179549',
                     marketType: '1X2',
@@ -232,6 +232,7 @@ describe('SPORT agent tools service', () => {
                 asset: 'TXLINE:18179549:1X2:part1',
                 rollupMode: 'SPORT',
                 fixtureId: '18179549',
+                collateral: 0,
             }),
         }));
         expect(result.offer.id).toBe('offer-1');

@@ -18,7 +18,7 @@ import { eventBus } from "../services/eventBus";
 import { dealTracker } from "../state/dealTracker";
 import { prisma } from "../lib/prisma";
 import { duneSIM } from "../services/duneSIMService";
-import { getAnchorProgram } from "../services/onChainExecutionService";
+import { executeConfirmDeposit, getAnchorProgram } from "../services/onChainExecutionService";
 import { dealPhaseManager } from "../../core/dealPhaseManager";
 
 // Track active watchers so we can unsubscribe later
@@ -105,6 +105,12 @@ export async function watchForDeposits(
     watcherLog.info("deposit_watcher_initial_balance", {
       balance: initialBalance / LAMPORTS_PER_SOL,
     });
+    const expect = expectations.get(ticketId);
+    if (expect && buyerCollateralLamports === 0) {
+      void autoConfirmZeroBuyerCollateral(ticketId, expect).catch((e: any) => {
+        watcherLog.error("zero_buyer_collateral_auto_confirm_failed", { error: e.message });
+      });
+    }
   } catch (e: any) {
     watcherLog.error("deposit_watcher_initial_balance_failed", { error: e.message });
     throw e;
@@ -165,8 +171,9 @@ async function markProgramStateDeposit(
   ticketId: string,
   expect: DepositExpectation,
   depositType: DepositType,
+  txHash?: string,
 ): Promise<void> {
-  const syntheticSignature = `program-state:${expect.dealPda.toBase58()}:${depositType}`;
+  const syntheticSignature = txHash || `program-state:${expect.dealPda.toBase58()}:${depositType}`;
   const updated = await prisma.depositConfirmation.updateMany({
     where: { ticketId, type: depositType, confirmed: false },
     data: { confirmed: true, txHash: syntheticSignature },
@@ -197,11 +204,7 @@ async function markProgramStateDeposit(
     await dealPhaseManager.recordDeposit(ticketId, "seller");
   } else {
     expect.paymentDeposited = true;
-    const phaseDeal = await dealPhaseManager.getDealWithFallback(ticketId);
-    if (phaseDeal) {
-      phaseDeal.payment_locked = true;
-      dealPhaseManager.persistDealPublic(phaseDeal);
-    }
+    await dealPhaseManager.recordPaymentLocked(ticketId);
   }
 
   logger.info("deposit_program_state_confirmed", {
@@ -209,6 +212,31 @@ async function markProgramStateDeposit(
     depositType,
     deal_pda: expect.dealPda.toBase58(),
   });
+}
+
+async function autoConfirmZeroBuyerCollateral(
+  ticketId: string,
+  expect: DepositExpectation,
+): Promise<void> {
+  if (expect.expectedBuyerCollateral !== 0 || expect.buyerDeposited) {
+    return;
+  }
+
+  logger.info("zero_buyer_collateral_auto_confirm_started", {
+    ticket_id: ticketId,
+    deal_pda: expect.dealPda.toBase58(),
+  });
+
+  const result = await executeConfirmDeposit(ticketId, "buyer_collateral");
+  if (!result.success) {
+    logger.warn("zero_buyer_collateral_auto_confirm_rejected", {
+      ticket_id: ticketId,
+      error: result.error || "unknown_error",
+    });
+    return;
+  }
+
+  await markProgramStateDeposit(ticketId, expect, "buyer_collateral", result.tx);
 }
 
 async function pollOnChainDealState(

@@ -48,7 +48,7 @@ vi.mock("../src/utils/logger", () => ({
 
 function fundedDeal() {
   return {
-    phase: "delivery",
+    phase: "awaiting_result",
     buyer_deposited: true,
     seller_deposited: true,
     payment_locked: true,

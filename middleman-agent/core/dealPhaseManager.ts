@@ -6,9 +6,8 @@ import { eventBus } from "../src/services/eventBus";
  * State machine managing the deal lifecycle.
  *
  * Phases:
- *   negotiation → escrow_created → awaiting_deposits → delivery → completed
- *                                                           ↓
- *                                                    disputed / cancelled
+ *   Normal: negotiation → escrow_created → awaiting_deposits → delivery → completed
+ *   SPORT:  negotiation → escrow_created → awaiting_deposits → awaiting_result → completed/refunded
  *
  * Now accepts MiddlemanAction from the brain (NLP-based),
  * NOT rigid CommandType patterns.
@@ -61,6 +60,7 @@ export type DealPhase =
   | "escrow_created"
   | "awaiting_deposits"
   | "delivery"
+  | "awaiting_result"
   | "awaiting_release"
   | "completed"
   | "disputed"
@@ -317,6 +317,7 @@ class DealPhaseManager {
       created: "escrow_created",
       collateral_locked: "awaiting_deposits",
       payment_locked: "delivery",
+      awaiting_result: "awaiting_result",
       completed: "completed",
       refunded: "refunded",
       cancelled: "cancelled",
@@ -408,7 +409,15 @@ class DealPhaseManager {
       };
     }
 
-    if (!terms || !terms.price || !terms.collateral_buyer || !terms.collateral_seller) {
+    if (
+      !terms ||
+      !Number.isFinite(terms.price) ||
+      terms.price <= 0 ||
+      !Number.isFinite(terms.collateral_buyer) ||
+      terms.collateral_buyer < 0 ||
+      !Number.isFinite(terms.collateral_seller) ||
+      terms.collateral_seller < 0
+    ) {
       return {
         success: false,
         response: await errorMessage(deal.ticket_id,
@@ -440,7 +449,12 @@ class DealPhaseManager {
 
     return {
       success: true,
-      response: await dealCreatedMessage(deal.ticket_id, terms, deal.escrow_pda || undefined),
+      response: await dealCreatedMessage(
+        deal.ticket_id,
+        terms,
+        deal.escrow_pda || undefined,
+        { sport: await this.isSportTicket(deal.ticket_id) },
+      ),
       new_phase: "escrow_created",
       on_chain_action: "create_deal",
     };
@@ -587,9 +601,32 @@ class DealPhaseManager {
 
   // ── DEPOSIT TRACKING ──
 
+  private async isSportTicket(ticket_id: string): Promise<boolean> {
+    try {
+      const { ticketStore } = await import("../src/state/ticketStore");
+      const ticket = await ticketStore.getTicket(ticket_id);
+      if (ticket?.rollup_mode === "SPORT") return true;
+    } catch {
+      // Fall through to Prisma if the local ticket store is unavailable.
+    }
+
+    try {
+      const ticketDelegate = (prisma as any).ticket;
+      if (!ticketDelegate?.findUnique) return false;
+      const ticket = await ticketDelegate.findUnique({
+        where: { id: ticket_id },
+        select: { rollupMode: true },
+      });
+      return ticket?.rollupMode === "SPORT";
+    } catch {
+      return false;
+    }
+  }
+
   public async recordDeposit(ticket_id: string, party: "buyer" | "seller"): Promise<ActionResult | null> {
     const deal = this.deals.get(ticket_id);
     if (!deal) return null;
+    const isSport = await this.isSportTicket(ticket_id);
 
     if (!deal.escrow_pda) {
       appendAuditLog(ticket_id, "deposit_blocked_missing_escrow", { party, phase: deal.phase });
@@ -603,7 +640,7 @@ class DealPhaseManager {
       };
     }
 
-    if (deal.phase !== "awaiting_deposits" && deal.phase !== "delivery") {
+    if (deal.phase !== "awaiting_deposits" && deal.phase !== "delivery" && deal.phase !== "awaiting_result") {
       appendAuditLog(ticket_id, "deposit_blocked_invalid_phase", { party, phase: deal.phase });
       logger.warn("deposit_blocked_invalid_phase", { ticket_id, party, phase: deal.phase });
       return {
@@ -616,9 +653,9 @@ class DealPhaseManager {
     }
 
     if ((party === "buyer" && deal.buyer_deposited) || (party === "seller" && deal.seller_deposited)) {
-      if (deal.buyer_deposited && deal.seller_deposited && deal.phase !== "delivery") {
-        deal.payment_locked = true;
-        this.transition(deal, "delivery", "system", "AUTO");
+      const targetPhase = isSport ? "awaiting_result" : "delivery";
+      if (deal.buyer_deposited && deal.seller_deposited && deal.payment_locked && deal.phase !== targetPhase) {
+        this.transition(deal, targetPhase, "system", "AUTO");
         this.persistDeal(deal).catch((e: any) => logger.error("persist_deposit_heal_failed", { ticket_id }, e));
       }
       logger.info("deposit_recorded_idempotent_skip", { ticket_id, party });
@@ -638,17 +675,58 @@ class DealPhaseManager {
     });
 
     if (deal.buyer_deposited && deal.seller_deposited) {
+      if (isSport && !deal.payment_locked) {
+        logger.info("sport_stakes_waiting_for_payment_lock", { ticket_id });
+        return null;
+      }
       deal.payment_locked = true;
-      if (deal.phase !== "delivery") {
-        this.transition(deal, "delivery", "system", "AUTO");
+      const targetPhase = isSport ? "awaiting_result" : "delivery";
+      if (deal.phase !== targetPhase) {
+        this.transition(deal, targetPhase, "system", "AUTO");
       }
       logger.info("payment_locked_on_dual_deposit", { ticket_id });
       return {
         success: true,
-        response: await depositsReceivedMessage(ticket_id),
-        new_phase: "delivery",
+        response: await depositsReceivedMessage(ticket_id, targetPhase),
+        new_phase: targetPhase,
       };
     }
+    return null;
+  }
+
+  public async recordPaymentLocked(ticket_id: string): Promise<ActionResult | null> {
+    const deal = await this.getDealWithFallback(ticket_id);
+    if (!deal) return null;
+
+    const isSport = await this.isSportTicket(ticket_id);
+    const targetPhase: DealPhase = isSport ? "awaiting_result" : "delivery";
+    deal.payment_locked = true;
+
+    if (!deal.buyer_deposited || !deal.seller_deposited) {
+      this.persistDeal(deal).catch((e: any) => logger.error("persist_payment_lock_partial_failed", { ticket_id }, e));
+      logger.info("payment_locked_waiting_for_deposit_flags", {
+        ticket_id,
+        isSport,
+        buyer: deal.buyer_deposited,
+        seller: deal.seller_deposited,
+      });
+      return null;
+    }
+
+    if (deal.phase !== targetPhase) {
+      this.transition(deal, targetPhase, "system", "AUTO");
+      logger.info(isSport ? "sport_escrow_awaiting_result" : "deal_fully_funded", {
+        ticket_id,
+        targetPhase,
+      });
+      return {
+        success: true,
+        response: await depositsReceivedMessage(ticket_id, targetPhase),
+        new_phase: targetPhase,
+      };
+    }
+
+    this.persistDeal(deal).catch((e: any) => logger.error("persist_payment_lock_failed", { ticket_id }, e));
     return null;
   }
 
@@ -682,7 +760,12 @@ class DealPhaseManager {
     this.transition(deal, "awaiting_deposits", "system", "AUTO");
     return {
       success: true,
-      response: await depositInstructionMessage(ticket_id, deal.terms, deal.escrow_pda),
+      response: await depositInstructionMessage(
+        ticket_id,
+        deal.terms,
+        deal.escrow_pda,
+        { sport: await this.isSportTicket(ticket_id) },
+      ),
       new_phase: "awaiting_deposits",
     };
   }
@@ -696,7 +779,12 @@ class DealPhaseManager {
     }
 
     const previousPhase = deal.phase;
-    const phaseChanged = Boolean(snapshot.phase && snapshot.phase !== deal.phase);
+    const isSport = await this.isSportTicket(deal.ticket_id);
+    const reconciledPhase =
+      isSport && snapshot.phase === "delivery" && snapshot.paymentLocked
+        ? "awaiting_result"
+        : snapshot.phase;
+    const phaseChanged = Boolean(reconciledPhase && reconciledPhase !== deal.phase);
     const flagsChanged =
       deal.buyer_deposited !== snapshot.buyerDeposited ||
       deal.seller_deposited !== snapshot.sellerDeposited ||
@@ -706,8 +794,8 @@ class DealPhaseManager {
     deal.seller_deposited = snapshot.sellerDeposited;
     deal.payment_locked = snapshot.paymentLocked;
 
-    if (snapshot.phase && snapshot.phase !== deal.phase) {
-      this.transition(deal, snapshot.phase, "on_chain_reconcile", "AUTO");
+    if (reconciledPhase && reconciledPhase !== deal.phase) {
+      this.transition(deal, reconciledPhase, "on_chain_reconcile", "AUTO");
     }
 
     if (phaseChanged || flagsChanged) {
@@ -762,6 +850,7 @@ class DealPhaseManager {
       escrow_created: "created",
       awaiting_deposits: "collateral_locked",
       delivery: "payment_locked",
+      awaiting_result: "payment_locked",
       awaiting_release: "payment_locked",
       completed: "completed",
       disputed: "disputed",

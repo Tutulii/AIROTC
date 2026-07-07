@@ -154,7 +154,7 @@ describe("Torque reward wallet marketplace bridge", () => {
       asset: "TXLINE:18179549:1X2:part1",
       price: 0.1,
       amount: 4,
-      collateral: 1,
+      collateral: 0,
       rollupMode: "SPORT",
       creatorSettlementWallet: sellerSettlementWallet,
       creatorRewardWallet: null,
@@ -177,14 +177,16 @@ describe("Torque reward wallet marketplace bridge", () => {
         escrowPda: "escrow-pda-1",
         buyer: {
           wallet: "buyer-wallet",
+          stake: 4,
           payment: 4,
-          collateral: 1,
-          total: 5,
+          collateral: 0,
+          total: 4,
         },
         seller: {
           wallet: "seller-wallet",
-          collateral: 1,
-          total: 1,
+          stake: 4,
+          collateral: 0,
+          total: 4,
         },
       },
     });
@@ -208,7 +210,7 @@ describe("Torque reward wallet marketplace bridge", () => {
         rollupMode: "SPORT",
         price: 0.1,
         amount: 4,
-        collateral: 1,
+        collateral: 0,
       })
     );
     expect(attachSportTicketByOfferMock).toHaveBeenCalledWith({
