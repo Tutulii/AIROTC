@@ -1,5 +1,5 @@
 import express from 'express';
-import { PublicKey } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { eventBus } from '../services/eventBus';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
@@ -824,6 +824,10 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 res.status(400).json({ error: "SPORT stake must be greater than zero." });
                 return;
             }
+            const sportProtocolBuyerCollateralLamports = isSportMode
+                ? Math.max(1, Number(process.env.SPORT_PROTOCOL_BUYER_COLLATERAL_LAMPORTS || "1"))
+                : 0;
+            const sportProtocolBuyerCollateral = sportProtocolBuyerCollateralLamports / LAMPORTS_PER_SOL;
 
             // 1. Register both wallets in the internal registry
             const { walletRegistry } = await import('../state/walletRegistry');
@@ -921,7 +925,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                     buyer: buyerWallet,
                     seller: sellerWallet,
                     price: sportStake,
-                    collateralBuyer: 0,
+                    collateralBuyer: sportProtocolBuyerCollateral,
                     collateralSeller: sportStake,
                     assetType: asset || tokenMint || 'SOL',
                     tokenMint,
@@ -953,7 +957,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             if (isSportMode) {
                 eventBus.publish("middleman_response", {
                     ticket_id: ticketId,
-                    content: `SPORT wager locked from offer terms. Escrow: ${sportPipelineResult?.dealPda}. Buyer deposits ${sportStake} ${asset || 'SOL'} and seller deposits ${sportStake} ${asset || 'SOL'}. No collateral or delivery step is used; settlement runs automatically from TxLINE final result.`,
+                    content: `SPORT wager locked from offer terms. Escrow: ${sportPipelineResult?.dealPda}. Buyer deposits ${sportStake} ${asset || 'SOL'} plus ${sportProtocolBuyerCollateralLamports} protocol dust lamport, and seller deposits ${sportStake} ${asset || 'SOL'}. No economic collateral or delivery step is used; settlement runs automatically from TxLINE final result.`,
                     phase: "awaiting_deposits",
                     timestamp: new Date().toISOString()
                 });
@@ -1006,8 +1010,9 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                         wallet: buyerWallet,
                         stake: sportStake,
                         payment: sportStake,
-                        collateral: 0,
-                        total: sportStake,
+                        collateral: sportProtocolBuyerCollateral,
+                        protocolDustLamports: sportProtocolBuyerCollateralLamports,
+                        total: sportStake + sportProtocolBuyerCollateral,
                     },
                     seller: {
                         wallet: sellerWallet,

@@ -96,6 +96,32 @@ describe('TxLINE Day 1 snapshot normalization', () => {
         });
     });
 
+    it('treats score updates with stale GameState 1 as live when in-play evidence is present', () => {
+        const scores = normalizeScoresPayload({
+            FixtureId: 18179999,
+            GameState: 1,
+            Action: 'update',
+            Ts: 1783124800000,
+            Clock: { Running: true, Seconds: 3420 },
+            Score: {
+                Participant1: { Total: { Goals: 1 } },
+                Participant2: { Total: { Goals: 0 } },
+            },
+        });
+
+        expect(scores).toHaveLength(1);
+        expect(scores[0]).toMatchObject({
+            fixtureId: '18179999',
+            status: 'live',
+            homeScore: 1,
+            awayScore: 0,
+        });
+        expect(scores[0].raw.normalizedScoreState).toMatchObject({
+            status: 'live',
+            clock: { Running: true, Seconds: 3420 },
+        });
+    });
+
     it('normalizes odds snapshots with implied probability', () => {
         const odds = normalizeOddsPayload({
             data: {

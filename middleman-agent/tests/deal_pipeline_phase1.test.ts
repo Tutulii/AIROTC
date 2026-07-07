@@ -259,6 +259,117 @@ describe("dealPipeline", () => {
     );
   });
 
+  it("dispatches SPORT equal-stake escrow with protocol dust collateral for the current on-chain ABI", async () => {
+    const sportTicket: Ticket = {
+      ...standardTicket,
+      ticket_id: "ticket-sport",
+      rollup_mode: "SPORT",
+    };
+    const deps = {
+      loadConfig: () =>
+        ({
+          enableConfidentialEscrow: true,
+        } as any),
+      ticketStore: {
+        getTicket: vi.fn().mockResolvedValue(sportTicket),
+        recordNegotiatedTerms: vi.fn().mockResolvedValue(undefined),
+      },
+      dealTracker: {
+        initDeal: vi.fn().mockResolvedValue(undefined),
+        storeOnChainId: vi.fn().mockResolvedValue(undefined),
+        updateStatus: vi.fn().mockResolvedValue(undefined),
+      },
+      getPrivacyStatus: vi.fn().mockResolvedValue(noPrivacy),
+      pipelineStateStore: {
+        markStage: vi.fn().mockResolvedValue(undefined),
+        markRouteSelected: vi.fn().mockResolvedValue(undefined),
+        getLatestStage: vi.fn().mockResolvedValue(null),
+      },
+      eventBus: {
+        publish: vi.fn(),
+      },
+      appendAuditLog: vi.fn().mockResolvedValue(undefined),
+      executeCreateDealPhase: vi.fn().mockResolvedValue({
+        success: true,
+        dealPda: "sport-deal-pda",
+        tx: "sport-create-tx",
+      }),
+      isConfidentialEscrowReady: vi.fn().mockReturnValue(true),
+      initConfidentialEscrow: vi.fn().mockResolvedValue(undefined),
+      executeConfidentialDeal: vi.fn(),
+      verifyNegotiationForExecution: vi.fn().mockResolvedValue({
+        verificationLevel: "onchain_balance_check",
+        verificationScope: "balance_readiness",
+        checkedAt: new Date().toISOString(),
+        reason: "sport_equal_stake_ready",
+      }),
+      prepareSettlementAddressPlan: vi.fn().mockResolvedValue({
+        policy: "DIRECT",
+        resolution: "resolved",
+        assetMint: "So11111111111111111111111111111111111111112",
+        buyerTarget: {
+          role: "buyer",
+          strategy: "DIRECT_WALLET",
+          baseWallet: "buyer-wallet",
+          resolvedAddress: "buyer-wallet",
+          status: "resolved",
+        },
+        sellerTarget: {
+          role: "seller",
+          strategy: "DIRECT_WALLET",
+          baseWallet: "seller-wallet",
+          resolvedAddress: "seller-wallet",
+          status: "resolved",
+        },
+        notes: [],
+      }),
+      prepareStealthSettlement: vi.fn(),
+      executeStealthSettlement: vi.fn(),
+      activateStandardEscrowLifecycle: vi.fn().mockResolvedValue({
+        phase: "awaiting_deposits",
+        depositInstructionsPublished: true,
+        watcherAttached: true,
+      }),
+      magicBlockSessions: {
+        finalizePrivateTicket: vi.fn().mockResolvedValue(undefined),
+        completeTicketSession: vi.fn(),
+      },
+    };
+
+    const pipeline = createDealPipeline(deps as any);
+    const result = await pipeline.start({
+      ticketId: "ticket-sport",
+      price: 3,
+      collateralBuyer: 0.000000001,
+      collateralSeller: 3,
+      assetType: "SOL",
+      confidence: 100,
+      buyer: "buyer-wallet",
+      seller: "seller-wallet",
+      rollupMode: "SPORT",
+      negotiationSource: "OFFCHAIN",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.route).toBe("STANDARD_ESCROW");
+    expect(deps.executeCreateDealPhase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ticketId: "ticket-sport",
+        price: 3,
+        collateral_buyer: 0.000000001,
+        collateral_seller: 3,
+      })
+    );
+    expect(deps.activateStandardEscrowLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ticketId: "ticket-sport",
+        price: 3,
+        collateralBuyer: 0.000000001,
+        collateralSeller: 3,
+      })
+    );
+  });
+
   it("keeps confidential success green even when PER close/finalize remains pending", async () => {
     const deps = {
       loadConfig: () =>

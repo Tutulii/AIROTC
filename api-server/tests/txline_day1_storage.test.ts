@@ -272,6 +272,83 @@ describe('TxLINE Day 1 snapshot storage', () => {
         });
     });
 
+    it('does not downgrade a live fixture when a stale TxLINE snapshot still reports GameState 1', async () => {
+        const {
+            getTxlineSnapshotProof,
+            recordScoreUpdates,
+            upsertFixtures,
+        } = await import('../src/services/arena/arena.service');
+
+        await upsertFixtures([{
+            fixtureId: '18179999',
+            sport: 'football',
+            homeTeam: 'Canada',
+            awayTeam: 'Morocco',
+            startsAt: new Date('2026-07-04T17:00:00.000Z'),
+            status: 'upcoming',
+            raw: {
+                source: 'txline',
+                GameState: 1,
+                Participant1: 'Canada',
+                Participant2: 'Morocco',
+            },
+        }]);
+        await recordScoreUpdates([{
+            fixtureId: '18179999',
+            homeScore: 1,
+            awayScore: 0,
+            status: 'live',
+            source: 'txline',
+            sourceUpdateId: 'can-mar-live',
+            sourceTimestamp: new Date('2026-07-04T17:57:00.000Z'),
+            raw: {
+                GameState: 1,
+                Action: 'update',
+                Clock: { Running: true, Seconds: 3420 },
+                normalizedScoreState: {
+                    status: 'live',
+                    action: 'update',
+                    clock: { Running: true, Seconds: 3420 },
+                    homeScore: 1,
+                    awayScore: 0,
+                },
+            },
+        }]);
+
+        await upsertFixtures([{
+            fixtureId: '18179999',
+            sport: 'football',
+            homeTeam: 'Canada',
+            awayTeam: 'Morocco',
+            startsAt: new Date('2026-07-04T17:00:00.000Z'),
+            status: 'upcoming',
+            raw: {
+                source: 'txline',
+                GameState: 1,
+                Participant1: 'Canada',
+                Participant2: 'Morocco',
+            },
+        }]);
+
+        const proof = await getTxlineSnapshotProof('18179999');
+
+        expect(proof.fixture).toMatchObject({
+            fixtureId: '18179999',
+            status: 'live',
+            raw: {
+                source: 'txline',
+                GameState: 1,
+                latestScoreUpdateId: 'can-mar-live',
+                latestScoreState: {
+                    status: 'live',
+                    homeScore: 1,
+                    awayScore: 0,
+                },
+                statusPreservedFrom: 'score_replay_live',
+            },
+        });
+    });
+
     it('prefers a final score row over later non-final housekeeping score rows', async () => {
         const {
             getTxlineSnapshotProof,

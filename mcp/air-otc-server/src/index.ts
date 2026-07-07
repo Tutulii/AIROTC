@@ -506,9 +506,74 @@ function normalizeSportStatus(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-function sportStatusBucket(value: unknown, startsAt?: unknown): "live" | "upcoming" | "final" | "unknown" {
-  const status = normalizeSportStatus(value);
-  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half", "2"].includes(status)) {
+function sportRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function sportNested(value: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, key) => sportRecord(current)[key], value);
+}
+
+function sportFirstString(source: Record<string, unknown>, keys: string[], fallback = ""): string {
+  for (const key of keys) {
+    const value = key.includes(".") ? sportNested(source, key) : source[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return fallback;
+}
+
+function sportHasClockEvidence(raw: Record<string, unknown>): boolean {
+  const clock = raw.Clock || sportNested(raw, "Data.New.Clock") || sportNested(raw, "Data.Clock");
+  if (typeof clock === "string") return clock.trim().length > 0;
+  if (typeof clock === "number") return Number.isFinite(clock);
+  return Object.keys(sportRecord(clock)).length > 0;
+}
+
+function sportHasScoreEvidence(raw: Record<string, unknown>): boolean {
+  return (
+    Object.keys(sportRecord(raw.Score || raw.score)).length > 0 ||
+    Object.keys(sportRecord(sportNested(raw, "Data.New.Score"))).length > 0 ||
+    Object.keys(sportRecord(sportNested(raw, "Data.Score"))).length > 0
+  );
+}
+
+function sportHasLiveScoreEvidence(raw: Record<string, unknown>): boolean {
+  const state = sportRecord(raw.normalizedScoreState || raw.latestScoreState);
+  const stateStatus = normalizeSportStatus(sportFirstString(state, ["status"]));
+  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half", "2"].includes(stateStatus)) {
+    return true;
+  }
+
+  const action = normalizeSportStatus(sportFirstString(raw, ["Action"]) || sportFirstString(state, ["action"]));
+  if (["disconnected", "fixture_created", "fixture_updated", "game_finalised", "game_finalized", "finalised", "finalized"].includes(action)) {
+    return false;
+  }
+  if (sportHasClockEvidence(raw) || sportHasClockEvidence(state)) return true;
+  return (
+    (sportHasScoreEvidence(raw) || sportHasScoreEvidence(state)) &&
+    ["update", "updated", "score_update", "score_changed", "clock_update", "clock_changed", "game_started", "period_started", "stats_update", "statistics_update"].includes(action)
+  );
+}
+
+function sportStatusBucket(fixtureOrStatus: unknown, startsAt?: unknown): "live" | "upcoming" | "final" | "unknown" {
+  const fixture = sportRecord(fixtureOrStatus);
+  const raw = sportRecord(fixture.raw);
+  const statusInput = Object.keys(fixture).length > 0
+    ? fixture.status || raw.latestScoreState || raw.GameState || raw.status
+    : fixtureOrStatus;
+  const status = normalizeSportStatus(statusInput);
+  const latestScoreState = sportRecord(raw.latestScoreState);
+  const scoreStateStatus = normalizeSportStatus(sportFirstString(latestScoreState, ["status"]));
+  const action = normalizeSportStatus(sportFirstString(raw, ["Action"]) || sportFirstString(sportRecord(raw.latestScoreState), ["action"]));
+  if (
+    ["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft", "3", "4"].includes(status) ||
+    ["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft", "3", "4"].includes(scoreStateStatus) ||
+    ["finalised", "finalized", "game_finalised", "game_finalized"].includes(action)
+  ) {
+    return "final";
+  }
+  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half", "2"].includes(status) || sportHasLiveScoreEvidence(raw)) {
     return "live";
   }
   if (["scheduled", "upcoming", "not_started", "pre_match", "prematch", "pending", "1"].includes(status)) {
@@ -528,9 +593,7 @@ function sportStatusBucket(value: unknown, startsAt?: unknown): "live" | "upcomi
 
 function filterSportFixtures(fixtures: any[], status?: string): any[] {
   if (!status || status === "all") return fixtures;
-  return fixtures.filter((fixture) =>
-    sportStatusBucket(fixture?.status || fixture?.raw?.GameState || fixture?.raw?.status, fixture?.startsAt || fixture?.raw?.StartTime) === status
-  );
+  return fixtures.filter((fixture) => sportStatusBucket(fixture, fixture?.startsAt || fixture?.raw?.StartTime) === status);
 }
 
 function sportAsset(args: { fixtureId: string; marketType: string; selection: string; asset?: string }): string {
@@ -2380,6 +2443,7 @@ export const __test = {
   mergeRequestAuth,
   parseScopes,
   delegatedWalletFromArgs,
+  sportStatusBucket,
 };
 
 if (process.env.AIR_OTC_MCP_NO_AUTOSTART !== "1") {

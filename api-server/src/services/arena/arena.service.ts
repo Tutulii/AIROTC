@@ -67,12 +67,27 @@ function hasFinalScoreEvidence(rawValue: unknown): boolean {
     return normalizeFixtureStatus(latestScoreState) === 'final';
 }
 
-function shouldPreserveFinalStatus(existingFixture: any, nextStatus: string): boolean {
-    if (!existingFixture || nextStatus === 'final') return false;
-    return existingFixture.status === 'final' || hasFinalScoreEvidence(existingFixture.raw);
+function hasLiveScoreEvidence(rawValue: unknown): boolean {
+    const raw = asRecord(rawValue);
+    const latestScoreState = asRecord(raw.latestScoreState);
+    if (Object.keys(latestScoreState).length === 0) return false;
+    return normalizeFixtureStatus(latestScoreState) === 'live';
 }
 
-function mergeFixtureSnapshotRaw(existingRawValue: unknown, nextRawValue: unknown, preserveFinal: boolean): Record<string, unknown> {
+function scoreDerivedStatusToPreserve(existingFixture: any, nextStatus: string): 'final' | 'live' | null {
+    if (!existingFixture || nextStatus === 'final') return null;
+    if (existingFixture.status === 'final' || hasFinalScoreEvidence(existingFixture.raw)) return 'final';
+    if (nextStatus === 'live') return null;
+    if (
+        (nextStatus === 'upcoming' || nextStatus === 'unknown') &&
+        (existingFixture.status === 'live' || hasLiveScoreEvidence(existingFixture.raw))
+    ) {
+        return 'live';
+    }
+    return null;
+}
+
+function mergeFixtureSnapshotRaw(existingRawValue: unknown, nextRawValue: unknown, preservedStatus: 'final' | 'live' | null): Record<string, unknown> {
     const existingRaw = asRecord(existingRawValue);
     const nextRaw = asRecord(nextRawValue);
     const merged: Record<string, unknown> = { ...nextRaw };
@@ -82,8 +97,8 @@ function mergeFixtureSnapshotRaw(existingRawValue: unknown, nextRawValue: unknow
             merged[key] = existingRaw[key];
         }
     }
-    if (preserveFinal) {
-        merged.statusPreservedFrom = 'score_replay_final';
+    if (preservedStatus) {
+        merged.statusPreservedFrom = `score_replay_${preservedStatus}`;
     }
     return merged;
 }
@@ -264,9 +279,9 @@ export async function upsertFixtures(fixtures: TxlineFixture[]): Promise<number>
     const existingFixtures = await fixtureMetadataById(fixtures.map((fixture) => fixture.fixtureId));
     for (const fixture of fixtures) {
         const existingFixture = existingFixtures.get(fixture.fixtureId);
-        const preserveFinal = shouldPreserveFinalStatus(existingFixture, fixture.status);
-        const status = preserveFinal ? 'final' : fixture.status;
-        const raw = mergeFixtureSnapshotRaw(existingFixture?.raw, fixture.raw, preserveFinal);
+        const preservedStatus = scoreDerivedStatusToPreserve(existingFixture, fixture.status);
+        const status = preservedStatus || fixture.status;
+        const raw = mergeFixtureSnapshotRaw(existingFixture?.raw, fixture.raw, preservedStatus);
         await prismaAny.arenaFixture.upsert({
             where: { fixtureId: fixture.fixtureId },
             update: {

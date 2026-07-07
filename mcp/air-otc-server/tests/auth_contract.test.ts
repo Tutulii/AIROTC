@@ -115,6 +115,40 @@ assert.deepEqual(
   ["all", "live", "upcoming", "final"],
   "sport_list_matches must expose match status filters"
 );
+assert.equal(
+  __test.sportStatusBucket({
+    status: "upcoming",
+    startsAt: "2026-07-04T17:00:00.000Z",
+    raw: {
+      GameState: 1,
+      latestScoreState: {
+        status: "live",
+        action: "update",
+        clock: { Running: true, Seconds: 3420 },
+        homeScore: 1,
+        awayScore: 0,
+      },
+    },
+  }),
+  "live",
+  "sport_list_matches must classify stale GameState 1 fixtures as live when score evidence is live"
+);
+assert.equal(
+  __test.sportStatusBucket({
+    status: "upcoming",
+    raw: {
+      GameState: "scheduled",
+      latestScoreState: {
+        status: "final",
+        action: "game_finalised",
+        homeScore: 0,
+        awayScore: 3,
+      },
+    },
+  }),
+  "final",
+  "sport_list_matches must classify stale scheduled fixtures as final when score evidence is final"
+);
 
 const reputationTool = __test.tools.find((candidate: any) => candidate.name === "airotc_get_reputation");
 assert.deepEqual(

@@ -266,6 +266,43 @@ function normalizeStatusToken(value: unknown): string {
     return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
+function hasClockEvidence(raw: Record<string, unknown>): boolean {
+    const clock = raw.Clock || nested(raw, 'Data.New.Clock') || nested(raw, 'Data.Clock');
+    if (typeof clock === 'string') return clock.trim().length > 0;
+    if (typeof clock === 'number') return Number.isFinite(clock);
+    return Object.keys(asRecord(clock)).length > 0;
+}
+
+function hasScoreEvidence(raw: Record<string, unknown>): boolean {
+    return (
+        goalNumber(raw, 'Participant1') !== undefined ||
+        goalNumber(raw, 'Participant2') !== undefined ||
+        Object.keys(asRecord(raw.Score || raw.score)).length > 0 ||
+        Object.keys(asRecord(nested(raw, 'Data.New.Score'))).length > 0 ||
+        Object.keys(asRecord(nested(raw, 'Data.Score'))).length > 0
+    );
+}
+
+function hasLiveScoreEvidence(raw: Record<string, unknown>): boolean {
+    const state = asRecord(raw.normalizedScoreState);
+    const stateStatus = normalizeStatusToken(firstString(state, ['status']));
+    if (['live', 'in_play', 'in_progress', 'running', 'started', 'first_half', 'second_half', '2'].includes(stateStatus)) {
+        return true;
+    }
+
+    const action = normalizeStatusToken(firstString(raw, ['Action']) || firstString(state, ['action']));
+    if (['disconnected', 'fixture_created', 'fixture_updated', 'game_finalised', 'game_finalized', 'finalised', 'finalized'].includes(action)) {
+        return false;
+    }
+
+    if (hasClockEvidence(raw)) return true;
+
+    return (
+        hasScoreEvidence(raw) &&
+        ['update', 'updated', 'score_update', 'score_changed', 'clock_update', 'clock_changed', 'game_started', 'period_started', 'stats_update', 'statistics_update'].includes(action)
+    );
+}
+
 export function normalizeFixtureStatus(raw: Record<string, unknown>, startsAt?: Date): string {
     const rawStatus = firstString(raw, ['GameState', 'status', 'state', 'fixtureStatus'], 'unknown');
     const status = normalizeStatusToken(rawStatus);
@@ -278,6 +315,9 @@ export function normalizeFixtureStatus(raw: Record<string, unknown>, startsAt?: 
         return 'final';
     }
     if (['live', 'in_play', 'in_progress', 'running', 'started', 'first_half', 'second_half', '2'].includes(status)) {
+        return 'live';
+    }
+    if (hasLiveScoreEvidence(raw)) {
         return 'live';
     }
     if (['scheduled', 'upcoming', 'not_started', 'pre_match', 'prematch', 'pending', '1'].includes(status)) {

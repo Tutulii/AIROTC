@@ -350,8 +350,15 @@ export async function executeCreateDeal(result: AgreementResult): Promise<Execut
     if (result.confidence < 80) {
       return { success: false, error: "Confidence too low", step: "create_deal" };
     }
-    if (!result.price || !result.collateral_buyer || !result.collateral_seller) {
-      return { success: false, error: "Missing price or collateral", step: "create_deal" };
+    if (
+      !Number.isFinite(result.price) ||
+      result.price <= 0 ||
+      !Number.isFinite(result.collateral_buyer) ||
+      result.collateral_buyer < 0 ||
+      !Number.isFinite(result.collateral_seller) ||
+      result.collateral_seller < 0
+    ) {
+      return { success: false, error: "Missing or invalid price/collateral", step: "create_deal" };
     }
     // Duplicate prevention is handled by executionStore.beginExecution() DB mutex
     const { program, wallet, programId } = getAnchorProgram();
