@@ -73,6 +73,10 @@ function isPerStrictOpaqueModeEnabled(): boolean {
     return (process.env.PER_STRICT_OPAQUE_MODE || "true").toLowerCase() !== "false";
 }
 
+export function resolveSportStake(price: number, amount: number): number {
+    return price > 0 ? price : amount;
+}
+
 type OnChainActionResult = {
     success?: boolean;
     on_chain_action?: string;
@@ -819,7 +823,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             const parsedCol = parseFloat(collateral) || 0;
             const strictPerOpaque = rollupMode === 'PER' && isPerStrictOpaqueModeEnabled();
             const isSportMode = rollupMode === 'SPORT';
-            const sportStake = parsedAmount || parsedPrice;
+            const sportStake = resolveSportStake(parsedPrice, parsedAmount);
             if (isSportMode && sportStake <= 0) {
                 res.status(400).json({ error: "SPORT stake must be greater than zero." });
                 return;
