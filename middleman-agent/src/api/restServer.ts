@@ -77,6 +77,13 @@ export function resolveSportStake(price: number, amount: number): number {
     return price > 0 ? price : amount;
 }
 
+export function resolveSportEscrowAssetType(rollupMode: string | undefined, asset?: string | null, tokenMint?: string | null): string {
+    if (rollupMode === "SPORT") {
+        return "SOL";
+    }
+    return asset || tokenMint || "SOL";
+}
+
 type OnChainActionResult = {
     success?: boolean;
     on_chain_action?: string;
@@ -931,7 +938,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                     price: sportStake,
                     collateralBuyer: sportProtocolBuyerCollateral,
                     collateralSeller: sportStake,
-                    assetType: asset || tokenMint || 'SOL',
+                    assetType: resolveSportEscrowAssetType(rollupMode, asset, tokenMint),
                     tokenMint,
                     decimals: decimals ? parseInt(decimals) : undefined,
                     confidence: 100,
