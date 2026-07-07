@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createNegotiationVerifier } from "../src/services/zerionVerificationService";
+import { UMBRA_SUPPORTED_MINTS } from "../src/services/umbraService";
 import type { DealPipelineContext } from "../src/types/dealPipeline";
 
 const baseContext: DealPipelineContext = {
@@ -177,5 +178,29 @@ describe("Zerion verification policy", () => {
         collateralPolicy: "sport_equal_stake",
       })
     );
+  });
+
+  it("resolves SPORT TxLINE synthetic markets as SOL-backed escrow assets", async () => {
+    const verifier = createNegotiationVerifier(
+      buildDeps({
+        network: "devnet",
+        zerionVerificationMode: "hybrid",
+        zerionApiKey: "redacted",
+      }) as any
+    );
+
+    const summary = await verifier.verifyNegotiationForExecution({
+      ...baseContext,
+      rollupMode: "SPORT",
+      negotiationSource: "OFFCHAIN",
+      assetType: "TXLINE:18202701:1X2_PARTICIPANT_RESULT:part1",
+      collateralBuyer: 0.000000001,
+      collateralSeller: 0.001,
+    });
+
+    expect(summary.provider).toBe("SOLANA_RPC");
+    expect(summary.assetMint).toBe(UMBRA_SUPPORTED_MINTS.wSOL);
+    expect(summary.assetResolution).toBe("native_sol");
+    expect(summary.reason).toBe("rpc_balance_check_used_on_non_mainnet_runtime");
   });
 });

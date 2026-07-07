@@ -23,6 +23,10 @@ const SUPPORTED_ASSET_ALIASES: Record<string, string> = {
 };
 
 export class MeridianOtcGuard {
+    static isSportSyntheticAsset(asset?: string | null): boolean {
+        return Boolean(asset?.trim().toUpperCase().startsWith("TXLINE:"));
+    }
+
     static normalizeSupportedAsset(asset?: string | null): string | null {
         if (!asset) return null;
         const trimmed = asset.trim();
@@ -67,9 +71,12 @@ export class MeridianOtcGuard {
         // Make sure the requested asset is known in our high-tier registry
         const allowedMints = Object.values(UMBRA_SUPPORTED_MINTS) as string[];
         const normalizedBuyerMint = this.normalizeSupportedAsset(agreement.buyerMint);
-        const normalizedSellerMint = this.normalizeSupportedAsset(
-            agreement.sellerMint || agreement.assetMint || agreement.asset_type
-        );
+        const sellerMintInput = agreement.sellerMint || agreement.assetMint || agreement.asset_type;
+        const isSportSynthetic =
+            agreement.rollupMode === "SPORT" && this.isSportSyntheticAsset(sellerMintInput);
+        const normalizedSellerMint = isSportSynthetic
+            ? UMBRA_SUPPORTED_MINTS.wSOL
+            : this.normalizeSupportedAsset(sellerMintInput);
 
         if (
             !normalizedBuyerMint ||
@@ -82,6 +89,7 @@ export class MeridianOtcGuard {
                 sellerMint: agreement.sellerMint,
                 normalizedBuyerMint,
                 normalizedSellerMint,
+                rollupMode: agreement.rollupMode,
             });
             throw new Error(`[Meridian Guard] Policy Violation: Unsupported Asset. The requested token mint is not on the Allowlist.`);
         }
