@@ -233,7 +233,7 @@ export const middlemanForwarder = {
      */
     async forwardSportSettlement(params: {
         ticketId: string;
-        settlementAction: 'release_to_maker' | 'refund_to_taker';
+        settlementAction: 'release_to_maker' | 'refund_to_taker' | 'release_to_seller' | 'release_to_buyer';
         matchId?: string | null;
         fixtureId?: string | null;
         outcomeWinner?: string | null;

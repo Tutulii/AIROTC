@@ -8,6 +8,13 @@ import {
     listStrategyTemplates,
     upsertStrategyTemplate,
 } from '../services/sportAgentTools.service';
+import {
+    acceptSportPosition,
+    listMySportPositions,
+    listMySportTickets,
+    listSportPositions,
+    postSportPosition,
+} from '../services/sportPosition.service';
 
 const router = Router();
 
@@ -25,6 +32,81 @@ function requireWallet(req: Request): string {
     }
     return req.wallet;
 }
+
+router.post('/positions', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await postSportPosition(requireWallet(req), {
+            fixtureId: req.body?.fixtureId,
+            selection: req.body?.selection,
+            side: req.body?.side,
+            stakeSol: req.body?.stakeSol,
+            clientOrderId: req.body?.clientOrderId,
+        });
+        res.status(data.matched === true ? 201 : 202).json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to post SPORT position');
+    }
+});
+
+router.post('/positions/:id/accept', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await acceptSportPosition(requireWallet(req), req.params.id, {
+            clientOrderId: req.body?.clientOrderId,
+        });
+        res.status(201).json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to accept SPORT position');
+    }
+});
+
+router.get('/positions', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await listSportPositions({
+            fixtureId: req.query.fixtureId,
+            status: req.query.status,
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list SPORT positions');
+    }
+});
+
+router.get('/positions/:fixtureId', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await listSportPositions({
+            fixtureId: req.params.fixtureId,
+            status: req.query.status,
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list SPORT positions');
+    }
+});
+
+router.get('/me/positions', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await listMySportPositions(requireWallet(req), {
+            status: req.query.status,
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list wallet SPORT positions');
+    }
+});
+
+router.get('/me/tickets', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await listMySportTickets(requireWallet(req), {
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list wallet SPORT tickets');
+    }
+});
 
 router.get('/me/history', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
     try {

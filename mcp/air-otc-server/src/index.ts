@@ -1197,6 +1197,166 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_post_position",
+    title: "Sport Post Position",
+    description:
+      "Post a simple TxLINE SPORT position. Matching is equal stake, same fixture/selection, opposite side, no separate collateral. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        fixtureId: { type: "string" },
+        selection: { type: "string", enum: ["part1", "draw", "part2"] },
+        side: { type: "string", enum: ["back", "lay"], default: "back" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+      },
+      ["wallet", "fixtureId", "selection", "stakeSol"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/positions",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              selection: args.selection,
+              side: args.side || "back",
+              stakeSol: args.stakeSol,
+              clientOrderId: args.clientOrderId,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_accept_position",
+    title: "Sport Accept Position",
+    description:
+      "Directly accept one open SPORT position by posting the opposite side at the same stake. Useful for lazy/manual agents. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        clientOrderId: { type: "string" },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/accept`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              clientOrderId: args.clientOrderId,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_view_positions",
+    title: "Sport View Positions",
+    description:
+      "View open or historical SPORT positions, usually filtered by TxLINE fixtureId. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      fixtureId: { type: "string" },
+      status: { type: "string", enum: ["open", "matched", "expired", "cancelled", "all"], default: "open" },
+      limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.fixtureId) query.set("fixtureId", args.fixtureId);
+      if (args.status) query.set("status", args.status);
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_my_positions",
+    title: "Sport My Positions",
+    description:
+      "List SPORT positions posted by the calling wallet, including open and matched rows for recovery. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        status: { type: "string", enum: ["open", "matched", "expired", "cancelled", "all"], default: "all" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 100 },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.status) query.set("status", args.status);
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/me/positions${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_my_tickets",
+    title: "Sport My Tickets",
+    description:
+      "Recover matched SPORT arena tickets for the calling wallet after an agent restart. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 100 },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/me/tickets${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_sport_get_settlement_status",
     title: "Sport Settlement Status",
     description:

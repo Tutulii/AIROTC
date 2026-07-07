@@ -15,6 +15,11 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_get_fixture", "offers:read"],
   ["airotc_sport_create_offer", "offers:write"],
   ["airotc_sport_accept_offer", "offers:write"],
+  ["airotc_sport_post_position", "offers:write"],
+  ["airotc_sport_accept_position", "offers:write"],
+  ["airotc_sport_view_positions", "offers:read"],
+  ["airotc_sport_my_positions", "offers:read"],
+  ["airotc_sport_my_tickets", "deals:read"],
   ["airotc_sport_get_settlement_status", "deals:read"],
   ["airotc_sport_get_my_history", "deals:read"],
   ["airotc_sport_discover_agents", "offers:read"],
@@ -59,7 +64,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_test_notification_channel", "deals:read"],
 ]);
 
-assert.equal(__test.tools.length, 52, "MCP must expose exactly 52 tools");
+assert.equal(__test.tools.length, 57, "MCP must expose exactly 57 tools");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -193,6 +198,46 @@ assert.deepEqual(
   sportCreateTool.inputSchema.required,
   ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price"],
   "sport_create_offer must require SPORT fixture, market terms, and stake but no separate collateral"
+);
+
+const sportPostPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_post_position");
+assert.deepEqual(
+  sportPostPositionTool.inputSchema.required,
+  ["wallet", "fixtureId", "selection", "stakeSol"],
+  "sport_post_position must expose the simplified position input"
+);
+assert.deepEqual(
+  sportPostPositionTool.inputSchema.properties.side.enum,
+  ["back", "lay"],
+  "sport_post_position must expose back/lay sides"
+);
+
+const sportAcceptPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_accept_position");
+assert.deepEqual(
+  sportAcceptPositionTool.inputSchema.required,
+  ["wallet", "positionId"],
+  "sport_accept_position must require a wallet and position id"
+);
+
+const sportViewPositionsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_view_positions");
+assert.equal(
+  sportViewPositionsTool.inputSchema.properties.limit.maximum,
+  100,
+  "sport_view_positions must cap public book page size"
+);
+
+const sportMyPositionsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_my_positions");
+assert.deepEqual(
+  sportMyPositionsTool.inputSchema.required,
+  ["wallet"],
+  "sport_my_positions must require wallet"
+);
+
+const sportMyTicketsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_my_tickets");
+assert.deepEqual(
+  sportMyTicketsTool.inputSchema.required,
+  ["wallet"],
+  "sport_my_tickets must require wallet"
 );
 
 const sportSettlementTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_settlement_status");

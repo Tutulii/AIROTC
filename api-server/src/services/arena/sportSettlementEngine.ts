@@ -61,13 +61,40 @@ function settlementDirectionFromOfferMode(mode: unknown): 'BUY_SELECTION' | 'SEL
 }
 
 function inferMakerWins(match: any, outcome: any): boolean | null {
+    const makerSide = trimString(match.makerSide);
     const direction = trimString(match.direction);
     const selection = trimString(match.selection);
     const winner = trimString(outcome?.winner);
-    if (!direction || !selection || !winner) return null;
+    if (!selection || !winner) return null;
+    if (makerSide === 'back') return selection === winner;
+    if (makerSide === 'lay') return selection !== winner;
+    if (!direction) return null;
     if (direction === 'BUY_SELECTION') return selection === winner;
     if (direction === 'SELL_SELECTION') return selection !== winner;
     return null;
+}
+
+type SportSettlementAction =
+    | 'release_to_maker'
+    | 'refund_to_taker'
+    | 'release_to_seller'
+    | 'release_to_buyer';
+
+function sellerPayoutAction(action: SportSettlementAction): boolean {
+    return action === 'release_to_maker' || action === 'release_to_seller';
+}
+
+function winnerWalletForMatch(match: any, makerWins: boolean): string | null {
+    return trimString(makerWins ? match.makerWallet : match.takerWallet) || null;
+}
+
+function settlementActionForWinner(match: any, makerWins: boolean): SportSettlementAction {
+    const winnerWallet = winnerWalletForMatch(match, makerWins);
+    const sellerWallet = trimString(match.sellerWallet);
+    const buyerWallet = trimString(match.buyerWallet);
+    if (winnerWallet && sellerWallet && winnerWallet === sellerWallet) return 'release_to_seller';
+    if (winnerWallet && buyerWallet && winnerWallet === buyerWallet) return 'release_to_buyer';
+    return makerWins ? 'release_to_maker' : 'refund_to_taker';
 }
 
 async function refreshOutcomeForFixture(fixtureId: string, liveSync: boolean): Promise<Record<string, unknown>> {
@@ -260,11 +287,12 @@ export async function runSportSettlement(params: {
             continue;
         }
 
-        const settlementAction = makerWins ? 'release_to_maker' : 'refund_to_taker';
-        let releaseTx = settlementAction === 'release_to_maker'
+        const settlementAction = settlementActionForWinner(match, makerWins);
+        const winnerWallet = winnerWalletForMatch(match, makerWins);
+        let releaseTx = sellerPayoutAction(settlementAction)
             ? trimString(params.releaseTx) || trimString(match.releaseTx)
             : undefined;
-        let refundTx = settlementAction === 'refund_to_taker'
+        let refundTx = !sellerPayoutAction(settlementAction)
             ? trimString(params.refundTx) || trimString(match.refundTx)
             : undefined;
         let bridgeResult: Awaited<ReturnType<typeof middlemanForwarder.forwardSportSettlement>> | null = null;
@@ -286,7 +314,7 @@ export async function runSportSettlement(params: {
                 matchId: match.id,
                 fixtureId: match.fixtureId,
                 outcomeWinner: outcome.winner,
-                winnerWallet: makerWins ? match.makerWallet : match.takerWallet,
+                winnerWallet,
             });
 
             if (!bridgeResult.success) {
@@ -301,7 +329,7 @@ export async function runSportSettlement(params: {
                 continue;
             }
 
-            if (settlementAction === 'release_to_maker') {
+            if (sellerPayoutAction(settlementAction)) {
                 releaseTx = trimString(bridgeResult.tx);
             } else {
                 refundTx = trimString(bridgeResult.tx);
@@ -309,9 +337,11 @@ export async function runSportSettlement(params: {
         }
 
         const txRecorded = Boolean(releaseTx || refundTx);
-        const terminalStatus = settlementAction === 'release_to_maker' ? 'released' : 'refunded';
+        const terminalStatus = sellerPayoutAction(settlementAction) ? 'released' : 'refunded';
         settled.push(await settleArenaMatch(match.id, {
             outcomeId: outcome.id,
+            winnerWallet: winnerWallet || undefined,
+            settlementAction,
             releaseTx,
             refundTx,
             status: txRecorded || bridgeResult?.success ? terminalStatus : 'settled',

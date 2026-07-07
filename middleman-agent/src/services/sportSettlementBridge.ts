@@ -4,7 +4,11 @@ import { appendAuditLog } from "./auditTrail";
 import { executeReleasePhase, executeSettleToBuyerPhase } from "./onChainExecutionService";
 import { logger } from "../utils/logger";
 
-export type SportSettlementAction = "release_to_maker" | "refund_to_taker";
+export type SportSettlementAction =
+  | "release_to_maker"
+  | "refund_to_taker"
+  | "release_to_seller"
+  | "release_to_buyer";
 
 export interface ExecuteSportSettlementInput {
   ticketId: string;
@@ -32,7 +36,21 @@ function bridgeError(message: string, statusCode: number): Error {
 }
 
 function isSportSettlementAction(value: unknown): value is SportSettlementAction {
-  return value === "release_to_maker" || value === "refund_to_taker";
+  return (
+    value === "release_to_maker" ||
+    value === "refund_to_taker" ||
+    value === "release_to_seller" ||
+    value === "release_to_buyer"
+  );
+}
+
+function onChainActionForSettlement(
+  settlementAction: SportSettlementAction,
+): "release_funds" | "settle_to_buyer" {
+  if (settlementAction === "release_to_maker" || settlementAction === "release_to_seller") {
+    return "release_funds";
+  }
+  return "settle_to_buyer";
 }
 
 export async function executeSportSettlement(
@@ -78,8 +96,7 @@ export async function executeSportSettlement(
     matchId: input.matchId || null,
   });
 
-  const onChainAction =
-    input.settlementAction === "release_to_maker" ? "release_funds" : "settle_to_buyer";
+  const onChainAction = onChainActionForSettlement(input.settlementAction);
   const execution =
     onChainAction === "release_funds"
       ? await executeReleasePhase(ticketId)

@@ -217,6 +217,10 @@ model ArenaMatch {
   marketType            String?
   selection             String?
   direction             String?
+  makerPositionId       String?
+  takerPositionId       String?
+  makerSide             String?
+  stakeLamports         String?
   signalConfidence      Float?
 
   makerWallet           String
@@ -259,6 +263,34 @@ model ArenaMatch {
   @@index([makerWallet, createdAt])
   @@index([takerWallet, createdAt])
   @@index([escrowPda])
+  @@index([makerPositionId])
+  @@index([takerPositionId])
+}
+
+model SportPosition {
+  id                String   @id @default(uuid())
+  fixtureId         String
+  selection         String
+  side              String
+  stakeLamports     String
+  agentWallet       String
+  status            String   @default("open")
+  matchedPositionId String?
+  matchId           String?
+  offerId           String?
+  ticketId          String?
+  expiresAt         DateTime
+  clientOrderId     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([agentWallet, clientOrderId])
+  @@index([fixtureId, status, stakeLamports, createdAt])
+  @@index([agentWallet, status, createdAt])
+  @@index([expiresAt, status])
+  @@index([matchId])
+  @@index([offerId])
+  @@index([ticketId])
 }
 
 model McpAccessToken {

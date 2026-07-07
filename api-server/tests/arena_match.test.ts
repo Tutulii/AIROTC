@@ -336,7 +336,7 @@ describe('ArenaMatch lifecycle', () => {
                 outcomeId: 'outcome-1',
                 outcomeWinner: 'part1',
                 winnerWallet: 'maker-wallet',
-                settlementAction: 'release_to_maker',
+                settlementAction: 'release_to_seller',
                 settlementStatus: 'tx_recorded',
                 releaseTx: 'release-tx-signature',
                 status: 'settled',
@@ -344,7 +344,7 @@ describe('ArenaMatch lifecycle', () => {
             decision: {
                 makerWins: true,
                 winnerWallet: 'maker-wallet',
-                settlementAction: 'release_to_maker',
+                settlementAction: 'release_to_seller',
             },
         });
 
@@ -685,6 +685,128 @@ describe('ArenaMatch lifecycle', () => {
                         makerWins: false,
                         winnerWallet: 'taker-wallet',
                         settlementAction: 'refund_to_taker',
+                    },
+                },
+            ],
+        });
+    });
+
+    it('routes a winning back position to the buyer payout instruction', async () => {
+        const { runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
+
+        matchRows.set('match-position-back', stored({
+            id: 'match-position-back',
+            fixtureId: 'fixture-1',
+            offerId: 'offer-position-back',
+            ticketId: 'ticket-1',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+            direction: 'BUY_SELECTION',
+            makerSide: 'back',
+            makerWallet: 'maker-wallet',
+            takerWallet: 'taker-wallet',
+            buyerWallet: 'maker-wallet',
+            sellerWallet: 'taker-wallet',
+            rollupMode: 'SPORT',
+            status: 'escrow_attached',
+            proof: {},
+        }));
+        middlemanForwarderMock.forwardSportSettlement.mockResolvedValueOnce({
+            success: true,
+            tx: 'bridge-buyer-payout-tx',
+            onChainAction: 'settle_to_buyer',
+            status: 'refunded',
+        });
+
+        const result = await runSportSettlement({ matchId: 'match-position-back' });
+
+        expect(middlemanForwarderMock.forwardSportSettlement).toHaveBeenCalledWith({
+            ticketId: 'ticket-1',
+            settlementAction: 'release_to_buyer',
+            matchId: 'match-position-back',
+            fixtureId: 'fixture-1',
+            outcomeWinner: 'part1',
+            winnerWallet: 'maker-wallet',
+        });
+        expect(result).toMatchObject({
+            settledCount: 1,
+            settled: [
+                {
+                    match: {
+                        id: 'match-position-back',
+                        refundTx: 'bridge-buyer-payout-tx',
+                        winnerWallet: 'maker-wallet',
+                        settlementAction: 'release_to_buyer',
+                        status: 'refunded',
+                    },
+                },
+            ],
+        });
+    });
+
+    it('routes a winning lay position to the seller payout instruction', async () => {
+        const { runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
+
+        const losingSelectionOutcome = stored({
+            id: 'outcome-lay-1',
+            fixtureId: 'fixture-1',
+            status: 'finished',
+            homeScore: 0,
+            awayScore: 1,
+            winner: 'part2',
+            source: 'txline',
+            sourceUpdateId: 'score-final-away-lay',
+            sourceTimestamp: new Date('2026-07-01T11:00:00.000Z'),
+            settledAt: new Date('2026-07-01T11:00:00.000Z'),
+            raw: { GameState: 'finished' },
+        });
+        outcomeRowsById.set(losingSelectionOutcome.id, losingSelectionOutcome);
+        outcomeRowsByFixture.set(losingSelectionOutcome.fixtureId, losingSelectionOutcome);
+
+        matchRows.set('match-position-lay', stored({
+            id: 'match-position-lay',
+            fixtureId: 'fixture-1',
+            offerId: 'offer-position-lay',
+            ticketId: 'ticket-1',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+            direction: 'SELL_SELECTION',
+            makerSide: 'lay',
+            makerWallet: 'maker-wallet',
+            takerWallet: 'taker-wallet',
+            buyerWallet: 'taker-wallet',
+            sellerWallet: 'maker-wallet',
+            rollupMode: 'SPORT',
+            status: 'escrow_attached',
+            proof: {},
+        }));
+        middlemanForwarderMock.forwardSportSettlement.mockResolvedValueOnce({
+            success: true,
+            tx: 'bridge-seller-payout-tx',
+            onChainAction: 'release_funds',
+            status: 'completed',
+        });
+
+        const result = await runSportSettlement({ matchId: 'match-position-lay' });
+
+        expect(middlemanForwarderMock.forwardSportSettlement).toHaveBeenCalledWith({
+            ticketId: 'ticket-1',
+            settlementAction: 'release_to_seller',
+            matchId: 'match-position-lay',
+            fixtureId: 'fixture-1',
+            outcomeWinner: 'part2',
+            winnerWallet: 'maker-wallet',
+        });
+        expect(result).toMatchObject({
+            settledCount: 1,
+            settled: [
+                {
+                    match: {
+                        id: 'match-position-lay',
+                        releaseTx: 'bridge-seller-payout-tx',
+                        winnerWallet: 'maker-wallet',
+                        settlementAction: 'release_to_seller',
+                        status: 'released',
                     },
                 },
             ],

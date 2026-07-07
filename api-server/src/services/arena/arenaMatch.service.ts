@@ -7,6 +7,7 @@ import { serializeStrategySignal } from './strategyEngine';
 const prismaAny = prisma as any;
 
 const TERMINAL_MATCH_STATUSES = new Set(['settled', 'released', 'refunded', 'cancelled', 'failed']);
+const LAMPORTS_PER_SOL = 1_000_000_000;
 
 export interface CreateArenaMatchInput {
     fixtureId?: string;
@@ -96,6 +97,16 @@ function serializeDate(value: unknown): string | undefined {
     return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
+function lamportsToSol(value: unknown): number | undefined {
+    const raw = trimString(value);
+    if (!raw) return undefined;
+    try {
+        return Number(BigInt(raw)) / LAMPORTS_PER_SOL;
+    } catch {
+        return undefined;
+    }
+}
+
 export function serializeArenaMatch(row: any): Record<string, unknown> {
     if (!row) return {};
     return {
@@ -106,6 +117,11 @@ export function serializeArenaMatch(row: any): Record<string, unknown> {
         marketType: row.marketType || undefined,
         selection: row.selection || undefined,
         direction: row.direction || undefined,
+        makerPositionId: row.makerPositionId || undefined,
+        takerPositionId: row.takerPositionId || undefined,
+        makerSide: row.makerSide || undefined,
+        stakeLamports: row.stakeLamports || undefined,
+        stakeSol: lamportsToSol(row.stakeLamports),
         signalConfidence: row.signalConfidence ?? undefined,
         makerWallet: row.makerWallet,
         takerWallet: row.takerWallet || undefined,
@@ -340,13 +356,27 @@ export async function attachArenaTicket(matchId: string, input: AttachTicketInpu
 }
 
 function inferMakerWins(match: any, signal: any, outcome: any): boolean | null {
+    const makerSide = trimString(match.makerSide);
     const direction = match.direction || signal?.direction;
     const selection = match.selection || signal?.selection;
     const winner = outcome?.winner || match.outcomeWinner;
-    if (!direction || !selection || !winner) return null;
+    if (!selection || !winner) return null;
+    if (makerSide === 'back') return selection === winner;
+    if (makerSide === 'lay') return selection !== winner;
+    if (!direction) return null;
     if (direction === 'BUY_SELECTION') return selection === winner;
     if (direction === 'SELL_SELECTION') return selection !== winner;
     return null;
+}
+
+function settlementActionForWinner(match: any, makerWins: boolean | null): string {
+    if (makerWins === null) return 'manual_review';
+    const winnerWallet = trimString(makerWins ? match.makerWallet : match.takerWallet);
+    const sellerWallet = trimString(match.sellerWallet);
+    const buyerWallet = trimString(match.buyerWallet);
+    if (winnerWallet && sellerWallet && winnerWallet === sellerWallet) return 'release_to_seller';
+    if (winnerWallet && buyerWallet && winnerWallet === buyerWallet) return 'release_to_buyer';
+    return makerWins ? 'release_to_maker' : 'refund_to_taker';
 }
 
 export async function settleArenaMatch(matchId: string, input: SettleArenaMatchInput = {}): Promise<Record<string, unknown>> {
@@ -364,7 +394,7 @@ export async function settleArenaMatch(matchId: string, input: SettleArenaMatchI
         || (makerWins === true ? match.makerWallet : makerWins === false ? match.takerWallet : undefined)
         || null;
     const settlementAction = trimString(input.settlementAction)
-        || (makerWins === true ? 'release_to_maker' : makerWins === false ? 'refund_to_taker' : 'manual_review');
+        || settlementActionForWinner(match, makerWins);
     const releaseTx = trimString(input.releaseTx) || match.releaseTx || null;
     const refundTx = trimString(input.refundTx) || match.refundTx || null;
     const settlementStatus = trimString(input.settlementStatus)

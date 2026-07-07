@@ -143,6 +143,54 @@ describe("sportSettlementBridge", () => {
     });
   });
 
+  it("supports explicit seller payout action for position-aware SPORT settlement", async () => {
+    const { executeSportSettlement } = await import("../src/services/sportSettlementBridge");
+
+    const result = await executeSportSettlement({
+      ticketId: "ticket-sport",
+      settlementAction: "release_to_seller",
+      fixtureId: "fixture-1",
+      outcomeWinner: "part1",
+      winnerWallet: "seller-wallet",
+    });
+
+    expect(executeReleasePhaseMock).toHaveBeenCalledWith("ticket-sport");
+    expect(executeSettleToBuyerPhaseMock).not.toHaveBeenCalled();
+    expect(syncTerminalPhaseMock).toHaveBeenCalledWith("ticket-sport", "completed");
+    expect(result).toMatchObject({
+      success: true,
+      ticketId: "ticket-sport",
+      settlementAction: "release_to_seller",
+      onChainAction: "release_funds",
+      tx: "release-tx",
+      status: "completed",
+    });
+  });
+
+  it("supports explicit buyer payout action for position-aware SPORT settlement", async () => {
+    const { executeSportSettlement } = await import("../src/services/sportSettlementBridge");
+
+    const result = await executeSportSettlement({
+      ticketId: "ticket-sport",
+      settlementAction: "release_to_buyer",
+      fixtureId: "fixture-1",
+      outcomeWinner: "part1",
+      winnerWallet: "buyer-wallet",
+    });
+
+    expect(executeSettleToBuyerPhaseMock).toHaveBeenCalledWith("ticket-sport");
+    expect(executeReleasePhaseMock).not.toHaveBeenCalled();
+    expect(syncTerminalPhaseMock).toHaveBeenCalledWith("ticket-sport", "refunded");
+    expect(result).toMatchObject({
+      success: true,
+      ticketId: "ticket-sport",
+      settlementAction: "release_to_buyer",
+      onChainAction: "settle_to_buyer",
+      tx: "refund-tx",
+      status: "refunded",
+    });
+  });
+
   it("rejects SPORT settlement before escrow funding is complete", async () => {
     getDealWithFallbackMock.mockResolvedValueOnce({
       phase: "awaiting_deposits",
