@@ -291,6 +291,14 @@ export async function getOutcomeForFixture(fixtureId: string): Promise<Record<st
         }
     }
     if (!outcome || !isTrustedOutcomeSource(outcome.source)) {
+        try {
+            await deriveOutcomesFromStoredScores(fixtureId);
+            outcome = await prismaAny.arenaOutcome.findUnique({ where: { fixtureId } });
+        } catch {
+            outcome = await prismaAny.arenaOutcome.findUnique({ where: { fixtureId } });
+        }
+    }
+    if (!outcome || !isTrustedOutcomeSource(outcome.source)) {
         const error = new Error('txline_outcome_not_found');
         (error as any).statusCode = 404;
         throw error;

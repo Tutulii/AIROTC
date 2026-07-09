@@ -18,6 +18,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_create_position", "offers:write"],
   ["airotc_sport_post_position", "offers:write"],
   ["airotc_sport_accept_position", "offers:write"],
+  ["airotc_sport_counter_position", "offers:write"],
   ["airotc_sport_confirm_position_funding", "offers:write"],
   ["airotc_sport_execute_funding", "offers:write"],
   ["airotc_sport_cancel_position", "offers:write"],
@@ -237,6 +238,18 @@ assert.equal(
   sportAcceptPositionTool.inputSchema.properties.stakeSol.exclusiveMinimum,
   0,
   "sport_accept_position must allow optional partial/larger stake"
+);
+
+const sportCounterPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_counter_position");
+assert.deepEqual(
+  sportCounterPositionTool.inputSchema.required,
+  ["wallet", "positionId"],
+  "sport_counter_position must require a wallet and position id"
+);
+assert.equal(
+  sportCounterPositionTool.inputSchema.properties.stakeSol.exclusiveMinimum,
+  0,
+  "sport_counter_position must allow optional adjusted stake"
 );
 
 const sportConfirmFundingTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_confirm_position_funding");

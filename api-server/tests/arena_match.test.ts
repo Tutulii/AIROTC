@@ -9,6 +9,12 @@ const { middlemanForwarderMock } = vi.hoisted(() => ({
         getDealStatus: vi.fn(),
     },
 }));
+const { webhooksMock } = vi.hoisted(() => ({
+    webhooksMock: {
+        dealCompleted: vi.fn(),
+        dealRefunded: vi.fn(),
+    },
+}));
 
 const NOW = new Date('2026-07-01T09:00:00.000Z');
 const fixtureRows = new Map<string, any>();
@@ -229,6 +235,10 @@ vi.mock('../src/services/arena/strategyOfferBridge', () => ({
 
 vi.mock('../src/services/middlemanForwarder', () => ({
     middlemanForwarder: middlemanForwarderMock,
+}));
+
+vi.mock('../src/services/webhookDelivery', () => ({
+    webhooks: webhooksMock,
 }));
 
 describe('ArenaMatch lifecycle', () => {
@@ -822,6 +832,20 @@ describe('ArenaMatch lifecycle', () => {
                 },
             ],
         });
+        expect(webhooksMock.dealCompleted).toHaveBeenCalledWith(
+            'ticket-1',
+            'maker-wallet',
+            'taker-wallet',
+            expect.objectContaining({
+                mode: 'SPORT',
+                matchId: 'match-position-back',
+                fixtureId: 'fixture-1',
+                outcomeWinner: 'part1',
+                winnerWallet: 'maker-wallet',
+                settlementAction: 'release_to_buyer',
+            })
+        );
+        expect(webhooksMock.dealRefunded).not.toHaveBeenCalled();
     });
 
     it('void-refunds complement-backed part1 vs part2 matches when TxLINE outcome is draw', async () => {
@@ -907,6 +931,20 @@ describe('ArenaMatch lifecycle', () => {
             makerWins: null,
             winnerWallet: null,
         });
+        expect(webhooksMock.dealCompleted).toHaveBeenCalledWith(
+            'ticket-1',
+            'maker-wallet',
+            'taker-wallet',
+            expect.objectContaining({
+                mode: 'SPORT',
+                matchId: 'match-complement-draw',
+                fixtureId: 'fixture-1',
+                outcomeWinner: 'draw',
+                winnerWallet: null,
+                settlementAction: 'void_refund',
+            })
+        );
+        expect(webhooksMock.dealRefunded).toHaveBeenCalledWith('ticket-1', 'maker-wallet', 'taker-wallet');
     });
 
     it('routes a winning lay position to the seller payout instruction', async () => {

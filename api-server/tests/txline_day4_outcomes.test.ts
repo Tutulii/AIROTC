@@ -288,6 +288,30 @@ describe('TxLINE Day 4 outcomes and backtest', () => {
         });
     });
 
+    it('derives a trusted TxLINE outcome from stored score replay before returning 404', async () => {
+        const { getOutcomeForFixture } = await import('../src/services/arena/outcomeBacktest');
+        scoreRows.push({
+            fixtureId: 'fixture-replay-only',
+            homeScore: 3,
+            awayScore: 1,
+            status: 'finished',
+            source: 'txline',
+            sourceUpdateId: 'score-replay-final',
+            sourceTimestamp: new Date('2026-07-01T22:00:00.000Z'),
+            raw: { GameState: 'finished' },
+            createdAt: new Date('2026-07-01T22:00:00.000Z'),
+            updatedAt: new Date('2026-07-01T22:00:00.000Z'),
+        });
+
+        await expect(getOutcomeForFixture('fixture-replay-only')).resolves.toMatchObject({
+            fixtureId: 'fixture-replay-only',
+            homeScore: 3,
+            awayScore: 1,
+            winner: 'part1',
+            source: 'txline',
+        });
+    });
+
     it('runs accuracy and PnL backtests only for signals before a stored outcome', async () => {
         const { runBacktest } = await import('../src/services/arena/outcomeBacktest');
         outcomeRows.push({

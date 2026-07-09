@@ -1,6 +1,8 @@
 import { Prisma } from '@prisma/client';
+import { logger } from '../../lib/logger';
 import { prisma } from '../../lib/prisma';
 import { middlemanForwarder } from '../middlemanForwarder';
+import { webhooks } from '../webhookDelivery';
 import { attachArenaTicket, serializeArenaMatch, settleArenaMatch } from './arenaMatch.service';
 import { deriveOutcomesFromStoredScores, isTrustedOutcomeSource, syncOutcomeForFixture } from './outcomeBacktest';
 
@@ -58,6 +60,60 @@ async function fixtureMapForMatches(matches: any[]): Promise<Map<string, any>> {
 
 function settlementDirectionFromOfferMode(mode: unknown): 'BUY_SELECTION' | 'SELL_SELECTION' {
     return mode === 'sell' ? 'SELL_SELECTION' : 'BUY_SELECTION';
+}
+
+function observeNotification(promise: Promise<unknown> | void, context: Record<string, unknown>): void {
+    if (!promise || typeof (promise as Promise<unknown>).catch !== 'function') return;
+    void (promise as Promise<unknown>).catch((error: any) => {
+        logger.warn('sport_settlement_notification_failed', {
+            ...context,
+            error: error?.message || String(error),
+        });
+    });
+}
+
+function emitSportSettlementNotifications(input: {
+    match: any;
+    outcome: any;
+    settlementAction: SportSettlementAction;
+    winnerWallet: string | null;
+    releaseTx?: string;
+    refundTx?: string;
+    terminalStatus: string;
+}): void {
+    const ticketId = trimString(input.match.ticketId);
+    const buyer = trimString(input.match.buyerWallet) || trimString(input.match.makerWallet);
+    const seller = trimString(input.match.sellerWallet) || trimString(input.match.takerWallet);
+    if (!ticketId || !buyer || !seller) return;
+
+    const data = {
+        mode: 'SPORT',
+        matchId: input.match.id,
+        fixtureId: input.match.fixtureId,
+        marketType: input.match.marketType || null,
+        selection: input.match.selection || null,
+        settlementSource: 'txline',
+        outcomeWinner: input.outcome.winner || null,
+        winnerWallet: input.winnerWallet || null,
+        settlementAction: input.settlementAction,
+        terminalStatus: input.terminalStatus,
+        releaseTx: input.releaseTx || null,
+        refundTx: input.refundTx || null,
+    };
+
+    observeNotification(webhooks.dealCompleted(ticketId, buyer, seller, data), {
+        ticketId,
+        matchId: input.match.id,
+        event: 'deal.completed',
+    });
+
+    if (input.settlementAction === 'void_refund') {
+        observeNotification(webhooks.dealRefunded(ticketId, buyer, seller), {
+            ticketId,
+            matchId: input.match.id,
+            event: 'deal.refunded',
+        });
+    }
 }
 
 function inferMakerWins(match: any, outcome: any): boolean | null {
@@ -405,6 +461,15 @@ export async function runSportSettlement(params: {
                 },
             });
         }
+        emitSportSettlementNotifications({
+            match,
+            outcome,
+            settlementAction,
+            winnerWallet,
+            releaseTx,
+            refundTx,
+            terminalStatus,
+        });
         settled.push(settledMatch);
     }
 

@@ -1302,6 +1302,41 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_counter_position",
+    title: "Sport Counter Position",
+    description:
+      "Prebuilt SPORT counter-offer helper. Creates the opposite funding-required draft with an optional adjusted stakeSol, then the agent funds it through airotc_sport_execute_funding. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/accept`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              stakeSol: args.stakeSol,
+              clientOrderId: args.clientOrderId,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_sport_confirm_position_funding",
     title: "Sport Confirm Position Funding",
     description:
