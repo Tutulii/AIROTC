@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import bs58 from "bs58";
+import nacl from "tweetnacl";
 
 process.env.AIR_OTC_MCP_NO_AUTOSTART = "1";
 
@@ -301,6 +303,42 @@ assert.deepEqual(
   sportFundingSessionStatusTool.inputSchema.required,
   ["wallet"],
   "sport_funding_session_status must require wallet"
+);
+
+const generatedFundingKeypair = nacl.sign.keyPair();
+const generatedFundingWallet = bs58.encode(generatedFundingKeypair.publicKey);
+const generatedFundingSecret = bs58.encode(generatedFundingKeypair.secretKey);
+const fundingSession = __test.registerFundingSession(
+  generatedFundingWallet,
+  "session-body-token",
+  generatedFundingSecret,
+  600
+);
+assert.equal(fundingSession.registered, true, "funding session registration must succeed for a matching wallet keypair");
+assert.equal(
+  __test.getFundingSessionKeypair(generatedFundingWallet, "session-body-token"),
+  generatedFundingSecret,
+  "funding session must resolve with the original token binding"
+);
+assert.equal(
+  __test.getFundingSessionKeypair(generatedFundingWallet, "session-header-token"),
+  generatedFundingSecret,
+  "funding session must resolve by wallet fallback when token transport changes"
+);
+assert.equal(
+  __test.getFundingSessionStatus(generatedFundingWallet, "session-header-token").active,
+  true,
+  "funding session status must report active through wallet fallback"
+);
+assert.equal(
+  __test.clearFundingSession(generatedFundingWallet, "session-header-token").cleared,
+  true,
+  "clearing by fallback token must clear the wallet session"
+);
+assert.equal(
+  __test.getFundingSessionStatus(generatedFundingWallet, "session-body-token").active,
+  false,
+  "clearing a wallet session must remove all aliases for that session"
 );
 
 const sportExecuteFundingTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_execute_funding");

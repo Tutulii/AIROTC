@@ -294,6 +294,10 @@ function fundingSessionKey(wallet: string, authToken?: string): string {
   return `${wallet}:${fundingSessionTokenKey(authToken)}`;
 }
 
+function fundingSessionWalletKey(wallet: string): string {
+  return `${wallet}:wallet-session`;
+}
+
 function pruneExpiredFundingSessions(nowMs = Date.now()): void {
   for (const [key, session] of fundingSessions.entries()) {
     if (session.expiresAtMs <= nowMs) fundingSessions.delete(key);
@@ -320,6 +324,7 @@ function registerFundingSession(wallet: string, authToken: string | undefined, w
     expiresAtMs: nowMs + ttlSeconds * 1000,
   };
   fundingSessions.set(fundingSessionKey(wallet, authToken), session);
+  fundingSessions.set(fundingSessionWalletKey(wallet), session);
   return {
     wallet,
     sessionId,
@@ -333,12 +338,17 @@ function registerFundingSession(wallet: string, authToken: string | undefined, w
 
 function getFundingSessionKeypair(wallet: string, authToken?: string): string | undefined {
   pruneExpiredFundingSessions();
-  return fundingSessions.get(fundingSessionKey(wallet, authToken))?.secretKeyBase58;
+  return (
+    fundingSessions.get(fundingSessionKey(wallet, authToken)) ||
+    fundingSessions.get(fundingSessionWalletKey(wallet))
+  )?.secretKeyBase58;
 }
 
 function getFundingSessionStatus(wallet: string, authToken?: string): Record<string, unknown> {
   pruneExpiredFundingSessions();
-  const session = fundingSessions.get(fundingSessionKey(wallet, authToken));
+  const tokenSession = fundingSessions.get(fundingSessionKey(wallet, authToken));
+  const walletSession = fundingSessions.get(fundingSessionWalletKey(wallet));
+  const session = tokenSession || walletSession;
   if (!session) {
     return {
       wallet,
@@ -353,6 +363,7 @@ function getFundingSessionStatus(wallet: string, authToken?: string): Record<str
     active: true,
     sessionId: session.sessionId,
     storage: "mcp_process_memory_only",
+    binding: tokenSession ? "token_and_wallet" : "wallet",
     createdAt: new Date(session.createdAtMs).toISOString(),
     expiresAt: new Date(session.expiresAtMs).toISOString(),
     ttlRemainingSeconds,
@@ -362,7 +373,18 @@ function getFundingSessionStatus(wallet: string, authToken?: string): Record<str
 function clearFundingSession(wallet: string, authToken?: string): Record<string, unknown> {
   pruneExpiredFundingSessions();
   const key = fundingSessionKey(wallet, authToken);
-  const existed = fundingSessions.delete(key);
+  const session = fundingSessions.get(key) || fundingSessions.get(fundingSessionWalletKey(wallet));
+  const existed = Boolean(session);
+  if (session) {
+    for (const [candidateKey, candidateSession] of fundingSessions.entries()) {
+      if (candidateSession.wallet === wallet && candidateSession.sessionId === session.sessionId) {
+        fundingSessions.delete(candidateKey);
+      }
+    }
+  } else {
+    fundingSessions.delete(key);
+    fundingSessions.delete(fundingSessionWalletKey(wallet));
+  }
   return {
     wallet,
     cleared: existed,
@@ -3264,6 +3286,10 @@ export const __test = {
   parseScopes,
   delegatedWalletFromArgs,
   sportStatusBucket,
+  registerFundingSession,
+  getFundingSessionKeypair,
+  getFundingSessionStatus,
+  clearFundingSession,
 };
 
 if (process.env.AIR_OTC_MCP_NO_AUTOSTART !== "1") {
