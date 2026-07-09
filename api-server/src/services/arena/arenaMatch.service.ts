@@ -444,6 +444,18 @@ function inferMakerWins(match: any, signal: any, outcome: any): boolean | null {
     const selection = match.selection || signal?.selection;
     const winner = outcome?.winner || match.outcomeWinner;
     if (!selection || !winner) return null;
+    const proof = match?.proof && typeof match.proof === 'object' && !Array.isArray(match.proof)
+        ? match.proof
+        : {};
+    if (
+        winner === 'draw'
+        && (
+            proof.marketModel === 'complement_back_draw_refund'
+            || proof.matchKind === 'complement_back_back'
+        )
+    ) {
+        return null;
+    }
     if (makerSide === 'back') return selection === winner;
     if (makerSide === 'lay') return selection !== winner;
     if (!direction) return null;

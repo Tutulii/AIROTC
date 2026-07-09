@@ -824,6 +824,91 @@ describe('ArenaMatch lifecycle', () => {
         });
     });
 
+    it('void-refunds complement-backed part1 vs part2 matches when TxLINE outcome is draw', async () => {
+        const { runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
+
+        const drawOutcome = stored({
+            id: 'outcome-draw-1',
+            fixtureId: 'fixture-1',
+            status: 'finished',
+            homeScore: 1,
+            awayScore: 1,
+            winner: 'draw',
+            source: 'txline',
+            sourceUpdateId: 'score-final-draw',
+            sourceTimestamp: new Date('2026-07-01T11:00:00.000Z'),
+            settledAt: new Date('2026-07-01T11:00:00.000Z'),
+            raw: { GameState: 'finished' },
+        });
+        outcomeRowsById.set(drawOutcome.id, drawOutcome);
+        outcomeRowsByFixture.set(drawOutcome.fixtureId, drawOutcome);
+        matchRows.set('match-complement-draw', stored({
+            id: 'match-complement-draw',
+            fixtureId: 'fixture-1',
+            offerId: 'offer-complement-draw',
+            ticketId: 'ticket-1',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+            direction: 'BUY_SELECTION',
+            makerSide: 'back',
+            makerWallet: 'maker-wallet',
+            takerWallet: 'taker-wallet',
+            buyerWallet: 'maker-wallet',
+            sellerWallet: 'taker-wallet',
+            rollupMode: 'SPORT',
+            status: 'escrow_attached',
+            proof: {
+                marketModel: 'complement_back_draw_refund',
+                matchKind: 'complement_back_back',
+                makerSelection: 'part1',
+                takerSelection: 'part2',
+                drawPolicy: 'void_refund',
+            },
+        }));
+        middlemanForwarderMock.forwardSportSettlement.mockResolvedValueOnce({
+            success: true,
+            tx: 'bridge-void-refund-tx',
+            onChainAction: 'cancel_deal',
+            status: 'cancelled',
+        });
+
+        const result = await runSportSettlement({ matchId: 'match-complement-draw' });
+
+        expect(middlemanForwarderMock.forwardSportSettlement).toHaveBeenCalledWith({
+            ticketId: 'ticket-1',
+            settlementAction: 'void_refund',
+            matchId: 'match-complement-draw',
+            fixtureId: 'fixture-1',
+            outcomeWinner: 'draw',
+            winnerWallet: null,
+        });
+        expect(result).toMatchObject({
+            settledCount: 1,
+            settled: [
+                {
+                    match: {
+                        id: 'match-complement-draw',
+                        refundTx: 'bridge-void-refund-tx',
+                        settlementAction: 'void_refund',
+                        settlementStatus: 'tx_recorded',
+                        status: 'refunded',
+                    },
+                    decision: {
+                        makerWins: null,
+                        winnerWallet: null,
+                        settlementAction: 'void_refund',
+                    },
+                },
+            ],
+        });
+        expect(result.settled[0].match.winnerWallet).toBeUndefined();
+        expect(result.settled[0].match.proof).toMatchObject({
+            drawPolicy: 'void_refund',
+            makerWins: null,
+            winnerWallet: null,
+        });
+    });
+
     it('routes a winning lay position to the seller payout instruction', async () => {
         const { runSportSettlement } = await import('../src/services/arena/sportSettlementEngine');
 

@@ -1,14 +1,15 @@
 import { dealPhaseManager } from "../../core/dealPhaseManager";
 import { ticketStore } from "../state/ticketStore";
 import { appendAuditLog } from "./auditTrail";
-import { executeReleasePhase, executeSettleToBuyerPhase } from "./onChainExecutionService";
+import { executeCancelDeal, executeReleasePhase, executeSettleToBuyerPhase } from "./onChainExecutionService";
 import { logger } from "../utils/logger";
 
 export type SportSettlementAction =
   | "release_to_maker"
   | "refund_to_taker"
   | "release_to_seller"
-  | "release_to_buyer";
+  | "release_to_buyer"
+  | "void_refund";
 
 export interface ExecuteSportSettlementInput {
   ticketId: string;
@@ -23,9 +24,9 @@ export interface ExecuteSportSettlementResult {
   success: boolean;
   ticketId: string;
   settlementAction: SportSettlementAction;
-  onChainAction: "release_funds" | "settle_to_buyer";
+  onChainAction: "release_funds" | "settle_to_buyer" | "cancel_deal";
   tx?: string;
-  status?: "completed" | "refunded";
+  status?: "completed" | "refunded" | "cancelled";
   error?: string;
 }
 
@@ -40,13 +41,17 @@ function isSportSettlementAction(value: unknown): value is SportSettlementAction
     value === "release_to_maker" ||
     value === "refund_to_taker" ||
     value === "release_to_seller" ||
-    value === "release_to_buyer"
+    value === "release_to_buyer" ||
+    value === "void_refund"
   );
 }
 
 function onChainActionForSettlement(
   settlementAction: SportSettlementAction,
-): "release_funds" | "settle_to_buyer" {
+): "release_funds" | "settle_to_buyer" | "cancel_deal" {
+  if (settlementAction === "void_refund") {
+    return "cancel_deal";
+  }
   if (settlementAction === "release_to_maker" || settlementAction === "release_to_seller") {
     return "release_funds";
   }
@@ -100,7 +105,9 @@ export async function executeSportSettlement(
   const execution =
     onChainAction === "release_funds"
       ? await executeReleasePhase(ticketId)
-      : await executeSettleToBuyerPhase(ticketId);
+      : onChainAction === "settle_to_buyer"
+        ? await executeSettleToBuyerPhase(ticketId)
+        : await executeCancelDeal(ticketId);
 
   if (!execution.success) {
     await appendAuditLog(ticketId, "sport_settlement_execution_failed", {
@@ -117,7 +124,11 @@ export async function executeSportSettlement(
     };
   }
 
-  const terminalStatus = onChainAction === "release_funds" ? "completed" : "refunded";
+  const terminalStatus = onChainAction === "release_funds"
+    ? "completed"
+    : onChainAction === "settle_to_buyer"
+      ? "refunded"
+      : "cancelled";
   await dealPhaseManager.syncTerminalPhaseFromExecutionStatus(ticketId, terminalStatus);
   await appendAuditLog(ticketId, "sport_settlement_executed", {
     ...auditPayload,

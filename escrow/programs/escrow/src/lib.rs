@@ -300,6 +300,20 @@ pub enum SportPositionSide {
     Lay,
 }
 
+const SPORT_SELECTION_PART1_HASH: [u8; 32] = [
+    89, 224, 163, 204, 122, 12, 69, 249, 103, 53, 191, 31, 6, 50, 93, 185,
+    11, 75, 183, 66, 242, 87, 223, 18, 182, 177, 141, 243, 210, 18, 100, 153,
+];
+const SPORT_SELECTION_PART2_HASH: [u8; 32] = [
+    71, 77, 60, 154, 11, 82, 183, 104, 183, 197, 74, 255, 178, 195, 134, 169,
+    33, 166, 179, 48, 7, 16, 156, 112, 190, 123, 83, 110, 186, 23, 107, 180,
+];
+
+fn is_participant_complement_pair(left: [u8; 32], right: [u8; 32]) -> bool {
+    (left == SPORT_SELECTION_PART1_HASH && right == SPORT_SELECTION_PART2_HASH)
+        || (left == SPORT_SELECTION_PART2_HASH && right == SPORT_SELECTION_PART1_HASH)
+}
+
 // ── State ────────────────────────────────────────────────────────────
 
 /// Global config PDA — stores admin authority and paused flag.
@@ -1674,13 +1688,23 @@ pub mod escrow {
         require!(now <= buyer_position.expires_at, EscrowError::SportPositionExpired);
         require!(now <= seller_position.expires_at, EscrowError::SportPositionExpired);
         require!(buyer_position.owner != seller_position.owner, EscrowError::SportSelfMatch);
-        require!(buyer_position.side == SportPositionSide::Back, EscrowError::SportPositionMismatch);
-        require!(seller_position.side == SportPositionSide::Lay, EscrowError::SportPositionMismatch);
         require!(buyer_position.mint == ctx.accounts.mint.key(), EscrowError::MintMismatch);
         require!(seller_position.mint == ctx.accounts.mint.key(), EscrowError::MintMismatch);
         require!(buyer_position.fixture_hash == seller_position.fixture_hash, EscrowError::SportPositionMismatch);
         require!(buyer_position.market_hash == seller_position.market_hash, EscrowError::SportPositionMismatch);
-        require!(buyer_position.selection_hash == seller_position.selection_hash, EscrowError::SportPositionMismatch);
+        let same_selection_back_lay = buyer_position.side == SportPositionSide::Back
+            && seller_position.side == SportPositionSide::Lay
+            && buyer_position.selection_hash == seller_position.selection_hash;
+        let complement_back_back = buyer_position.side == SportPositionSide::Back
+            && seller_position.side == SportPositionSide::Back
+            && is_participant_complement_pair(
+                buyer_position.selection_hash,
+                seller_position.selection_hash,
+            );
+        require!(
+            same_selection_back_lay || complement_back_back,
+            EscrowError::SportPositionMismatch
+        );
         require!(fill_lamports <= buyer_position.available_stake, EscrowError::InsufficientFunds);
         require!(fill_lamports <= seller_position.available_stake, EscrowError::InsufficientFunds);
 

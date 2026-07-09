@@ -675,6 +675,84 @@ describe('SPORT position layer', () => {
         expect(middlemanForwarderMock.forwardOfferAccepted).toHaveBeenCalledTimes(2);
     });
 
+    it('matches complementary backed selections with draw-refund proof', async () => {
+        const { confirmSportPositionFunding, postSportPosition } = await import('../src/services/sportPosition.service');
+        const part1Back: any = await postSportPosition(MAKER, {
+            fixtureId: '18198205',
+            selection: 'part1',
+            side: 'back',
+            stakeSol: '0.03',
+        });
+        await confirmSportPositionFunding(MAKER, part1Back.position.id, { fundingTx: 'maker-part1-back-tx' });
+
+        const part2Back: any = await postSportPosition(TAKER, {
+            fixtureId: '18198205',
+            selection: 'part2',
+            side: 'back',
+            stakeSol: '0.01',
+        });
+        const result: any = await confirmSportPositionFunding(TAKER, part2Back.position.id, { fundingTx: 'taker-part2-back-tx' });
+
+        expect(result).toMatchObject({
+            matched: true,
+            fill: {
+                fillLamports: '10000000',
+                status: 'awaiting_result',
+            },
+            position: {
+                agentWallet: TAKER,
+                selection: 'part2',
+                side: 'back',
+                status: 'filled',
+                remainingLamports: '0',
+            },
+            counterpartyPosition: {
+                agentWallet: MAKER,
+                selection: 'part1',
+                side: 'back',
+                status: 'partially_filled',
+                remainingLamports: '20000000',
+            },
+            ticket: {
+                buyer: MAKER,
+                seller: TAKER,
+                status: 'awaiting_result',
+            },
+        });
+        expect(arenaMatchRows.get('match-1')).toMatchObject({
+            makerPositionId: part1Back.position.id,
+            takerPositionId: part2Back.position.id,
+            selection: 'part1',
+            makerSide: 'back',
+            buyerWallet: MAKER,
+            sellerWallet: TAKER,
+            proof: expect.objectContaining({
+                marketModel: 'complement_back_draw_refund',
+                matchKind: 'complement_back_back',
+                makerSelection: 'part1',
+                takerSelection: 'part2',
+                drawPolicy: 'void_refund',
+            }),
+        });
+        expect(sportPositionFillRows.get('fill-1')).toMatchObject({
+            backPositionId: part1Back.position.id,
+            layPositionId: part2Back.position.id,
+            backWallet: MAKER,
+            layWallet: TAKER,
+            fillLamports: '10000000',
+            status: 'awaiting_result',
+        });
+        expect(middlemanForwarderMock.forwardOfferAccepted).toHaveBeenCalledWith(expect.objectContaining({
+            buyerWallet: MAKER,
+            sellerWallet: TAKER,
+            sportPositionVaults: expect.objectContaining({
+                buyerPositionId: part1Back.position.id,
+                sellerPositionId: part2Back.position.id,
+                fillLamports: '10000000',
+            }),
+        }));
+    });
+
     it('lists position fills and wallet fills for restart recovery', async () => {
         const {
             confirmSportPositionFunding,

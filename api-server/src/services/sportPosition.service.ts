@@ -17,6 +17,7 @@ const PUBLIC_POSITION_STATUSES = ['funded_open', 'partially_filled', 'matching',
 
 type SportSide = 'back' | 'lay';
 type SportSelection = 'part1' | 'draw' | 'part2';
+type SportMatchKind = 'same_selection_back_lay' | 'complement_back_back';
 type SportPositionStatus =
     | 'funding_required'
     | 'funded_open'
@@ -35,6 +36,7 @@ interface MatchArtifacts {
     counterpartyPosition: any;
     fill?: any | null;
     fillLamports?: string | null;
+    matchKind?: SportMatchKind;
     offer: any;
     ticket: any;
     arenaMatch: any;
@@ -131,6 +133,57 @@ function normalizePositionStatus(value: unknown, fallback: SportPositionStatus):
 
 function oppositeSide(side: SportSide): SportSide {
     return side === 'back' ? 'lay' : 'back';
+}
+
+function complementSelection(selection: unknown): SportSelection | null {
+    if (selection === 'part1') return 'part2';
+    if (selection === 'part2') return 'part1';
+    return null;
+}
+
+function sportComplementBackMatchingEnabled(): boolean {
+    return process.env.SPORT_COMPLEMENT_BACK_MATCHING_ENABLED !== 'false';
+}
+
+function resolveSportMatchKind(left: any, right: any): SportMatchKind | null {
+    if (
+        left?.fixtureId === right?.fixtureId
+        && left?.selection === right?.selection
+        && left?.side === oppositeSide(right?.side as SportSide)
+    ) {
+        return 'same_selection_back_lay';
+    }
+    if (
+        sportComplementBackMatchingEnabled()
+        && left?.fixtureId === right?.fixtureId
+        && left?.side === 'back'
+        && right?.side === 'back'
+        && complementSelection(left?.selection) === right?.selection
+    ) {
+        return 'complement_back_back';
+    }
+    return null;
+}
+
+function matchCandidateBranches(position: any): Array<Record<string, unknown>> {
+    const branches: Array<Record<string, unknown>> = [
+        {
+            selection: position.selection,
+            side: oppositeSide(position.side as SportSide),
+        },
+    ];
+    const complement = complementSelection(position.selection);
+    if (
+        sportComplementBackMatchingEnabled()
+        && position.side === 'back'
+        && complement
+    ) {
+        branches.push({
+            selection: complement,
+            side: 'back',
+        });
+    }
+    return branches;
 }
 
 function sportPartialFillEnabled(): boolean {
@@ -608,10 +661,12 @@ async function createMatchedArtifacts(tx: any, params: {
     fixture: any;
     fill?: any | null;
     fillLamports?: string | null;
+    matchKind?: SportMatchKind;
 }): Promise<MatchArtifacts> {
     const maker = params.makerPosition;
     const taker = params.takerPosition;
     const makerSide = maker.side as SportSide;
+    const matchKind = params.matchKind || resolveSportMatchKind(maker, taker) || 'same_selection_back_lay';
     const mode = sideToOfferMode(makerSide);
     const fillLamports = params.fillLamports || maker.stakeLamports;
     const stakeSol = lamportsToSolNumber(fillLamports);
@@ -680,10 +735,16 @@ async function createMatchedArtifacts(tx: any, params: {
                 fixtureKnown: Boolean(params.fixture),
                 fixtureStartsAt: params.fixture?.startsAt || null,
                 settlementSource: 'txline',
-                marketModel: 'binary_back_lay',
+                marketModel: matchKind === 'complement_back_back'
+                    ? 'complement_back_draw_refund'
+                    : 'binary_back_lay',
                 makerPositionId: maker.id,
                 takerPositionId: taker.id,
                 makerSide,
+                matchKind,
+                makerSelection: maker.selection,
+                takerSelection: taker.selection,
+                drawPolicy: matchKind === 'complement_back_back' ? 'void_refund' : null,
                 stakeLamports: fillLamports,
                 makerVaultPda: maker.vaultPda || null,
                 takerVaultPda: taker.vaultPda || null,
@@ -745,6 +806,7 @@ async function createMatchedArtifacts(tx: any, params: {
         counterpartyPosition,
         fill,
         fillLamports,
+        matchKind,
         offer,
         ticket,
         arenaMatch,
@@ -1077,8 +1139,7 @@ async function tryMatchPartialFundedPosition(positionId: string, now = new Date(
                 const candidates = await (tx as any).sportPosition.findMany({
                     where: {
                         fixtureId: position.fixtureId,
-                        selection: position.selection,
-                        side: oppositeSide(position.side as SportSide),
+                        OR: matchCandidateBranches(position),
                         status: { in: ['funded_open', 'partially_filled'] },
                         expiresAt: { gt: now },
                         agentWallet: { not: position.agentWallet },
@@ -1088,8 +1149,13 @@ async function tryMatchPartialFundedPosition(positionId: string, now = new Date(
                     orderBy: [{ fundedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
                     take: 25,
                 });
-                const counterparty = candidates.find((candidate: any) => BigInt(positionRemainingLamports(candidate)) > 0n);
+                const counterparty = candidates.find((candidate: any) => {
+                    return BigInt(positionRemainingLamports(candidate)) > 0n
+                        && resolveSportMatchKind(position, candidate) !== null;
+                });
                 if (!counterparty) return { position };
+                const matchKind = resolveSportMatchKind(position, counterparty);
+                if (!matchKind) return { position };
 
                 const counterpartyRemaining = BigInt(positionRemainingLamports(counterparty));
                 const fillAmount = remaining < counterpartyRemaining ? remaining : counterpartyRemaining;
@@ -1115,8 +1181,12 @@ async function tryMatchPartialFundedPosition(positionId: string, now = new Date(
                     throw httpError('sport_position_match_race_retry', 409);
                 }
 
-                const backPosition = position.side === 'back' ? position : counterparty;
-                const layPosition = position.side === 'lay' ? position : counterparty;
+                const backPosition = matchKind === 'same_selection_back_lay'
+                    ? (position.side === 'back' ? position : counterparty)
+                    : counterparty;
+                const layPosition = matchKind === 'same_selection_back_lay'
+                    ? (position.side === 'lay' ? position : counterparty)
+                    : position;
                 const fill = await (tx as any).sportPositionFill.create({
                     data: {
                         fixtureId: position.fixtureId,
@@ -1135,23 +1205,29 @@ async function tryMatchPartialFundedPosition(positionId: string, now = new Date(
                     wallet: position.agentWallet,
                     event: 'partial_fill_reserved',
                     lamports: fillAmount.toString(),
-                    metadata: {
-                        fillId: fill.id,
-                        counterpartyPositionId: counterparty.id,
-                        remainingLamportsBefore: remaining.toString(),
-                    },
-                });
+                        metadata: {
+                            fillId: fill.id,
+                            counterpartyPositionId: counterparty.id,
+                            matchKind,
+                            counterpartySelection: counterparty.selection,
+                            drawPolicy: matchKind === 'complement_back_back' ? 'void_refund' : null,
+                            remainingLamportsBefore: remaining.toString(),
+                        },
+                    });
                 await recordFundingEvent(tx, {
                     positionId: counterparty.id,
                     wallet: counterparty.agentWallet,
                     event: 'partial_fill_reserved',
                     lamports: fillAmount.toString(),
-                    metadata: {
-                        fillId: fill.id,
-                        counterpartyPositionId: position.id,
-                        remainingLamportsBefore: counterpartyRemaining.toString(),
-                    },
-                });
+                        metadata: {
+                            fillId: fill.id,
+                            counterpartyPositionId: position.id,
+                            matchKind,
+                            counterpartySelection: position.selection,
+                            drawPolicy: matchKind === 'complement_back_back' ? 'void_refund' : null,
+                            remainingLamportsBefore: counterpartyRemaining.toString(),
+                        },
+                    });
 
                 return createMatchedArtifacts(tx, {
                     makerPosition: counterparty,
@@ -1159,6 +1235,7 @@ async function tryMatchPartialFundedPosition(positionId: string, now = new Date(
                     fixture,
                     fill,
                     fillLamports: fillAmount.toString(),
+                    matchKind,
                 });
             });
         } catch (error: any) {

@@ -78,7 +78,16 @@ type SportSettlementAction =
     | 'release_to_maker'
     | 'refund_to_taker'
     | 'release_to_seller'
-    | 'release_to_buyer';
+    | 'release_to_buyer'
+    | 'void_refund';
+
+function isComplementBackDrawRefund(match: any): boolean {
+    const proof = match?.proof && typeof match.proof === 'object' && !Array.isArray(match.proof)
+        ? match.proof
+        : {};
+    return proof.marketModel === 'complement_back_draw_refund'
+        || proof.matchKind === 'complement_back_back';
+}
 
 function sellerPayoutAction(action: SportSettlementAction): boolean {
     return action === 'release_to_maker' || action === 'release_to_seller';
@@ -95,6 +104,28 @@ function settlementActionForWinner(match: any, makerWins: boolean): SportSettlem
     if (winnerWallet && sellerWallet && winnerWallet === sellerWallet) return 'release_to_seller';
     if (winnerWallet && buyerWallet && winnerWallet === buyerWallet) return 'release_to_buyer';
     return makerWins ? 'release_to_maker' : 'refund_to_taker';
+}
+
+function settlementActionForOutcome(match: any, outcome: any): {
+    settlementAction: SportSettlementAction;
+    makerWins: boolean | null;
+    winnerWallet: string | null;
+} | null {
+    const winner = trimString(outcome?.winner);
+    if (winner === 'draw' && isComplementBackDrawRefund(match)) {
+        return {
+            settlementAction: 'void_refund',
+            makerWins: null,
+            winnerWallet: null,
+        };
+    }
+    const makerWins = inferMakerWins(match, outcome);
+    if (makerWins === null) return null;
+    return {
+        settlementAction: settlementActionForWinner(match, makerWins),
+        makerWins,
+        winnerWallet: winnerWalletForMatch(match, makerWins),
+    };
 }
 
 async function refreshOutcomeForFixture(fixtureId: string, liveSync: boolean): Promise<Record<string, unknown>> {
@@ -276,8 +307,8 @@ export async function runSportSettlement(params: {
             continue;
         }
 
-        const makerWins = inferMakerWins(match, outcome);
-        if (makerWins === null) {
+        const decision = settlementActionForOutcome(match, outcome);
+        if (!decision) {
             skipped.push({
                 matchId: match.id,
                 fixtureId: match.fixtureId,
@@ -287,8 +318,7 @@ export async function runSportSettlement(params: {
             continue;
         }
 
-        const settlementAction = settlementActionForWinner(match, makerWins);
-        const winnerWallet = winnerWalletForMatch(match, makerWins);
+        const { settlementAction, winnerWallet } = decision;
         let releaseTx = sellerPayoutAction(settlementAction)
             ? trimString(params.releaseTx) || trimString(match.releaseTx)
             : undefined;
@@ -337,7 +367,9 @@ export async function runSportSettlement(params: {
         }
 
         const txRecorded = Boolean(releaseTx || refundTx);
-        const terminalStatus = sellerPayoutAction(settlementAction) ? 'released' : 'refunded';
+        const terminalStatus = settlementAction === 'void_refund'
+            ? 'refunded'
+            : sellerPayoutAction(settlementAction) ? 'released' : 'refunded';
         const settledMatch = await settleArenaMatch(match.id, {
             outcomeId: outcome.id,
             winnerWallet: winnerWallet || undefined,
@@ -357,6 +389,7 @@ export async function runSportSettlement(params: {
                     status: bridgeResult.status || null,
                     tx: bridgeResult.tx || null,
                 } : null,
+                drawPolicy: settlementAction === 'void_refund' ? 'void_refund' : null,
                 outcomeRefresh,
             },
         });
