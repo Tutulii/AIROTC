@@ -238,6 +238,114 @@ function walletAuth() {
   return cachedWalletAuth;
 }
 
+type FundingSession = {
+  wallet: string;
+  tokenKey: string;
+  secretKeyBase58: string;
+  sessionId: string;
+  createdAtMs: number;
+  expiresAtMs: number;
+};
+
+const fundingSessions = new Map<string, FundingSession>();
+const DEFAULT_FUNDING_SESSION_TTL_SECONDS = 8 * 60 * 60;
+const MIN_FUNDING_SESSION_TTL_SECONDS = 5 * 60;
+const MAX_FUNDING_SESSION_TTL_SECONDS = 24 * 60 * 60;
+
+function parseSecretKeyMaterial(value: unknown): Uint8Array {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) throw new Error("walletKeypair_required");
+    if (trimmed.startsWith("[")) {
+      parsed = JSON.parse(trimmed);
+    } else {
+      return bs58.decode(trimmed);
+    }
+  }
+  if (Array.isArray(parsed)) {
+    const bytes = parsed.map((item) => Number(item));
+    if (bytes.some((item) => !Number.isInteger(item) || item < 0 || item > 255)) {
+      throw new Error("walletKeypair_invalid_byte_array");
+    }
+    return Uint8Array.from(bytes);
+  }
+  throw new Error("walletKeypair_must_be_base58_or_json_array");
+}
+
+function keypairPublicKey(secretKey: Uint8Array): string {
+  if (secretKey.length !== 64) {
+    throw new Error("walletKeypair_must_be_64_bytes");
+  }
+  return bs58.encode(nacl.sign.keyPair.fromSecretKey(secretKey).publicKey);
+}
+
+function normalizedFundingSessionTtlSeconds(value: unknown): number {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_FUNDING_SESSION_TTL_SECONDS;
+  return Math.min(Math.max(parsed, MIN_FUNDING_SESSION_TTL_SECONDS), MAX_FUNDING_SESSION_TTL_SECONDS);
+}
+
+function fundingSessionTokenKey(authToken?: string): string {
+  return tokenFingerprint(normalizeAuthToken(authToken) || "local-mcp-session");
+}
+
+function fundingSessionKey(wallet: string, authToken?: string): string {
+  return `${wallet}:${fundingSessionTokenKey(authToken)}`;
+}
+
+function pruneExpiredFundingSessions(nowMs = Date.now()): void {
+  for (const [key, session] of fundingSessions.entries()) {
+    if (session.expiresAtMs <= nowMs) fundingSessions.delete(key);
+  }
+}
+
+function registerFundingSession(wallet: string, authToken: string | undefined, walletKeypair: unknown, ttlSecondsInput?: unknown) {
+  const secretKey = parseSecretKeyMaterial(walletKeypair);
+  const publicKey = keypairPublicKey(secretKey);
+  if (publicKey !== wallet) {
+    throw new Error(`sport_funding_session_wallet_mismatch:configured=${publicKey}:requested=${wallet}`);
+  }
+  pruneExpiredFundingSessions();
+  const ttlSeconds = normalizedFundingSessionTtlSeconds(ttlSecondsInput);
+  const nowMs = Date.now();
+  const tokenKey = fundingSessionTokenKey(authToken);
+  const sessionId = crypto.randomBytes(12).toString("hex");
+  const session: FundingSession = {
+    wallet,
+    tokenKey,
+    secretKeyBase58: bs58.encode(secretKey),
+    sessionId,
+    createdAtMs: nowMs,
+    expiresAtMs: nowMs + ttlSeconds * 1000,
+  };
+  fundingSessions.set(fundingSessionKey(wallet, authToken), session);
+  return {
+    wallet,
+    sessionId,
+    registered: true,
+    storage: "mcp_process_memory_only",
+    ttlSeconds,
+    expiresAt: new Date(session.expiresAtMs).toISOString(),
+    note: "Funding key is held only in MCP process memory and is not returned by any tool. Restarting the MCP server clears this session.",
+  };
+}
+
+function getFundingSessionKeypair(wallet: string, authToken?: string): string | undefined {
+  pruneExpiredFundingSessions();
+  return fundingSessions.get(fundingSessionKey(wallet, authToken))?.secretKeyBase58;
+}
+
+function clearFundingSession(wallet: string, authToken?: string): Record<string, unknown> {
+  pruneExpiredFundingSessions();
+  const key = fundingSessionKey(wallet, authToken);
+  const existed = fundingSessions.delete(key);
+  return {
+    wallet,
+    cleared: existed,
+  };
+}
+
 function isValidSolanaWallet(wallet: string): boolean {
   try {
     return bs58.decode(wallet).length === 32;
@@ -1337,6 +1445,88 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_counter_offer",
+    title: "Sport Counter Offer",
+    description:
+      "Create an opposite SPORT counter-position and DM the maker in one flow. The returned position still must be funded before matching. Requires offers:write scope and dm:write scope unless sendDm=false.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+        message: { type: "string" },
+        sendDm: { type: "boolean", default: true },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      if (args.sendDm !== false) {
+        await requireScope(args, "dm:write");
+      }
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const original = await httpJson(
+        `/v1/sport/positions/by-id/${encodeURIComponent(args.positionId)}`,
+        {},
+        config.apiUrl,
+        { delegatedWallet: wallet, authToken: args.authToken }
+      );
+      const makerPosition = original?.data?.position || original?.position || {};
+      const makerWallet = typeof makerPosition.agentWallet === "string" ? makerPosition.agentWallet : "";
+      const counter = await httpJson(
+        `/v1/sport/positions/${encodeURIComponent(args.positionId)}/accept`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            stakeSol: args.stakeSol,
+            clientOrderId: args.clientOrderId,
+          }),
+        },
+        config.apiUrl,
+        { delegatedWallet: wallet, authToken: args.authToken }
+      );
+      const counterPosition = counter?.data?.position || counter?.position || {};
+      let dm: Record<string, unknown> = { attempted: false };
+      if (args.sendDm !== false && makerWallet && makerWallet !== wallet) {
+        const stakeLabel = counterPosition.stakeSol ?? counterPosition.remainingSol ?? args.stakeSol ?? makerPosition.remainingSol ?? makerPosition.stakeSol ?? "matching";
+        const content = typeof args.message === "string" && args.message.trim()
+          ? args.message.trim()
+          : `SPORT counter offer opened for position ${args.positionId}. Counter position ${counterPosition.id || "created"} uses ${stakeLabel} SOL. Fund the returned vault to make it live and matchable.`;
+        dm = await bestEffort("counter_offer_dm", () =>
+          httpJson(
+            "/v1/dm/send",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                toWallet: makerWallet,
+                content,
+                contentType: "text",
+                metadata: {
+                  type: "sport_counter_offer",
+                  makerPositionId: args.positionId,
+                  counterPositionId: counterPosition.id || null,
+                  fixtureId: counterPosition.fixtureId || makerPosition.fixtureId || null,
+                  selection: counterPosition.selection || makerPosition.selection || null,
+                  stakeSol: stakeLabel,
+                },
+              }),
+            },
+            config.apiUrl,
+            { delegatedWallet: wallet, authToken: args.authToken }
+          )
+        );
+      }
+      return toolOutput({
+        counter,
+        dm,
+        note: "Counter-offer creates a funding-required draft. Run airotc_sport_execute_funding or use a registered funding session to lock the stake.",
+      });
+    },
+  },
+  {
     name: "airotc_sport_confirm_position_funding",
     title: "Sport Confirm Position Funding",
     description:
@@ -1370,6 +1560,54 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_register_funding_session",
+    title: "Sport Register Funding Session",
+    description:
+      "Unlock a wallet for SPORT funding once per MCP process. Stores the keypair in memory only, bound to this wallet and MCP token, so execute_funding can run without sending walletKeypair every call. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        walletKeypair: {
+          type: "string",
+          description: "Base58-encoded 64-byte Solana secret key or JSON array string. Stored in MCP memory only until TTL/restart.",
+        },
+        ttlSeconds: {
+          type: "integer",
+          minimum: MIN_FUNDING_SESSION_TTL_SECONDS,
+          maximum: MAX_FUNDING_SESSION_TTL_SECONDS,
+          default: DEFAULT_FUNDING_SESSION_TTL_SECONDS,
+        },
+      },
+      ["wallet", "walletKeypair"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(registerFundingSession(wallet, args.authToken, args.walletKeypair, args.ttlSeconds));
+    },
+  },
+  {
+    name: "airotc_sport_clear_funding_session",
+    title: "Sport Clear Funding Session",
+    description:
+      "Clear the in-memory SPORT funding key for this wallet and MCP token. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(clearFundingSession(wallet, args.authToken));
+    },
+  },
+  {
     name: "airotc_sport_execute_funding",
     title: "Sport Execute Funding",
     description:
@@ -1394,11 +1632,12 @@ const tools: ToolDefinition[] = [
       const explicitKeypair = typeof args.walletKeypair === "string" && args.walletKeypair.trim()
         ? args.walletKeypair.trim()
         : "";
-      const walletKeypair = explicitKeypair || config.walletPrivateKey;
+      const sessionKeypair = explicitKeypair ? "" : getFundingSessionKeypair(wallet, args.authToken);
+      const walletKeypair = explicitKeypair || sessionKeypair || config.walletPrivateKey;
       if (!walletKeypair) {
         throw new Error("sport_execute_funding_wallet_keypair_required");
       }
-      if (!explicitKeypair) {
+      if (!explicitKeypair && !sessionKeypair) {
         const configuredWallet = walletAuth();
         if (!configuredWallet || configuredWallet.publicKey !== wallet) {
           throw new Error("sport_execute_funding_configured_wallet_mismatch");

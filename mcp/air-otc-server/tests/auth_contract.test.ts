@@ -19,7 +19,10 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_post_position", "offers:write"],
   ["airotc_sport_accept_position", "offers:write"],
   ["airotc_sport_counter_position", "offers:write"],
+  ["airotc_sport_counter_offer", "offers:write"],
   ["airotc_sport_confirm_position_funding", "offers:write"],
+  ["airotc_sport_register_funding_session", "offers:write"],
+  ["airotc_sport_clear_funding_session", "offers:write"],
   ["airotc_sport_execute_funding", "offers:write"],
   ["airotc_sport_cancel_position", "offers:write"],
   ["airotc_sport_get_position", "offers:read"],
@@ -254,11 +257,42 @@ assert.equal(
   "sport_counter_position must allow optional adjusted stake"
 );
 
+const sportCounterOfferTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_counter_offer");
+assert.deepEqual(
+  sportCounterOfferTool.inputSchema.required,
+  ["wallet", "positionId"],
+  "sport_counter_offer must require a wallet and position id"
+);
+assert.equal(
+  sportCounterOfferTool.inputSchema.properties.sendDm.default,
+  true,
+  "sport_counter_offer must DM the maker by default"
+);
+
 const sportConfirmFundingTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_confirm_position_funding");
 assert.deepEqual(
   sportConfirmFundingTool.inputSchema.required,
   ["wallet", "positionId"],
   "sport_confirm_position_funding must require wallet and position id"
+);
+
+const sportRegisterFundingSessionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_register_funding_session");
+assert.deepEqual(
+  sportRegisterFundingSessionTool.inputSchema.required,
+  ["wallet", "walletKeypair"],
+  "sport_register_funding_session must require wallet and keypair"
+);
+assert.equal(
+  sportRegisterFundingSessionTool.inputSchema.properties.ttlSeconds.maximum,
+  86400,
+  "sport_register_funding_session must cap session TTL"
+);
+
+const sportClearFundingSessionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_clear_funding_session");
+assert.deepEqual(
+  sportClearFundingSessionTool.inputSchema.required,
+  ["wallet"],
+  "sport_clear_funding_session must require wallet"
 );
 
 const sportExecuteFundingTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_execute_funding");
