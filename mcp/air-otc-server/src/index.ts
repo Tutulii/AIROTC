@@ -103,6 +103,7 @@ const validScopes = new Set<Scope>([
 
 const defaultFullScopes = new Set<Scope>(tradeAgentScopes);
 const MCP_SHORT_TOKEN_PREFIX = "airotc_sk_";
+const SPORT_ASSUMED_LIVE_WINDOW_MS = 4 * 60 * 60 * 1000;
 const AGENT_EVENT_NAMES = [
   "deal.matched",
   "deal.expiring",
@@ -576,17 +577,25 @@ function sportStatusBucket(fixtureOrStatus: unknown, startsAt?: unknown): "live"
   if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half", "2"].includes(status) || sportHasLiveScoreEvidence(raw)) {
     return "live";
   }
-  if (["scheduled", "upcoming", "not_started", "pre_match", "prematch", "pending", "1"].includes(status)) {
-    return "upcoming";
-  }
   if (["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft", "3", "4"].includes(status)) {
     return "final";
   }
   if (startsAt) {
     const startMs = typeof startsAt === "number" ? startsAt : new Date(String(startsAt)).getTime();
-    if (Number.isFinite(startMs) && startMs > Date.now() - 15 * 60 * 1000) {
-      return "upcoming";
+    if (Number.isFinite(startMs)) {
+      const now = Date.now();
+      if (["scheduled", "upcoming", "not_started", "pre_match", "prematch", "pending", "1"].includes(status)) {
+        if (startMs <= now && now - startMs <= SPORT_ASSUMED_LIVE_WINDOW_MS) return "live";
+        if (startMs <= now - SPORT_ASSUMED_LIVE_WINDOW_MS) return "unknown";
+        return "upcoming";
+      }
+      if (startMs > now - 15 * 60 * 1000) {
+        return "upcoming";
+      }
     }
+  }
+  if (["scheduled", "upcoming", "not_started", "pre_match", "prematch", "pending", "1"].includes(status)) {
+    return "upcoming";
   }
   return "unknown";
 }

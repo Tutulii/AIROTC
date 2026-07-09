@@ -13,6 +13,10 @@ const prismaAny = prisma as any;
 const SPORT_MARKET_TYPE = '1X2_PARTICIPANT_RESULT';
 const LAMPORTS_PER_SOL = 1_000_000_000n;
 const DEFAULT_POSITION_ACCEPT_BUFFER_SECONDS = 60;
+const DEFAULT_POSITION_FUNDING_WINDOW_MINUTES = 60;
+const MIN_POSITION_FUNDING_WINDOW_MINUTES = 5;
+const MAX_POSITION_FUNDING_WINDOW_MINUTES = 24 * 60;
+const SPORT_POSITION_VAULT_ACCOUNT_SPACE = 8 + 256;
 const PUBLIC_POSITION_STATUSES = ['funded_open', 'partially_filled', 'matching', 'matched', 'filled', 'expired', 'cancelled'] as const;
 
 type SportSide = 'back' | 'lay';
@@ -265,8 +269,10 @@ function kickoffBufferMs(): number {
 }
 
 function fundingWindowMs(): number {
-    const minutes = Number(process.env.SPORT_POSITION_FUNDING_WINDOW_MINUTES || 10);
-    const safeMinutes = Number.isFinite(minutes) ? Math.max(1, minutes) : 10;
+    const minutes = Number(process.env.SPORT_POSITION_FUNDING_WINDOW_MINUTES || DEFAULT_POSITION_FUNDING_WINDOW_MINUTES);
+    const safeMinutes = Number.isFinite(minutes)
+        ? Math.min(Math.max(minutes, MIN_POSITION_FUNDING_WINDOW_MINUTES), MAX_POSITION_FUNDING_WINDOW_MINUTES)
+        : DEFAULT_POSITION_FUNDING_WINDOW_MINUTES;
     return safeMinutes * 60_000;
 }
 
@@ -298,6 +304,10 @@ function derivePositionVaultPdaForVersion(positionId: string, vaultVersion: unkn
     return vaultVersion === 'v1' ? derivePositionVaultPda(positionId) : derivePositionVaultPdaV2(positionId);
 }
 
+function positionVaultSeedPrefix(vaultVersion: unknown): 'sport_position' | 'sport_position_v2' {
+    return vaultVersion === 'v1' ? 'sport_position' : 'sport_position_v2';
+}
+
 function sha256Hex(value: string): string {
     return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -315,7 +325,41 @@ function unixSeconds(value: unknown): number | null {
     return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
-function fundingInstructions(row: any): Record<string, unknown> | null {
+async function fundingBalanceCheck(row: any): Promise<Record<string, unknown>> {
+    if (process.env.SPORT_POSITION_FUNDING_BALANCE_CHECK === 'false') {
+        return { checked: false, reason: 'disabled' };
+    }
+    try {
+        const owner = new PublicKey(row.agentWallet);
+        const [balanceLamports, rentBufferLamports] = await Promise.all([
+            CONNECTION.getBalance(owner, 'confirmed'),
+            CONNECTION.getMinimumBalanceForRentExemption(SPORT_POSITION_VAULT_ACCOUNT_SPACE).catch(() => 0),
+        ]);
+        const stakeLamports = BigInt(row.stakeLamports || '0');
+        const requiredLamports = stakeLamports + BigInt(rentBufferLamports);
+        return {
+            checked: true,
+            ownerWallet: row.agentWallet,
+            cluster: process.env.SOLANA_CLUSTER || 'devnet',
+            balanceLamports: String(balanceLamports),
+            balanceSol: lamportsToSolNumber(BigInt(balanceLamports)),
+            stakeLamports: stakeLamports.toString(),
+            stakeSol: lamportsToSolNumber(stakeLamports),
+            rentBufferLamports: String(rentBufferLamports),
+            requiredLamports: requiredLamports.toString(),
+            requiredSol: lamportsToSolNumber(requiredLamports),
+            hasEnoughBalance: BigInt(balanceLamports) >= requiredLamports,
+        };
+    } catch (error: any) {
+        return {
+            checked: false,
+            reason: 'wallet_balance_check_failed',
+            error: error?.message || String(error),
+        };
+    }
+}
+
+function fundingInstructions(row: any, balanceCheck?: Record<string, unknown> | null): Record<string, unknown> | null {
     if (!row?.vaultPda) return null;
     const rawPdaFundingEnabled = process.env.SPORT_POSITION_ENABLE_RAW_PDA_FUNDING === 'true';
     const programVaultModeEnabled = process.env.SPORT_POSITION_VAULT_MODE === 'program';
@@ -329,6 +373,7 @@ function fundingInstructions(row: any): Record<string, unknown> | null {
     const configPda = deriveConfigPda();
     const nativeMint = 'So11111111111111111111111111111111111111112';
     const vaultVersion = row.vaultVersion === 'v1' ? 'v1' : 'v2';
+    const seedPrefix = positionVaultSeedPrefix(vaultVersion);
     const anchorInstructions = vaultVersion === 'v2'
         ? {
             initializeSportPositionV2: {
@@ -415,12 +460,24 @@ function fundingInstructions(row: any): Record<string, unknown> | null {
                 },
             },
         };
-    return {
+    const instructions: Record<string, unknown> = {
         type: 'sport_position_prefund',
         network: process.env.SOLANA_CLUSTER || 'devnet',
         programId: ESCROW_PROGRAM_ID.toBase58(),
         positionId: row.id,
         vaultVersion,
+        pdaDerivation: {
+            vaultVersion,
+            seedPrefix,
+            seedHashAlgorithm: 'sha256',
+            seedHashInput: 'positionId',
+            seedHashHex: positionIdHashHex,
+            programId: ESCROW_PROGRAM_ID.toBase58(),
+            vaultPda: row.vaultPda,
+            compatibilityNote: vaultVersion === 'v2'
+                ? 'Use the sport_position_v2 seed prefix for this position. The older sport_position seed is only for legacy v1 positions and derives a different PDA.'
+                : 'Legacy v1 position. New SPORT positions use sport_position_v2.',
+        },
         positionIdHashHex,
         fixtureHashHex,
         marketHashHex,
@@ -444,6 +501,8 @@ function fundingInstructions(row: any): Record<string, unknown> | null {
                 : 'Send exactly this stake to the SPORT position vault, then call confirm_position_funding with the transaction signature.'
             : 'SPORT position vault transfer is not enabled on this deployment yet. Do not transfer funds to this PDA until the on-chain vault program path is enabled.',
     };
+    if (balanceCheck !== undefined) instructions.balanceCheck = balanceCheck;
+    return instructions;
 }
 
 function requireFundingTxIfConfigured(txSignature: string | undefined): void {
@@ -1022,22 +1081,26 @@ export async function postSportPosition(walletInput: string, input: {
 
     if ((result as any).existing) {
         const existing = (result as any).existing;
+        const balanceCheck = existing.status === 'funding_required'
+            ? await fundingBalanceCheck(existing)
+            : null;
         return {
             matched: existing.status === 'matched',
             idempotent: true,
             position: serializePosition(existing),
-            fundingInstructions: existing.status === 'funding_required' ? fundingInstructions(existing) : null,
+            fundingInstructions: existing.status === 'funding_required' ? fundingInstructions(existing, balanceCheck) : null,
             reason: existing.status === 'funding_required' ? 'existing_position_requires_funding' : undefined,
         };
     }
 
     const position = (result as any).position;
+    const balanceCheck = await fundingBalanceCheck(position);
     return {
         matched: false,
         status: 'funding_required',
         reason: 'stake_must_be_locked_before_position_is_public',
         position: serializePosition(position),
-        fundingInstructions: fundingInstructions(position),
+        fundingInstructions: fundingInstructions(position, balanceCheck),
     };
 }
 
@@ -1558,21 +1621,26 @@ export async function acceptSportPosition(walletInput: string, positionIdInput: 
 
     if ((result as any).existing) {
         const existing = (result as any).existing;
+        const balanceCheck = existing.status === 'funding_required'
+            ? await fundingBalanceCheck(existing)
+            : null;
         return {
             matched: existing.status === 'matched',
             idempotent: true,
             position: serializePosition(existing),
-            fundingInstructions: existing.status === 'funding_required' ? fundingInstructions(existing) : null,
+            fundingInstructions: existing.status === 'funding_required' ? fundingInstructions(existing, balanceCheck) : null,
         };
     }
 
+    const position = (result as any).position;
+    const balanceCheck = await fundingBalanceCheck(position);
     return {
         matched: false,
         status: 'funding_required',
         reason: 'counterparty_stake_must_be_locked_before_partial_match',
-        position: serializePosition((result as any).position),
+        position: serializePosition(position),
         acceptedPosition: serializePosition((result as any).acceptedPosition),
-        fundingInstructions: fundingInstructions((result as any).position),
+        fundingInstructions: fundingInstructions(position, balanceCheck),
     };
 }
 

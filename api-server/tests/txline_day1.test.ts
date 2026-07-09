@@ -21,7 +21,7 @@ describe('TxLINE Day 1 snapshot normalization', () => {
                         sport: 'football',
                         home: { name: 'Argentina' },
                         away: { name: 'Brazil' },
-                        startTime: '2026-07-01T18:00:00.000Z',
+                        startTime: '2099-07-01T18:00:00.000Z',
                         status: 'scheduled',
                         merkleRoot: 'root-abc',
                     },
@@ -37,7 +37,7 @@ describe('TxLINE Day 1 snapshot normalization', () => {
             awayTeam: 'Brazil',
             status: 'upcoming',
         });
-        expect(fixtures[0].startsAt?.toISOString()).toBe('2026-07-01T18:00:00.000Z');
+        expect(fixtures[0].startsAt?.toISOString()).toBe('2099-07-01T18:00:00.000Z');
         expect(fixtures[0].raw).toHaveProperty('merkleRoot', 'root-abc');
     });
 
@@ -93,6 +93,23 @@ describe('TxLINE Day 1 snapshot normalization', () => {
         expect(fixtures[0]).toMatchObject({
             fixtureId: '18176123',
             status: 'live',
+        });
+    });
+
+    it('does not keep stale GameState 1 fixtures in the upcoming bucket after the assumed live window', () => {
+        const fixtures = normalizeFixturesPayload([{
+            FixtureId: 18176124,
+            Competition: 'World Cup',
+            Participant1: 'Switzerland',
+            Participant2: 'Colombia',
+            GameState: 1,
+            StartTime: Date.now() - 5 * 60 * 60 * 1000,
+        }]);
+
+        expect(fixtures).toHaveLength(1);
+        expect(fixtures[0]).toMatchObject({
+            fixtureId: '18176124',
+            status: 'unknown',
         });
     });
 

@@ -191,6 +191,16 @@ function withFixtureMarketMetadata(fixture: any): any {
     const raw = fixture.raw && typeof fixture.raw === 'object' && !Array.isArray(fixture.raw)
         ? fixture.raw
         : {};
+    const startsAt = fixture.startsAt
+        ? fixture.startsAt instanceof Date
+            ? fixture.startsAt
+            : new Date(fixture.startsAt)
+        : undefined;
+    const status = fixture.status === 'final' || hasFinalScoreEvidence(raw)
+        ? 'final'
+        : fixture.status === 'live' || hasLiveScoreEvidence(raw)
+            ? 'live'
+            : normalizeFixtureStatus({ ...raw, status: fixture.status || raw.status }, startsAt);
     const marketSelections = Array.isArray(raw.marketSelections) && raw.marketSelections.length > 0
         ? raw.marketSelections
         : ['part1', 'draw', 'part2'];
@@ -199,6 +209,7 @@ function withFixtureMarketMetadata(fixture: any): any {
         : ['1X2_PARTICIPANT_RESULT'];
     return {
         ...fixture,
+        status,
         marketSelections,
         marketTypes,
         raw: {

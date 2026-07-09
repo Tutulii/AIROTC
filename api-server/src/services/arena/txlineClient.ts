@@ -320,15 +320,20 @@ export function normalizeFixtureStatus(raw: Record<string, unknown>, startsAt?: 
     if (hasLiveScoreEvidence(raw)) {
         return 'live';
     }
-    if (['scheduled', 'upcoming', 'not_started', 'pre_match', 'prematch', 'pending', '1'].includes(status)) {
-        return 'upcoming';
-    }
-
     if (startsAt) {
         const startMs = startsAt.getTime();
         const now = Date.now();
+        if (['scheduled', 'upcoming', 'not_started', 'pre_match', 'prematch', 'pending', '1'].includes(status)) {
+            if (startMs <= now && now - startMs <= ASSUMED_LIVE_WINDOW_MS) return 'live';
+            if (startMs <= now - ASSUMED_LIVE_WINDOW_MS) return 'unknown';
+            return 'upcoming';
+        }
         if (startMs > now - 15 * 60 * 1000) return 'upcoming';
         if (startMs <= now && now - startMs <= ASSUMED_LIVE_WINDOW_MS) return 'live';
+    }
+
+    if (['scheduled', 'upcoming', 'not_started', 'pre_match', 'prematch', 'pending', '1'].includes(status)) {
+        return 'upcoming';
     }
 
     return 'unknown';

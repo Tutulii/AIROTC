@@ -252,6 +252,7 @@ describe('SPORT position layer', () => {
         fundingEventSeq = 0;
         process.env.SPORT_POSITION_VERIFY_FUNDING_ONCHAIN = 'false';
         process.env.SPORT_POSITION_ALLOW_SERVER_RECORDED_FUNDING = 'true';
+        process.env.SPORT_POSITION_FUNDING_BALANCE_CHECK = 'false';
         process.env.SPORT_PARTIAL_FILL_ENABLED = 'true';
         delete process.env.SPORT_POSITION_ENABLE_RAW_PDA_FUNDING;
         delete process.env.SPORT_POSITION_VAULT_MODE;
@@ -309,6 +310,7 @@ describe('SPORT position layer', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+        delete process.env.SPORT_POSITION_FUNDING_BALANCE_CHECK;
     });
 
     it('creates a funding-required position draft with vault instructions and keeps it off the public book', async () => {
@@ -340,6 +342,17 @@ describe('SPORT position layer', () => {
                 amountLamports: '30000000',
                 ownerWallet: MAKER,
                 transferEnabled: false,
+                expiresAt: '2026-07-07T11:00:00.000Z',
+                pdaDerivation: {
+                    vaultVersion: 'v2',
+                    seedPrefix: 'sport_position_v2',
+                    seedHashAlgorithm: 'sha256',
+                    seedHashInput: 'positionId',
+                },
+                balanceCheck: {
+                    checked: false,
+                    reason: 'disabled',
+                },
             },
         });
         expect(result.position.vaultPda).toEqual(expect.any(String));
