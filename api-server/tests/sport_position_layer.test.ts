@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import bs58 from 'bs58';
+import nacl from 'tweetnacl';
 
 const MAKER = 'EdUWKpttdUtWWiUpWzDasouXPvZzpuMpjytteHEzuk9Y';
 const TAKER = 'A4bCoAbesNR18wwsujY5h5hwrZqJG4574tJ8uiEzLF3V';
@@ -25,6 +27,7 @@ const {
 const fixtureRows = new Map<string, any>();
 const sportPositionRows = new Map<string, any>();
 const sportPositionFillRows = new Map<string, any>();
+const sportFundingSessionRows = new Map<string, any>();
 const offerRows = new Map<string, any>();
 const ticketRows = new Map<string, any>();
 const arenaMatchRows = new Map<string, any>();
@@ -165,6 +168,34 @@ const tx = {
                 .slice(0, take || 100);
         }),
     },
+    sportFundingSession: {
+        findUnique: vi.fn(async ({ where }) => {
+            if (where.wallet) return sportFundingSessionRows.get(where.wallet) || null;
+            return null;
+        }),
+        upsert: vi.fn(async ({ where, create, update }) => {
+            const existing = sportFundingSessionRows.get(where.wallet);
+            const row = stored({
+                ...(existing || {}),
+                ...(existing ? clone(update) : clone(create)),
+                id: existing?.id || `funding-session-${where.wallet}`,
+                wallet: where.wallet,
+            });
+            sportFundingSessionRows.set(where.wallet, row);
+            return row;
+        }),
+        update: vi.fn(async ({ where, data }) => {
+            const row = sportFundingSessionRows.get(where.wallet);
+            if (!row) throw new Error('sport_funding_session_not_found');
+            Object.assign(row, clone(data), { updatedAt: NOW });
+            return row;
+        }),
+        deleteMany: vi.fn(async ({ where }) => {
+            let count = 0;
+            if (where.wallet && sportFundingSessionRows.delete(where.wallet)) count = 1;
+            return { count };
+        }),
+    },
     offer: {
         create: vi.fn(async ({ data }) => {
             const row = stored({ id: `offer-${++offerSeq}`, ...clone(data) });
@@ -240,6 +271,7 @@ describe('SPORT position layer', () => {
         fixtureRows.clear();
         sportPositionRows.clear();
         sportPositionFillRows.clear();
+        sportFundingSessionRows.clear();
         offerRows.clear();
         ticketRows.clear();
         arenaMatchRows.clear();
@@ -254,6 +286,7 @@ describe('SPORT position layer', () => {
         process.env.SPORT_POSITION_ALLOW_SERVER_RECORDED_FUNDING = 'true';
         process.env.SPORT_POSITION_FUNDING_BALANCE_CHECK = 'false';
         process.env.SPORT_PARTIAL_FILL_ENABLED = 'true';
+        process.env.SPORT_FUNDING_SESSION_ENCRYPTION_KEY = 'test-sport-funding-session-secret';
         delete process.env.SPORT_POSITION_ENABLE_RAW_PDA_FUNDING;
         delete process.env.SPORT_POSITION_VAULT_MODE;
         fixtureRows.set('18198205', stored({
@@ -310,7 +343,8 @@ describe('SPORT position layer', () => {
 
     afterEach(() => {
         vi.useRealTimers();
-        delete process.env.SPORT_POSITION_FUNDING_BALANCE_CHECK;
+            delete process.env.SPORT_POSITION_FUNDING_BALANCE_CHECK;
+            delete process.env.SPORT_FUNDING_SESSION_ENCRYPTION_KEY;
     });
 
     it('creates a funding-required position draft with vault instructions and keeps it off the public book', async () => {
@@ -473,6 +507,76 @@ describe('SPORT position layer', () => {
         expect(fundingEventRows.map((event) => event.event)).toEqual(
             expect.arrayContaining(['funding_execution_started', 'funding_executed', 'funded_open'])
         );
+    });
+
+    it('registers an encrypted funding session and executes funding without passing the keypair again', async () => {
+        const keypair = nacl.sign.keyPair();
+        const wallet = bs58.encode(keypair.publicKey);
+        fixtureRows.set('18198206', stored({
+            id: 'fixture-2',
+            fixtureId: '18198206',
+            status: 'upcoming',
+            startsAt: STARTS_AT,
+            raw: { source: 'txline' },
+        }));
+        const {
+            clearSportFundingSession,
+            executeSportPositionFunding,
+            getSportFundingSessionStatus,
+            postSportPosition,
+            registerSportFundingSession,
+        } = await import('../src/services/sportPosition.service');
+
+        const registered: any = await registerSportFundingSession(wallet, {
+            walletKeypair: bs58.encode(keypair.secretKey),
+            ttlSeconds: 900,
+        });
+        expect(registered).toMatchObject({
+            registered: true,
+            wallet,
+            active: true,
+            storage: 'api_encrypted_postgres',
+        });
+        expect(registered.encryptedSecretKey).toBeUndefined();
+        expect(registered.iv).toBeUndefined();
+        expect(registered.authTag).toBeUndefined();
+
+        await expect(getSportFundingSessionStatus(wallet)).resolves.toMatchObject({
+            wallet,
+            active: true,
+            storage: 'api_encrypted_postgres',
+        });
+
+        const draft: any = await postSportPosition(wallet, {
+            fixtureId: '18198206',
+            selection: 'part2',
+            side: 'back',
+            stakeSol: '0.01',
+        });
+
+        const result: any = await executeSportPositionFunding(wallet, draft.position.id);
+        expect(result).toMatchObject({
+            executed: true,
+            positionId: draft.position.id,
+            fundingTx: 'sport-position-fund-tx',
+        });
+        expect(middlemanForwarderMock.forwardSportPositionFunding).toHaveBeenCalledWith(
+            expect.objectContaining({
+                positionId: draft.position.id,
+                ownerWallet: wallet,
+                ownerKeypair: bs58.encode(keypair.secretKey),
+                stakeLamports: '10000000',
+            })
+        );
+        await expect(clearSportFundingSession(wallet)).resolves.toMatchObject({
+            wallet,
+            cleared: true,
+            storage: 'api_encrypted_postgres',
+        });
+        await expect(getSportFundingSessionStatus(wallet)).resolves.toMatchObject({
+            wallet,
+            active: false,
+        });
     });
 
     it('leaves a draft retryable when middleman funding execution fails', async () => {

@@ -354,6 +354,22 @@ model SportPositionFundingEvent {
   @@index([event, createdAt])
 }
 
+model SportFundingSession {
+  id                 String    @id @default(uuid())
+  wallet             String    @unique
+  sessionId          String
+  encryptedSecretKey String
+  iv                 String
+  authTag            String
+  expiresAt          DateTime
+  lastUsedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([wallet, expiresAt])
+  @@index([expiresAt])
+}
+
 model McpAccessToken {
   id          String    @id @default(uuid())
   tokenHash   String    @unique

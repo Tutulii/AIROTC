@@ -1608,7 +1608,7 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_register_funding_session",
     title: "Sport Register Funding Session",
     description:
-      "Unlock a wallet for SPORT funding once per MCP process. Stores the keypair in memory only, bound to this wallet and MCP token, so execute_funding can run without sending walletKeypair every call. Requires offers:write scope.",
+      "Register a wallet for SPORT funding. Stores the keypair encrypted in AIR OTC API storage with TTL, so execute_funding can run without sending walletKeypair every call. Requires offers:write scope.",
     scope: "offers:write",
     inputSchema: objectSchema(
       {
@@ -1616,7 +1616,7 @@ const tools: ToolDefinition[] = [
         wallet: { type: "string" },
         walletKeypair: {
           type: "string",
-          description: "Base58-encoded 64-byte Solana secret key or JSON array string. Stored in MCP memory only until TTL/restart.",
+          description: "Base58-encoded 64-byte Solana secret key or JSON array string. Stored encrypted in AIR OTC API storage until TTL/replacement/delete.",
         },
         ttlSeconds: {
           type: "integer",
@@ -1630,14 +1630,28 @@ const tools: ToolDefinition[] = [
     handler: async (args) => {
       const auth = await requireScope(args, "offers:write");
       const wallet = await delegatedWalletFromArgs(args, auth);
-      return toolOutput(registerFundingSession(wallet, args.authToken, args.walletKeypair, args.ttlSeconds));
+      registerFundingSession(wallet, args.authToken, args.walletKeypair, args.ttlSeconds);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/funding-session",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              walletKeypair: args.walletKeypair,
+              ttlSeconds: args.ttlSeconds,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
     },
   },
   {
     name: "airotc_sport_funding_session_status",
     title: "Sport Funding Session Status",
     description:
-      "Check whether this wallet and MCP token currently have an active in-memory SPORT funding session. Does not return secret key material. Requires offers:write scope.",
+      "Check whether this wallet currently has an active API-backed encrypted SPORT funding session. Does not return secret key material. Requires offers:write scope.",
     scope: "offers:write",
     inputSchema: objectSchema(
       {
@@ -1649,14 +1663,21 @@ const tools: ToolDefinition[] = [
     handler: async (args) => {
       const auth = await requireScope(args, "offers:write");
       const wallet = await delegatedWalletFromArgs(args, auth);
-      return toolOutput(getFundingSessionStatus(wallet, args.authToken));
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/funding-session",
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
     },
   },
   {
     name: "airotc_sport_clear_funding_session",
     title: "Sport Clear Funding Session",
     description:
-      "Clear the in-memory SPORT funding key for this wallet and MCP token. Requires offers:write scope.",
+      "Clear the encrypted SPORT funding key for this wallet. Requires offers:write scope.",
     scope: "offers:write",
     inputSchema: objectSchema(
       {
@@ -1668,14 +1689,22 @@ const tools: ToolDefinition[] = [
     handler: async (args) => {
       const auth = await requireScope(args, "offers:write");
       const wallet = await delegatedWalletFromArgs(args, auth);
-      return toolOutput(clearFundingSession(wallet, args.authToken));
+      clearFundingSession(wallet, args.authToken);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/funding-session",
+          { method: "DELETE" },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
     },
   },
   {
     name: "airotc_sport_execute_funding",
     title: "Sport Execute Funding",
     description:
-      "Initialize and fund a SPORT position vault on-chain, then confirm funding through AIR OTC. Devnet agent automation path; uses walletKeypair, a registered funding session, or AIR_OTC_WALLET_PRIVATE_KEY. Requires offers:write scope.",
+      "Initialize and fund a SPORT position vault on-chain, then confirm funding through AIR OTC. Devnet agent automation path; uses walletKeypair if supplied, otherwise the API-backed registered funding session. Requires offers:write scope.",
     scope: "offers:write",
     inputSchema: objectSchema(
       {
@@ -1685,7 +1714,7 @@ const tools: ToolDefinition[] = [
         walletKeypair: {
           type: "string",
           description:
-            "Optional base58-encoded 64-byte Solana secret key or JSON array string. If omitted, the MCP runtime uses a registered funding session first, then AIR_OTC_WALLET_PRIVATE_KEY.",
+            "Optional base58-encoded 64-byte Solana secret key or JSON array string. If omitted, the API uses the registered encrypted funding session for this wallet.",
         },
       },
       ["wallet", "positionId"]
@@ -1696,24 +1725,13 @@ const tools: ToolDefinition[] = [
       const explicitKeypair = typeof args.walletKeypair === "string" && args.walletKeypair.trim()
         ? args.walletKeypair.trim()
         : "";
-      const sessionKeypair = explicitKeypair ? "" : getFundingSessionKeypair(wallet, args.authToken);
-      const walletKeypair = explicitKeypair || sessionKeypair || config.walletPrivateKey;
-      if (!walletKeypair) {
-        throw new Error("sport_execute_funding_wallet_keypair_required");
-      }
-      if (!explicitKeypair && !sessionKeypair) {
-        const configuredWallet = walletAuth();
-        if (!configuredWallet || configuredWallet.publicKey !== wallet) {
-          throw new Error("sport_execute_funding_configured_wallet_mismatch");
-        }
-      }
       return toolOutput(
         await httpJson(
           `/v1/sport/positions/${encodeURIComponent(args.positionId)}/execute-funding`,
           {
             method: "POST",
             body: JSON.stringify({
-              walletKeypair,
+              ...(explicitKeypair ? { walletKeypair: explicitKeypair } : {}),
             }),
           },
           config.apiUrl,

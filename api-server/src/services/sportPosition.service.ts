@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
-import { PublicKey } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
+import bs58 from 'bs58';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
@@ -18,6 +19,9 @@ const MIN_POSITION_FUNDING_WINDOW_MINUTES = 5;
 const MAX_POSITION_FUNDING_WINDOW_MINUTES = 24 * 60;
 const SPORT_POSITION_VAULT_ACCOUNT_SPACE = 8 + 256;
 const PUBLIC_POSITION_STATUSES = ['funded_open', 'partially_filled', 'matching', 'matched', 'filled', 'expired', 'cancelled'] as const;
+const DEFAULT_FUNDING_SESSION_TTL_SECONDS = 8 * 60 * 60;
+const MIN_FUNDING_SESSION_TTL_SECONDS = 5 * 60;
+const MAX_FUNDING_SESSION_TTL_SECONDS = 24 * 60 * 60;
 
 type SportSide = 'back' | 'lay';
 type SportSelection = 'part1' | 'draw' | 'part2';
@@ -87,6 +91,109 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function jsonValue(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(JSON.stringify(value ?? {})) as Prisma.InputJsonValue;
+}
+
+function parseSecretKeyMaterial(value: unknown): Uint8Array {
+    let parsed: unknown = value;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) throw httpError('walletKeypair_required', 400);
+        if (trimmed.startsWith('[')) {
+            try {
+                parsed = JSON.parse(trimmed);
+            } catch {
+                throw httpError('walletKeypair_invalid_json_array', 400);
+            }
+        } else {
+            try {
+                return bs58.decode(trimmed);
+            } catch {
+                throw httpError('walletKeypair_invalid_base58', 400);
+            }
+        }
+    }
+    if (Array.isArray(parsed)) {
+        const bytes = parsed.map((item) => Number(item));
+        if (bytes.some((item) => !Number.isInteger(item) || item < 0 || item > 255)) {
+            throw httpError('walletKeypair_invalid_byte_array', 400);
+        }
+        return Uint8Array.from(bytes);
+    }
+    throw httpError('walletKeypair_must_be_base58_or_json_array', 400);
+}
+
+function secretKeyPublicKey(secretKey: Uint8Array): string {
+    if (secretKey.length !== 64) throw httpError('walletKeypair_must_be_64_bytes', 400);
+    try {
+        return Keypair.fromSecretKey(secretKey).publicKey.toBase58();
+    } catch {
+        throw httpError('walletKeypair_invalid_secret_key', 400);
+    }
+}
+
+function fundingSessionEncryptionKey(): Buffer {
+    const secret = (
+        process.env.SPORT_FUNDING_SESSION_ENCRYPTION_KEY ||
+        process.env.AIR_OTC_MCP_DELEGATION_TOKEN ||
+        process.env.AIR_OTC_MCP_TOKEN_SIGNING_SECRET ||
+        process.env.AIR_OTC_MCP_TOKEN ||
+        ''
+    ).trim();
+    if (secret.length < 16) {
+        throw httpError('sport_funding_session_encryption_not_configured', 503);
+    }
+    return crypto.createHash('sha256').update(secret, 'utf8').digest();
+}
+
+function encryptFundingSecret(secretKey: Uint8Array): { encryptedSecretKey: string; iv: string; authTag: string } {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', fundingSessionEncryptionKey(), iv);
+    const encrypted = Buffer.concat([cipher.update(Buffer.from(secretKey)), cipher.final()]);
+    return {
+        encryptedSecretKey: encrypted.toString('base64url'),
+        iv: iv.toString('base64url'),
+        authTag: cipher.getAuthTag().toString('base64url'),
+    };
+}
+
+function decryptFundingSecret(row: any): string {
+    const decipher = crypto.createDecipheriv(
+        'aes-256-gcm',
+        fundingSessionEncryptionKey(),
+        Buffer.from(row.iv, 'base64url'),
+    );
+    decipher.setAuthTag(Buffer.from(row.authTag, 'base64url'));
+    const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(row.encryptedSecretKey, 'base64url')),
+        decipher.final(),
+    ]);
+    return bs58.encode(decrypted);
+}
+
+function normalizedFundingSessionTtlSeconds(value: unknown): number {
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_FUNDING_SESSION_TTL_SECONDS;
+    return Math.min(Math.max(parsed, MIN_FUNDING_SESSION_TTL_SECONDS), MAX_FUNDING_SESSION_TTL_SECONDS);
+}
+
+function serializeFundingSession(row: any): Record<string, unknown> {
+    if (!row) {
+        return {
+            active: false,
+            storage: 'api_encrypted_postgres',
+        };
+    }
+    const expiresAtMs = new Date(row.expiresAt).getTime();
+    const active = expiresAtMs > Date.now();
+    return {
+        wallet: row.wallet,
+        active,
+        sessionId: row.sessionId,
+        storage: 'api_encrypted_postgres',
+        expiresAt: row.expiresAt instanceof Date ? row.expiresAt.toISOString() : row.expiresAt,
+        lastUsedAt: row.lastUsedAt instanceof Date ? row.lastUsedAt.toISOString() : row.lastUsedAt || null,
+        ttlRemainingSeconds: active ? Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1000)) : 0,
+    };
 }
 
 function validateWallet(value: unknown): string {
@@ -1429,6 +1536,76 @@ export async function confirmSportPositionFunding(walletInput: string, positionI
     };
 }
 
+export async function registerSportFundingSession(walletInput: string, input: {
+    walletKeypair?: unknown;
+    ttlSeconds?: unknown;
+} = {}): Promise<Record<string, unknown>> {
+    const wallet = validateWallet(walletInput);
+    const secretKey = parseSecretKeyMaterial(input.walletKeypair);
+    const publicKey = secretKeyPublicKey(secretKey);
+    if (publicKey !== wallet) {
+        throw httpError(`sport_funding_session_wallet_mismatch:configured=${publicKey}:requested=${wallet}`, 403);
+    }
+    const ttlSeconds = normalizedFundingSessionTtlSeconds(input.ttlSeconds);
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+    const encrypted = encryptFundingSecret(secretKey);
+    const sessionId = crypto.randomBytes(12).toString('hex');
+    const row = await prismaAny.sportFundingSession.upsert({
+        where: { wallet },
+        create: {
+            wallet,
+            sessionId,
+            ...encrypted,
+            expiresAt,
+        },
+        update: {
+            sessionId,
+            ...encrypted,
+            expiresAt,
+            lastUsedAt: null,
+        },
+    });
+    return {
+        registered: true,
+        ttlSeconds,
+        ...serializeFundingSession(row),
+        note: 'Funding key is encrypted in AIR OTC API storage until TTL, replacement, delete, or expiry. Secret key material is never returned.',
+    };
+}
+
+export async function getSportFundingSessionStatus(walletInput: string): Promise<Record<string, unknown>> {
+    const wallet = validateWallet(walletInput);
+    const row = await prismaAny.sportFundingSession.findUnique({ where: { wallet } });
+    return {
+        wallet,
+        ...serializeFundingSession(row),
+    };
+}
+
+export async function clearSportFundingSession(walletInput: string): Promise<Record<string, unknown>> {
+    const wallet = validateWallet(walletInput);
+    const deleted = await prismaAny.sportFundingSession.deleteMany({ where: { wallet } });
+    return {
+        wallet,
+        cleared: deleted.count > 0,
+        storage: 'api_encrypted_postgres',
+    };
+}
+
+async function getStoredFundingSessionKeypair(wallet: string): Promise<string | undefined> {
+    const row = await prismaAny.sportFundingSession.findUnique({ where: { wallet } });
+    if (!row) return undefined;
+    if (new Date(row.expiresAt).getTime() <= Date.now()) {
+        await prismaAny.sportFundingSession.deleteMany({ where: { wallet } }).catch(() => undefined);
+        return undefined;
+    }
+    const secretKey = decryptFundingSecret(row);
+    await prismaAny.sportFundingSession
+        .update({ where: { wallet }, data: { lastUsedAt: new Date() } })
+        .catch(() => undefined);
+    return secretKey;
+}
+
 export async function executeSportPositionFunding(walletInput: string, positionIdInput: unknown, input: {
     walletKeypair?: unknown;
     ownerKeypair?: unknown;
@@ -1436,8 +1613,8 @@ export async function executeSportPositionFunding(walletInput: string, positionI
     const wallet = validateWallet(walletInput);
     const positionId = trimString(positionIdInput);
     if (!positionId) throw httpError('position_id_required', 400);
-    const ownerKeypair = input.walletKeypair ?? input.ownerKeypair;
-    if (!ownerKeypair) throw httpError('walletKeypair_required', 400);
+    const ownerKeypair = input.walletKeypair ?? input.ownerKeypair ?? await getStoredFundingSessionKeypair(wallet);
+    if (!ownerKeypair) throw httpError('sport_funding_session_or_walletKeypair_required', 400);
     const cluster = String(process.env.SOLANA_CLUSTER || 'devnet').toLowerCase();
     if ((cluster === 'mainnet' || cluster === 'mainnet-beta') && process.env.SPORT_POSITION_EXECUTE_FUNDING_ALLOW_MAINNET !== 'true') {
         throw httpError('sport_execute_funding_mainnet_disabled', 403);

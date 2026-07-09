@@ -13,8 +13,10 @@ import {
 import {
     acceptSportPosition,
     cancelSportPosition,
+    clearSportFundingSession,
     confirmSportPositionFunding,
     executeSportPositionFunding,
+    getSportFundingSessionStatus,
     getSportPosition,
     listMySportFills,
     listMySportPositions,
@@ -22,6 +24,7 @@ import {
     listSportPositionFills,
     listSportPositions,
     postSportPosition,
+    registerSportFundingSession,
 } from '../services/sportPosition.service';
 
 const router = Router();
@@ -89,6 +92,36 @@ router.post('/positions/:id/execute-funding', authenticateSolana, async (req: Re
         res.status(data.confirmation && (data.confirmation as any).matched === true ? 201 : 200).json({ success: true, data });
     } catch (error: any) {
         sendError(res, error, 'Failed to execute SPORT position funding');
+    }
+});
+
+router.post('/funding-session', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await registerSportFundingSession(requireWallet(req), {
+            walletKeypair: req.body?.walletKeypair,
+            ttlSeconds: req.body?.ttlSeconds,
+        });
+        res.status(201).json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to register SPORT funding session');
+    }
+});
+
+router.get('/funding-session', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await getSportFundingSessionStatus(requireWallet(req));
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to get SPORT funding session status');
+    }
+});
+
+router.delete('/funding-session', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await clearSportFundingSession(requireWallet(req));
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to clear SPORT funding session');
     }
 });
 
