@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use sha2::{Sha256, Digest};
 use anchor_spl::token::spl_token::native_mint;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
@@ -51,6 +52,22 @@ pub enum EscrowError {
     TermsAlreadyRevealed,
     #[msg("Deal must be completed before revealing terms")]
     DealNotCompleted,
+    #[msg("SPORT positions are native SOL only in v1")]
+    SportNativeSolOnly,
+    #[msg("SPORT position is not valid for this operation")]
+    InvalidSportPosition,
+    #[msg("SPORT position funding window has expired")]
+    SportPositionExpired,
+    #[msg("SPORT position is not funded")]
+    SportPositionNotFunded,
+    #[msg("SPORT position has already been funded")]
+    SportPositionAlreadyFunded,
+    #[msg("SPORT positions do not form a valid equal-stake opposite-side match")]
+    SportPositionMismatch,
+    #[msg("SPORT positions cannot self-match")]
+    SportSelfMatch,
+    #[msg("SPORT deals must be created by committing prefunded SPORT positions")]
+    SportDealRequiresPrefundedPositions,
 }
 
 // ── Events ───────────────────────────────────────────────────────────
@@ -154,12 +171,108 @@ pub struct PauseToggled {
     pub authority: Pubkey,
 }
 
+#[event]
+pub struct SportPositionCreated {
+    pub position_id_hash: [u8; 32],
+    pub fixture_hash: [u8; 32],
+    pub market_hash: [u8; 32],
+    pub selection_hash: [u8; 32],
+    pub owner: Pubkey,
+    pub side: SportPositionSide,
+    pub stake: u64,
+    pub expires_at: i64,
+    pub vault: Pubkey,
+}
+
+#[event]
+pub struct SportPositionFunded {
+    pub position_id_hash: [u8; 32],
+    pub owner: Pubkey,
+    pub stake: u64,
+    pub vault: Pubkey,
+}
+
+#[event]
+pub struct SportPositionCancelled {
+    pub position_id_hash: [u8; 32],
+    pub owner: Pubkey,
+    pub refunded: u64,
+    pub vault: Pubkey,
+}
+
+#[event]
+pub struct SportPositionsCommitted {
+    pub deal_id: u64,
+    pub buyer_position_id_hash: [u8; 32],
+    pub seller_position_id_hash: [u8; 32],
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub stake: u64,
+}
+
+#[event]
+pub struct SportPositionV2Created {
+    pub position_id_hash: [u8; 32],
+    pub fixture_hash: [u8; 32],
+    pub market_hash: [u8; 32],
+    pub selection_hash: [u8; 32],
+    pub owner: Pubkey,
+    pub side: SportPositionSide,
+    pub total_stake: u64,
+    pub expires_at: i64,
+    pub vault: Pubkey,
+}
+
+#[event]
+pub struct SportPositionV2Funded {
+    pub position_id_hash: [u8; 32],
+    pub owner: Pubkey,
+    pub total_stake: u64,
+    pub available_stake: u64,
+    pub vault: Pubkey,
+}
+
+#[event]
+pub struct SportPositionV2RemainingCancelled {
+    pub position_id_hash: [u8; 32],
+    pub owner: Pubkey,
+    pub refunded: u64,
+    pub vault: Pubkey,
+}
+
+#[event]
+pub struct SportPositionV2ExpiredRemainingRefunded {
+    pub position_id_hash: [u8; 32],
+    pub owner: Pubkey,
+    pub keeper: Pubkey,
+    pub refunded: u64,
+    pub vault: Pubkey,
+}
+
+#[event]
+pub struct SportPositionFillCommitted {
+    pub deal_id: u64,
+    pub buyer_position_id_hash: [u8; 32],
+    pub seller_position_id_hash: [u8; 32],
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub fill_lamports: u64,
+}
+
+#[event]
+pub struct SportPositionV2Closed {
+    pub position_id_hash: [u8; 32],
+    pub owner: Pubkey,
+    pub vault: Pubkey,
+}
+
 // ── Enums ────────────────────────────────────────────────────────────
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, InitSpace)]
 pub enum TradeMode {
     Normal,  // 100 bps (1.0% fee)
     Privacy, // 110 bps (1.1% fee)
+    Sport,   // 100 bps (1.0% fee), prefunded equal-stake positions
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, InitSpace)]
@@ -179,6 +292,12 @@ pub enum DepositType {
     BuyerCollateral,
     SellerCollateral,
     BuyerPayment,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, InitSpace)]
+pub enum SportPositionSide {
+    Back,
+    Lay,
 }
 
 // ── State ────────────────────────────────────────────────────────────
@@ -247,6 +366,66 @@ pub struct Deal {
     pub terms_revealed: bool,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct SportPositionVault {
+    /// SHA-256(positionId) generated off-chain and used in PDA seeds.
+    pub position_id_hash: [u8; 32],
+    /// SHA-256(fixtureId) from the TxLINE fixture.
+    pub fixture_hash: [u8; 32],
+    /// SHA-256(marketType), e.g. 1X2_PARTICIPANT_RESULT.
+    pub market_hash: [u8; 32],
+    /// SHA-256(selection), e.g. part1/draw/part2.
+    pub selection_hash: [u8; 32],
+    /// Position owner. Only this signer can fund or cancel before match.
+    pub owner: Pubkey,
+    /// V1 is native SOL only, but storing mint makes state self-describing.
+    pub mint: Pubkey,
+    /// Back = buyer side in the committed deal, Lay = seller side.
+    pub side: SportPositionSide,
+    /// Exact stake in lamports. V1 requires equal stake on both sides.
+    pub stake: u64,
+    /// True only after exact owner funding lands in this PDA.
+    pub funded: bool,
+    pub created_at: i64,
+    pub funded_at: i64,
+    pub expires_at: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct SportPositionVaultV2 {
+    /// SHA-256(positionId) generated off-chain and used in PDA seeds.
+    pub position_id_hash: [u8; 32],
+    /// SHA-256(fixtureId) from the TxLINE fixture.
+    pub fixture_hash: [u8; 32],
+    /// SHA-256(marketType), e.g. 1X2_PARTICIPANT_RESULT.
+    pub market_hash: [u8; 32],
+    /// SHA-256(selection), e.g. part1/draw/part2.
+    pub selection_hash: [u8; 32],
+    /// Position owner. Only this signer can fund or cancel before match.
+    pub owner: Pubkey,
+    /// V2 remains native SOL only, but stores mint for account validation.
+    pub mint: Pubkey,
+    /// Back = buyer side in committed fills, Lay = seller side.
+    pub side: SportPositionSide,
+    /// Original locked stake in lamports.
+    pub total_stake: u64,
+    /// Stake still available for new fills.
+    pub available_stake: u64,
+    /// Stake already committed into fill deals.
+    pub committed_stake: u64,
+    /// Stake refunded from unmatched remaining liquidity.
+    pub refunded_stake: u64,
+    /// True only after owner funding lands in this PDA.
+    pub funded: bool,
+    pub created_at: i64,
+    pub funded_at: i64,
+    pub expires_at: i64,
+    pub bump: u8,
+}
+
 impl Deal {
     pub const MAX_ASSET_TYPE_LEN: usize = 32;
     pub const MAX_ASSET_DESC_LEN: usize = 128;
@@ -297,6 +476,18 @@ fn escrowed_native_lamports(pda: &AccountInfo) -> Result<u64> {
     let rent = Rent::get()?;
     let min_rent = rent.minimum_balance(pda.data_len());
     Ok(pda.lamports().saturating_sub(min_rent))
+}
+
+fn checked_token_account(
+    account: &AccountInfo,
+    expected_mint: Pubkey,
+    expected_owner: Pubkey,
+) -> Result<TokenAccount> {
+    let mut data: &[u8] = &account.try_borrow_data()?;
+    let token_account = TokenAccount::try_deserialize(&mut data)?;
+    require!(token_account.mint == expected_mint, EscrowError::MintMismatch);
+    require!(token_account.owner == expected_owner, EscrowError::Unauthorized);
+    Ok(token_account)
 }
 
 /// Helper method to transfer SPL tokens from user to PDA (or vice versa).
@@ -513,30 +704,18 @@ pub struct ReleaseFunds<'info> {
         constraint = fee_receiver.key() == deal.middleman @ EscrowError::Unauthorized
     )]
     pub fee_receiver: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = deal
-    )]
-    pub deal_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = buyer
-    )]
-    pub buyer_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = seller
-    )]
-    pub seller_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = fee_receiver
-    )]
-    pub fee_ata: Account<'info, TokenAccount>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub deal_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub buyer_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub seller_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub fee_ata: UncheckedAccount<'info>,
     #[account(seeds = [b"config"], bump = config.bump)]
     pub config: Account<'info, Config>,
     pub token_program: Program<'info, Token>,
@@ -572,30 +751,18 @@ pub struct SettleToBuyer<'info> {
         constraint = fee_receiver.key() == deal.middleman @ EscrowError::Unauthorized
     )]
     pub fee_receiver: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = deal
-    )]
-    pub deal_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = buyer
-    )]
-    pub buyer_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = seller
-    )]
-    pub seller_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = fee_receiver
-    )]
-    pub fee_ata: Account<'info, TokenAccount>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub deal_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub buyer_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub seller_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub fee_ata: UncheckedAccount<'info>,
     #[account(seeds = [b"config"], bump = config.bump)]
     pub config: Account<'info, Config>,
     pub token_program: Program<'info, Token>,
@@ -627,24 +794,15 @@ pub struct CancelDeal<'info> {
         constraint = seller.key() == deal.seller @ EscrowError::Unauthorized
     )]
     pub seller: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = deal
-    )]
-    pub deal_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = buyer
-    )]
-    pub buyer_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = seller
-    )]
-    pub seller_ata: Account<'info, TokenAccount>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub deal_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub buyer_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub seller_ata: UncheckedAccount<'info>,
     #[account(seeds = [b"config"], bump = config.bump)]
     pub config: Account<'info, Config>,
     pub token_program: Program<'info, Token>,
@@ -676,24 +834,15 @@ pub struct RefundOnTimeout<'info> {
         constraint = seller.key() == deal.seller @ EscrowError::Unauthorized
     )]
     pub seller: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = deal
-    )]
-    pub deal_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = buyer
-    )]
-    pub buyer_ata: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = seller
-    )]
-    pub seller_ata: Account<'info, TokenAccount>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub deal_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub buyer_ata: UncheckedAccount<'info>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub seller_ata: UncheckedAccount<'info>,
     #[account(seeds = [b"config"], bump = config.bump)]
     pub config: Account<'info, Config>,
     pub token_program: Program<'info, Token>,
@@ -743,14 +892,297 @@ pub struct ConfirmDeposit<'info> {
         constraint = middleman.key() == deal.middleman @ EscrowError::Unauthorized
     )]
     pub middleman: Signer<'info>,
-    #[account(
-        mut,
-        associated_token::mint = deal.mint,
-        associated_token::authority = deal
-    )]
-    pub deal_ata: Account<'info, TokenAccount>,
+    /// CHECK: Only required and manually validated for SPL-token deals.
+    #[account(mut)]
+    pub deal_ata: UncheckedAccount<'info>,
     #[account(seeds = [b"config"], bump = config.bump)]
     pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+#[instruction(position_id_hash: [u8; 32])]
+pub struct InitializeSportPosition<'info> {
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + SportPositionVault::INIT_SPACE,
+        seeds = [b"sport_position", position_id_hash.as_ref()],
+        bump
+    )]
+    pub sport_position: Account<'info, SportPositionVault>,
+
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    pub mint: Account<'info, Mint>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct FundSportPosition<'info> {
+    #[account(
+        mut,
+        seeds = [b"sport_position", sport_position.position_id_hash.as_ref()],
+        bump = sport_position.bump,
+        constraint = owner.key() == sport_position.owner @ EscrowError::Unauthorized
+    )]
+    pub sport_position: Account<'info, SportPositionVault>,
+
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CancelSportPosition<'info> {
+    #[account(
+        mut,
+        close = owner,
+        seeds = [b"sport_position", sport_position.position_id_hash.as_ref()],
+        bump = sport_position.bump,
+        constraint = owner.key() == sport_position.owner @ EscrowError::Unauthorized
+    )]
+    pub sport_position: Account<'info, SportPositionVault>,
+
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+#[instruction(deal_id: u64)]
+pub struct CommitSportPositionsToDeal<'info> {
+    #[account(
+        mut,
+        close = buyer,
+        seeds = [b"sport_position", buyer_position.position_id_hash.as_ref()],
+        bump = buyer_position.bump,
+    )]
+    pub buyer_position: Account<'info, SportPositionVault>,
+
+    #[account(
+        mut,
+        close = seller,
+        seeds = [b"sport_position", seller_position.position_id_hash.as_ref()],
+        bump = seller_position.bump,
+    )]
+    pub seller_position: Account<'info, SportPositionVault>,
+
+    #[account(
+        init,
+        payer = middleman,
+        space = 8 + Deal::INIT_SPACE,
+        seeds = [b"deal", buyer.key().as_ref(), deal_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub deal: Account<'info, Deal>,
+
+    #[account(mut)]
+    pub middleman: Signer<'info>,
+
+    /// CHECK: Must match the funded back-side SPORT position owner.
+    #[account(
+        mut,
+        constraint = buyer.key() == buyer_position.owner @ EscrowError::Unauthorized
+    )]
+    pub buyer: UncheckedAccount<'info>,
+
+    /// CHECK: Must match the funded lay-side SPORT position owner.
+    #[account(
+        mut,
+        constraint = seller.key() == seller_position.owner @ EscrowError::Unauthorized
+    )]
+    pub seller: UncheckedAccount<'info>,
+
+    pub mint: Account<'info, Mint>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(position_id_hash: [u8; 32])]
+pub struct InitializeSportPositionV2<'info> {
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + SportPositionVaultV2::INIT_SPACE,
+        seeds = [b"sport_position_v2", position_id_hash.as_ref()],
+        bump
+    )]
+    pub sport_position: Account<'info, SportPositionVaultV2>,
+
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    pub mint: Account<'info, Mint>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct FundSportPositionV2<'info> {
+    #[account(
+        mut,
+        seeds = [b"sport_position_v2", sport_position.position_id_hash.as_ref()],
+        bump = sport_position.bump,
+        constraint = owner.key() == sport_position.owner @ EscrowError::Unauthorized
+    )]
+    pub sport_position: Account<'info, SportPositionVaultV2>,
+
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CancelSportPositionRemaining<'info> {
+    #[account(
+        mut,
+        seeds = [b"sport_position_v2", sport_position.position_id_hash.as_ref()],
+        bump = sport_position.bump,
+        constraint = owner.key() == sport_position.owner @ EscrowError::Unauthorized
+    )]
+    pub sport_position: Account<'info, SportPositionVaultV2>,
+
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+pub struct RefundExpiredSportPositionRemaining<'info> {
+    #[account(
+        mut,
+        seeds = [b"sport_position_v2", sport_position.position_id_hash.as_ref()],
+        bump = sport_position.bump,
+        constraint = owner.key() == sport_position.owner @ EscrowError::Unauthorized
+    )]
+    pub sport_position: Account<'info, SportPositionVaultV2>,
+
+    /// CHECK: Receives the expired unmatched stake. Must equal the stored owner.
+    #[account(mut)]
+    pub owner: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub keeper: Signer<'info>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+pub struct CloseExpiredSportPositionV2IfEmpty<'info> {
+    #[account(
+        mut,
+        close = owner,
+        seeds = [b"sport_position_v2", sport_position.position_id_hash.as_ref()],
+        bump = sport_position.bump,
+        constraint = owner.key() == sport_position.owner @ EscrowError::Unauthorized,
+        constraint = sport_position.available_stake == 0 @ EscrowError::InvalidSportPosition
+    )]
+    pub sport_position: Account<'info, SportPositionVaultV2>,
+
+    /// CHECK: Receives reclaimed rent. Must equal the stored owner.
+    #[account(mut)]
+    pub owner: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub keeper: Signer<'info>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+pub struct CloseSportPositionV2IfEmpty<'info> {
+    #[account(
+        mut,
+        close = owner,
+        seeds = [b"sport_position_v2", sport_position.position_id_hash.as_ref()],
+        bump = sport_position.bump,
+        constraint = owner.key() == sport_position.owner @ EscrowError::Unauthorized,
+        constraint = sport_position.available_stake == 0 @ EscrowError::InvalidSportPosition
+    )]
+    pub sport_position: Account<'info, SportPositionVaultV2>,
+
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+#[instruction(deal_id: u64)]
+pub struct CommitSportPositionFillToDeal<'info> {
+    #[account(
+        mut,
+        seeds = [b"sport_position_v2", buyer_position.position_id_hash.as_ref()],
+        bump = buyer_position.bump,
+    )]
+    pub buyer_position: Account<'info, SportPositionVaultV2>,
+
+    #[account(
+        mut,
+        seeds = [b"sport_position_v2", seller_position.position_id_hash.as_ref()],
+        bump = seller_position.bump,
+    )]
+    pub seller_position: Account<'info, SportPositionVaultV2>,
+
+    #[account(
+        init,
+        payer = middleman,
+        space = 8 + Deal::INIT_SPACE,
+        seeds = [b"deal", buyer.key().as_ref(), deal_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub deal: Account<'info, Deal>,
+
+    #[account(mut)]
+    pub middleman: Signer<'info>,
+
+    /// CHECK: Must match the funded back-side SPORT position owner.
+    #[account(
+        mut,
+        constraint = buyer.key() == buyer_position.owner @ EscrowError::Unauthorized
+    )]
+    pub buyer: UncheckedAccount<'info>,
+
+    /// CHECK: Must match the funded lay-side SPORT position owner.
+    #[account(
+        mut,
+        constraint = seller.key() == seller_position.owner @ EscrowError::Unauthorized
+    )]
+    pub seller: UncheckedAccount<'info>,
+
+    pub mint: Account<'info, Mint>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    pub system_program: Program<'info, System>,
 }
 
 /// Reveal and verify terms for a privacy-mode deal.
@@ -805,6 +1237,538 @@ pub mod escrow {
         Ok(())
     }
 
+    // ─── SPORT Position Instructions ────────────────────────────────
+
+    /// Creates a native-SOL SPORT position vault PDA. The position is not public
+    /// or matchable until `fund_sport_position` transfers the exact stake.
+    #[allow(clippy::too_many_arguments)]
+    pub fn initialize_sport_position(
+        ctx: Context<InitializeSportPosition>,
+        position_id_hash: [u8; 32],
+        fixture_hash: [u8; 32],
+        market_hash: [u8; 32],
+        selection_hash: [u8; 32],
+        side: SportPositionSide,
+        stake: u64,
+        expires_at: i64,
+    ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+        require!(is_native_sol_mint(&ctx.accounts.mint.key()), EscrowError::SportNativeSolOnly);
+        require!(stake > 0, EscrowError::InvalidAmount);
+
+        let now = Clock::get()?.unix_timestamp;
+        require!(expires_at > now, EscrowError::InvalidTimeout);
+
+        let vault = ctx.accounts.sport_position.key();
+        let position = &mut ctx.accounts.sport_position;
+        position.position_id_hash = position_id_hash;
+        position.fixture_hash = fixture_hash;
+        position.market_hash = market_hash;
+        position.selection_hash = selection_hash;
+        position.owner = ctx.accounts.owner.key();
+        position.mint = ctx.accounts.mint.key();
+        position.side = side.clone();
+        position.stake = stake;
+        position.funded = false;
+        position.created_at = now;
+        position.funded_at = 0;
+        position.expires_at = expires_at;
+        position.bump = ctx.bumps.sport_position;
+
+        emit!(SportPositionCreated {
+            position_id_hash,
+            fixture_hash,
+            market_hash,
+            selection_hash,
+            owner: position.owner,
+            side,
+            stake,
+            expires_at,
+            vault,
+        });
+
+        Ok(())
+    }
+
+    /// Funds a SPORT position by transferring exactly the configured stake from
+    /// the owner into the position vault PDA.
+    pub fn fund_sport_position(ctx: Context<FundSportPosition>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+
+        let now = Clock::get()?.unix_timestamp;
+        let position_info = ctx.accounts.sport_position.to_account_info();
+        let position = &mut ctx.accounts.sport_position;
+
+        require!(!position.funded, EscrowError::SportPositionAlreadyFunded);
+        require!(position.stake > 0, EscrowError::InvalidAmount);
+        require!(now <= position.expires_at, EscrowError::SportPositionExpired);
+        require!(is_native_sol_mint(&position.mint), EscrowError::SportNativeSolOnly);
+
+        let cpi_accounts = system_program::Transfer {
+            from: ctx.accounts.owner.to_account_info(),
+            to: position_info.clone(),
+        };
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            cpi_accounts,
+        );
+        system_program::transfer(cpi_ctx, position.stake)?;
+
+        position.funded = true;
+        position.funded_at = now;
+
+        emit!(SportPositionFunded {
+            position_id_hash: position.position_id_hash,
+            owner: position.owner,
+            stake: position.stake,
+            vault: position_info.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Cancels an unmatched SPORT position. If funded, Anchor's close handler
+    /// returns rent plus the locked stake to the owner.
+    pub fn cancel_sport_position(ctx: Context<CancelSportPosition>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+
+        let position = &ctx.accounts.sport_position;
+        let refunded = if position.funded { position.stake } else { 0 };
+
+        emit!(SportPositionCancelled {
+            position_id_hash: position.position_id_hash,
+            owner: position.owner,
+            refunded,
+            vault: ctx.accounts.sport_position.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Atomically commits one funded back position and one funded lay position
+    /// into a SPORT deal. The resulting deal starts at `PaymentLocked`, so the
+    /// TxLINE settlement engine can call the existing buyer/seller payout
+    /// instructions without any negotiation or manual deposit phase.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit_sport_positions_to_deal(
+        ctx: Context<CommitSportPositionsToDeal>,
+        deal_id: u64,
+        timeout: i64,
+    ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+        require!(is_native_sol_mint(&ctx.accounts.mint.key()), EscrowError::SportNativeSolOnly);
+
+        let now = Clock::get()?.unix_timestamp;
+        require!(timeout > now, EscrowError::InvalidTimeout);
+
+        let buyer_position = &ctx.accounts.buyer_position;
+        let seller_position = &ctx.accounts.seller_position;
+
+        require!(buyer_position.funded, EscrowError::SportPositionNotFunded);
+        require!(seller_position.funded, EscrowError::SportPositionNotFunded);
+        require!(now <= buyer_position.expires_at, EscrowError::SportPositionExpired);
+        require!(now <= seller_position.expires_at, EscrowError::SportPositionExpired);
+        require!(buyer_position.owner != seller_position.owner, EscrowError::SportSelfMatch);
+        require!(buyer_position.side == SportPositionSide::Back, EscrowError::SportPositionMismatch);
+        require!(seller_position.side == SportPositionSide::Lay, EscrowError::SportPositionMismatch);
+        require!(buyer_position.mint == ctx.accounts.mint.key(), EscrowError::MintMismatch);
+        require!(seller_position.mint == ctx.accounts.mint.key(), EscrowError::MintMismatch);
+        require!(buyer_position.fixture_hash == seller_position.fixture_hash, EscrowError::SportPositionMismatch);
+        require!(buyer_position.market_hash == seller_position.market_hash, EscrowError::SportPositionMismatch);
+        require!(buyer_position.selection_hash == seller_position.selection_hash, EscrowError::SportPositionMismatch);
+        require!(buyer_position.stake == seller_position.stake, EscrowError::SportPositionMismatch);
+        require!(buyer_position.stake > 0, EscrowError::InvalidAmount);
+
+        let stake = buyer_position.stake;
+        let buyer_position_id_hash = buyer_position.position_id_hash;
+        let seller_position_id_hash = seller_position.position_id_hash;
+        let buyer_key = ctx.accounts.buyer.key();
+        let seller_key = ctx.accounts.seller.key();
+        let middleman_key = ctx.accounts.middleman.key();
+        let mint_key = ctx.accounts.mint.key();
+        let buyer_position_info = ctx.accounts.buyer_position.to_account_info();
+        let seller_position_info = ctx.accounts.seller_position.to_account_info();
+        let deal_info = ctx.accounts.deal.to_account_info();
+
+        assert_rent_safe(&buyer_position_info, stake)?;
+        assert_rent_safe(&seller_position_info, stake)?;
+        transfer_lamports_from_pda(&buyer_position_info, &deal_info, stake)?;
+        transfer_lamports_from_pda(&seller_position_info, &deal_info, stake)?;
+
+        let deal = &mut ctx.accounts.deal;
+        deal.deal_id = deal_id;
+        deal.buyer = buyer_key;
+        deal.seller = seller_key;
+        deal.middleman = middleman_key;
+        deal.trade_mode = TradeMode::Sport;
+        deal.mint = mint_key;
+        deal.decimals = ctx.accounts.mint.decimals;
+        deal.asset_type = "SPORT".to_string();
+        deal.asset_description = "Prefunded SPORT prediction".to_string();
+        deal.price = stake;
+        deal.collateral_buyer = 0;
+        deal.collateral_seller = stake;
+        deal.buyer_collateral_locked = true;
+        deal.seller_collateral_locked = true;
+        deal.payment_locked = true;
+        deal.status = DealStatus::PaymentLocked;
+        deal.created_at = now;
+        deal.timeout = timeout;
+        deal.middleman_fee_bps = 100;
+        deal.bump = ctx.bumps.deal;
+        deal.terms_hash = [0u8; 32];
+        deal.terms_revealed = false;
+
+        emit!(DealCreated {
+            deal_id,
+            buyer: deal.buyer,
+            seller: deal.seller,
+            middleman: deal.middleman,
+            trade_mode: TradeMode::Sport,
+            mint: deal.mint,
+            decimals: deal.decimals,
+            price: deal.price,
+            collateral_buyer: deal.collateral_buyer,
+            collateral_seller: deal.collateral_seller,
+            timeout,
+        });
+
+        emit!(SportPositionsCommitted {
+            deal_id,
+            buyer_position_id_hash,
+            seller_position_id_hash,
+            buyer: buyer_key,
+            seller: seller_key,
+            stake,
+        });
+
+        Ok(())
+    }
+
+    /// Creates a v2 native-SOL SPORT position vault PDA. V2 supports partial
+    /// fills by tracking available, committed, and refunded stake separately.
+    #[allow(clippy::too_many_arguments)]
+    pub fn initialize_sport_position_v2(
+        ctx: Context<InitializeSportPositionV2>,
+        position_id_hash: [u8; 32],
+        fixture_hash: [u8; 32],
+        market_hash: [u8; 32],
+        selection_hash: [u8; 32],
+        side: SportPositionSide,
+        total_stake: u64,
+        expires_at: i64,
+    ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+        require!(is_native_sol_mint(&ctx.accounts.mint.key()), EscrowError::SportNativeSolOnly);
+        require!(total_stake > 0, EscrowError::InvalidAmount);
+
+        let now = Clock::get()?.unix_timestamp;
+        require!(expires_at > now, EscrowError::InvalidTimeout);
+
+        let vault = ctx.accounts.sport_position.key();
+        let position = &mut ctx.accounts.sport_position;
+        position.position_id_hash = position_id_hash;
+        position.fixture_hash = fixture_hash;
+        position.market_hash = market_hash;
+        position.selection_hash = selection_hash;
+        position.owner = ctx.accounts.owner.key();
+        position.mint = ctx.accounts.mint.key();
+        position.side = side.clone();
+        position.total_stake = total_stake;
+        position.available_stake = 0;
+        position.committed_stake = 0;
+        position.refunded_stake = 0;
+        position.funded = false;
+        position.created_at = now;
+        position.funded_at = 0;
+        position.expires_at = expires_at;
+        position.bump = ctx.bumps.sport_position;
+
+        emit!(SportPositionV2Created {
+            position_id_hash,
+            fixture_hash,
+            market_hash,
+            selection_hash,
+            owner: position.owner,
+            side,
+            total_stake,
+            expires_at,
+            vault,
+        });
+
+        Ok(())
+    }
+
+    /// Funds a v2 SPORT position by transferring exactly total_stake from owner
+    /// into the position vault PDA.
+    pub fn fund_sport_position_v2(ctx: Context<FundSportPositionV2>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+
+        let now = Clock::get()?.unix_timestamp;
+        let position_info = ctx.accounts.sport_position.to_account_info();
+        let position = &mut ctx.accounts.sport_position;
+
+        require!(!position.funded, EscrowError::SportPositionAlreadyFunded);
+        require!(position.total_stake > 0, EscrowError::InvalidAmount);
+        require!(position.available_stake == 0, EscrowError::InvalidSportPosition);
+        require!(position.committed_stake == 0, EscrowError::InvalidSportPosition);
+        require!(position.refunded_stake == 0, EscrowError::InvalidSportPosition);
+        require!(now <= position.expires_at, EscrowError::SportPositionExpired);
+        require!(is_native_sol_mint(&position.mint), EscrowError::SportNativeSolOnly);
+
+        let cpi_accounts = system_program::Transfer {
+            from: ctx.accounts.owner.to_account_info(),
+            to: position_info.clone(),
+        };
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            cpi_accounts,
+        );
+        system_program::transfer(cpi_ctx, position.total_stake)?;
+
+        position.funded = true;
+        position.funded_at = now;
+        position.available_stake = position.total_stake;
+
+        emit!(SportPositionV2Funded {
+            position_id_hash: position.position_id_hash,
+            owner: position.owner,
+            total_stake: position.total_stake,
+            available_stake: position.available_stake,
+            vault: position_info.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Cancels and refunds only the unmatched remaining stake on a v2 position.
+    /// Already committed fills remain locked in their individual deal PDAs.
+    pub fn cancel_sport_position_remaining(ctx: Context<CancelSportPositionRemaining>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+
+        let position_info = ctx.accounts.sport_position.to_account_info();
+        let owner_info = ctx.accounts.owner.to_account_info();
+        let position = &mut ctx.accounts.sport_position;
+
+        require!(position.funded, EscrowError::SportPositionNotFunded);
+        let refund = position.available_stake;
+        require!(refund > 0, EscrowError::InvalidAmount);
+
+        let new_refunded = position
+            .refunded_stake
+            .checked_add(refund)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+        assert_rent_safe(&position_info, refund)?;
+        transfer_lamports_from_pda(&position_info, &owner_info, refund)?;
+
+        position.available_stake = 0;
+        position.refunded_stake = new_refunded;
+
+        emit!(SportPositionV2RemainingCancelled {
+            position_id_hash: position.position_id_hash,
+            owner: position.owner,
+            refunded: refund,
+            vault: position_info.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Permissionless keeper path for expired v2 SPORT positions. It refunds only
+    /// unmatched available stake to the original owner after the position expiry.
+    /// Already committed fills remain locked in their individual deal PDAs.
+    pub fn refund_expired_sport_position_remaining(
+        ctx: Context<RefundExpiredSportPositionRemaining>,
+    ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+
+        let now = Clock::get()?.unix_timestamp;
+        let position_info = ctx.accounts.sport_position.to_account_info();
+        let owner_info = ctx.accounts.owner.to_account_info();
+        let keeper_key = ctx.accounts.keeper.key();
+        let position = &mut ctx.accounts.sport_position;
+
+        require!(position.funded, EscrowError::SportPositionNotFunded);
+        require!(now > position.expires_at, EscrowError::TimeoutNotReached);
+        let refund = position.available_stake;
+        require!(refund > 0, EscrowError::InvalidAmount);
+
+        let new_refunded = position
+            .refunded_stake
+            .checked_add(refund)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+        assert_rent_safe(&position_info, refund)?;
+        transfer_lamports_from_pda(&position_info, &owner_info, refund)?;
+
+        position.available_stake = 0;
+        position.refunded_stake = new_refunded;
+
+        emit!(SportPositionV2ExpiredRemainingRefunded {
+            position_id_hash: position.position_id_hash,
+            owner: position.owner,
+            keeper: keeper_key,
+            refunded: refund,
+            vault: position_info.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Closes an empty v2 SPORT position vault and returns rent to owner. It can
+    /// be called after all stake has been committed and/or remaining stake was
+    /// cancelled.
+    pub fn close_sport_position_v2_if_empty(ctx: Context<CloseSportPositionV2IfEmpty>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+        require!(ctx.accounts.sport_position.available_stake == 0, EscrowError::InvalidSportPosition);
+
+        emit!(SportPositionV2Closed {
+            position_id_hash: ctx.accounts.sport_position.position_id_hash,
+            owner: ctx.accounts.sport_position.owner,
+            vault: ctx.accounts.sport_position.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Permissionless keeper close for expired empty v2 SPORT position vaults.
+    /// The rent always returns to the original owner.
+    pub fn close_expired_sport_position_v2_if_empty(
+        ctx: Context<CloseExpiredSportPositionV2IfEmpty>,
+    ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+
+        let now = Clock::get()?.unix_timestamp;
+        require!(now > ctx.accounts.sport_position.expires_at, EscrowError::TimeoutNotReached);
+        require!(ctx.accounts.sport_position.available_stake == 0, EscrowError::InvalidSportPosition);
+
+        emit!(SportPositionV2Closed {
+            position_id_hash: ctx.accounts.sport_position.position_id_hash,
+            owner: ctx.accounts.sport_position.owner,
+            vault: ctx.accounts.sport_position.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Commits one partial fill from a funded back position and one funded lay
+    /// position into a new SPORT deal. Only fill_lamports leaves each vault.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit_sport_position_fill_to_deal(
+        ctx: Context<CommitSportPositionFillToDeal>,
+        deal_id: u64,
+        fill_lamports: u64,
+        timeout: i64,
+    ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, EscrowError::Paused);
+        require!(is_native_sol_mint(&ctx.accounts.mint.key()), EscrowError::SportNativeSolOnly);
+        require!(fill_lamports > 0, EscrowError::InvalidAmount);
+
+        let now = Clock::get()?.unix_timestamp;
+        require!(timeout > now, EscrowError::InvalidTimeout);
+
+        let buyer_position = &ctx.accounts.buyer_position;
+        let seller_position = &ctx.accounts.seller_position;
+
+        require!(buyer_position.funded, EscrowError::SportPositionNotFunded);
+        require!(seller_position.funded, EscrowError::SportPositionNotFunded);
+        require!(now <= buyer_position.expires_at, EscrowError::SportPositionExpired);
+        require!(now <= seller_position.expires_at, EscrowError::SportPositionExpired);
+        require!(buyer_position.owner != seller_position.owner, EscrowError::SportSelfMatch);
+        require!(buyer_position.side == SportPositionSide::Back, EscrowError::SportPositionMismatch);
+        require!(seller_position.side == SportPositionSide::Lay, EscrowError::SportPositionMismatch);
+        require!(buyer_position.mint == ctx.accounts.mint.key(), EscrowError::MintMismatch);
+        require!(seller_position.mint == ctx.accounts.mint.key(), EscrowError::MintMismatch);
+        require!(buyer_position.fixture_hash == seller_position.fixture_hash, EscrowError::SportPositionMismatch);
+        require!(buyer_position.market_hash == seller_position.market_hash, EscrowError::SportPositionMismatch);
+        require!(buyer_position.selection_hash == seller_position.selection_hash, EscrowError::SportPositionMismatch);
+        require!(fill_lamports <= buyer_position.available_stake, EscrowError::InsufficientFunds);
+        require!(fill_lamports <= seller_position.available_stake, EscrowError::InsufficientFunds);
+
+        let buyer_position_id_hash = buyer_position.position_id_hash;
+        let seller_position_id_hash = seller_position.position_id_hash;
+        let buyer_key = ctx.accounts.buyer.key();
+        let seller_key = ctx.accounts.seller.key();
+        let middleman_key = ctx.accounts.middleman.key();
+        let mint_key = ctx.accounts.mint.key();
+        let buyer_position_info = ctx.accounts.buyer_position.to_account_info();
+        let seller_position_info = ctx.accounts.seller_position.to_account_info();
+        let deal_info = ctx.accounts.deal.to_account_info();
+
+        assert_rent_safe(&buyer_position_info, fill_lamports)?;
+        assert_rent_safe(&seller_position_info, fill_lamports)?;
+        transfer_lamports_from_pda(&buyer_position_info, &deal_info, fill_lamports)?;
+        transfer_lamports_from_pda(&seller_position_info, &deal_info, fill_lamports)?;
+
+        let buyer_position = &mut ctx.accounts.buyer_position;
+        let seller_position = &mut ctx.accounts.seller_position;
+
+        buyer_position.available_stake = buyer_position
+            .available_stake
+            .checked_sub(fill_lamports)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+        buyer_position.committed_stake = buyer_position
+            .committed_stake
+            .checked_add(fill_lamports)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+        seller_position.available_stake = seller_position
+            .available_stake
+            .checked_sub(fill_lamports)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+        seller_position.committed_stake = seller_position
+            .committed_stake
+            .checked_add(fill_lamports)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+
+        let deal = &mut ctx.accounts.deal;
+        deal.deal_id = deal_id;
+        deal.buyer = buyer_key;
+        deal.seller = seller_key;
+        deal.middleman = middleman_key;
+        deal.trade_mode = TradeMode::Sport;
+        deal.mint = mint_key;
+        deal.decimals = ctx.accounts.mint.decimals;
+        deal.asset_type = "SPORT".to_string();
+        deal.asset_description = "Partial-fill SPORT prediction".to_string();
+        deal.price = fill_lamports;
+        deal.collateral_buyer = 0;
+        deal.collateral_seller = fill_lamports;
+        deal.buyer_collateral_locked = true;
+        deal.seller_collateral_locked = true;
+        deal.payment_locked = true;
+        deal.status = DealStatus::PaymentLocked;
+        deal.created_at = now;
+        deal.timeout = timeout;
+        deal.middleman_fee_bps = 100;
+        deal.bump = ctx.bumps.deal;
+        deal.terms_hash = [0u8; 32];
+        deal.terms_revealed = false;
+
+        emit!(DealCreated {
+            deal_id,
+            buyer: deal.buyer,
+            seller: deal.seller,
+            middleman: deal.middleman,
+            trade_mode: TradeMode::Sport,
+            mint: deal.mint,
+            decimals: deal.decimals,
+            price: deal.price,
+            collateral_buyer: deal.collateral_buyer,
+            collateral_seller: deal.collateral_seller,
+            timeout,
+        });
+
+        emit!(SportPositionFillCommitted {
+            deal_id,
+            buyer_position_id_hash,
+            seller_position_id_hash,
+            buyer: buyer_key,
+            seller: seller_key,
+            fill_lamports,
+        });
+
+        Ok(())
+    }
+
     // ─── Deal Instructions ───────────────────────────────────────────
 
     /// Creates a new escrow deal. Only the buyer or the middleman agent may call this.
@@ -823,6 +1787,7 @@ pub mod escrow {
     ) -> Result<()> {
         // ── Pause guard ──
         require!(!ctx.accounts.config.paused, EscrowError::Paused);
+        require!(trade_mode != TradeMode::Sport, EscrowError::SportDealRequiresPrefundedPositions);
 
         // ── Input validation ──
         require!(price > 0, EscrowError::InvalidAmount);
@@ -838,6 +1803,7 @@ pub mod escrow {
         let fee_bps: u16 = match trade_mode {
             TradeMode::Normal  => 100, // 1.0%
             TradeMode::Privacy => 110, // 1.1%
+            TradeMode::Sport => return Err(EscrowError::SportDealRequiresPrefundedPositions.into()),
         };
 
         // ── Populate deal state ──
@@ -879,6 +1845,9 @@ pub mod escrow {
             }
             TradeMode::Normal => {
                 deal.terms_hash = [0u8; 32];
+            }
+            TradeMode::Sport => {
+                return Err(EscrowError::SportDealRequiresPrefundedPositions.into());
             }
         }
 
@@ -1047,7 +2016,27 @@ pub mod escrow {
                 fee,
             )?;
         } else {
-            require!(ctx.accounts.deal_ata.amount >= total_out, EscrowError::InsufficientFunds);
+            let deal_ata = checked_token_account(
+                &ctx.accounts.deal_ata.to_account_info(),
+                deal.mint,
+                deal_info.key(),
+            )?;
+            checked_token_account(
+                &ctx.accounts.seller_ata.to_account_info(),
+                deal.mint,
+                ctx.accounts.seller.key(),
+            )?;
+            checked_token_account(
+                &ctx.accounts.buyer_ata.to_account_info(),
+                deal.mint,
+                ctx.accounts.buyer.key(),
+            )?;
+            checked_token_account(
+                &ctx.accounts.fee_ata.to_account_info(),
+                deal.mint,
+                ctx.accounts.fee_receiver.key(),
+            )?;
+            require!(deal_ata.amount >= total_out, EscrowError::InsufficientFunds);
 
             // ── Disburse via token account CPIs ──
             deal.transfer_tokens_from_pda(
@@ -1140,7 +2129,22 @@ pub mod escrow {
                 fee,
             )?;
         } else {
-            require!(ctx.accounts.deal_ata.amount >= total_out, EscrowError::InsufficientFunds);
+            let deal_ata = checked_token_account(
+                &ctx.accounts.deal_ata.to_account_info(),
+                deal.mint,
+                deal_info.key(),
+            )?;
+            checked_token_account(
+                &ctx.accounts.buyer_ata.to_account_info(),
+                deal.mint,
+                ctx.accounts.buyer.key(),
+            )?;
+            checked_token_account(
+                &ctx.accounts.fee_ata.to_account_info(),
+                deal.mint,
+                ctx.accounts.fee_receiver.key(),
+            )?;
+            require!(deal_ata.amount >= total_out, EscrowError::InsufficientFunds);
 
             deal.transfer_tokens_from_pda(
                 ctx.accounts.deal_ata.to_account_info(),
@@ -1235,12 +2239,22 @@ pub mod escrow {
             }
         } else {
             // ── Verify deal_ata token balance ──
+            let deal_ata = checked_token_account(
+                &ctx.accounts.deal_ata.to_account_info(),
+                deal.mint,
+                deal_info.key(),
+            )?;
             if total_refund > 0 {
-                require!(ctx.accounts.deal_ata.amount >= total_refund, EscrowError::InsufficientFunds);
+                require!(deal_ata.amount >= total_refund, EscrowError::InsufficientFunds);
             }
 
             // ── Disburse refunds via token CPIs ──
             if buyer_refund > 0 {
+                checked_token_account(
+                    &ctx.accounts.buyer_ata.to_account_info(),
+                    deal.mint,
+                    ctx.accounts.buyer.key(),
+                )?;
                 deal.transfer_tokens_from_pda(
                     ctx.accounts.deal_ata.to_account_info(),
                     ctx.accounts.buyer_ata.to_account_info(),
@@ -1251,6 +2265,11 @@ pub mod escrow {
                 )?;
             }
             if seller_refund > 0 {
+                checked_token_account(
+                    &ctx.accounts.seller_ata.to_account_info(),
+                    deal.mint,
+                    ctx.accounts.seller.key(),
+                )?;
                 deal.transfer_tokens_from_pda(
                     ctx.accounts.deal_ata.to_account_info(),
                     ctx.accounts.seller_ata.to_account_info(),
@@ -1334,12 +2353,22 @@ pub mod escrow {
             }
         } else {
             // ── Verify deal_ata token balance ──
+            let deal_ata = checked_token_account(
+                &ctx.accounts.deal_ata.to_account_info(),
+                deal.mint,
+                deal_info.key(),
+            )?;
             if total_refund > 0 {
-                require!(ctx.accounts.deal_ata.amount >= total_refund, EscrowError::InsufficientFunds);
+                require!(deal_ata.amount >= total_refund, EscrowError::InsufficientFunds);
             }
 
             // ── Disburse refunds via token CPIs ──
             if buyer_refund > 0 {
+                checked_token_account(
+                    &ctx.accounts.buyer_ata.to_account_info(),
+                    deal.mint,
+                    ctx.accounts.buyer.key(),
+                )?;
                 deal.transfer_tokens_from_pda(
                     ctx.accounts.deal_ata.to_account_info(),
                     ctx.accounts.buyer_ata.to_account_info(),
@@ -1350,6 +2379,11 @@ pub mod escrow {
                 )?;
             }
             if seller_refund > 0 {
+                checked_token_account(
+                    &ctx.accounts.seller_ata.to_account_info(),
+                    deal.mint,
+                    ctx.accounts.seller.key(),
+                )?;
                 deal.transfer_tokens_from_pda(
                     ctx.accounts.deal_ata.to_account_info(),
                     ctx.accounts.seller_ata.to_account_info(),
@@ -1410,7 +2444,11 @@ pub mod escrow {
         let current_balance = if is_native_sol_mint(&deal.mint) {
             escrowed_native_lamports(&deal_info)?
         } else {
-            ctx.accounts.deal_ata.amount
+            checked_token_account(
+                &ctx.accounts.deal_ata.to_account_info(),
+                deal.mint,
+                deal_info.key(),
+            )?.amount
         };
         let deposit_label: String;
 

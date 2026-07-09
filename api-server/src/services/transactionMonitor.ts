@@ -14,6 +14,7 @@ import { prisma } from '../lib/prisma';
 import { logger, logDrain, type AlertSeverity } from '../lib/logger';
 import { SUCCESSFUL_TICKET_STATUSES } from './ticketStatusPolicy';
 import { runSportSettlement } from './arena/sportSettlementEngine';
+import { sweepExpiredSportPositionRefunds } from './sportPosition.service';
 
 // ═══════════════════════════════════════════════════════
 // CONFIGURATION
@@ -270,22 +271,36 @@ export async function sweepSportSettlement(): Promise<Record<string, unknown>> {
             limit: SPORT_SETTLEMENT_MONITOR_LIMIT,
             refreshOutcomes: true,
         });
+        const expiredPositionRefunds = await sweepExpiredSportPositionRefunds({
+            limit: SPORT_SETTLEMENT_MONITOR_LIMIT,
+        });
+        const sportMonitorResult = {
+            ...sportSettlement,
+            expiredPositionRefunds,
+        };
         latestSportSettlementRun = {
             running: false,
             lastRunAt: new Date(startedAt).toISOString(),
             lastDurationMs: Date.now() - startedAt,
-            lastResult: sportSettlement,
+            lastResult: sportMonitorResult,
             lastError: null,
         };
-        if ((sportSettlement as any).settledCount > 0 || (sportSettlement as any).skippedCount > 0) {
+        if (
+            (sportSettlement as any).settledCount > 0
+            || (sportSettlement as any).skippedCount > 0
+            || (expiredPositionRefunds as any).refundedCount > 0
+            || (expiredPositionRefunds as any).skippedCount > 0
+        ) {
             logger.info('sport_settlement_monitor_sweep', {
                 scanned: (sportSettlement as any).scanned,
                 settledCount: (sportSettlement as any).settledCount,
                 skippedCount: (sportSettlement as any).skippedCount,
+                expiredRefundedCount: (expiredPositionRefunds as any).refundedCount,
+                expiredRefundSkippedCount: (expiredPositionRefunds as any).skippedCount,
                 skippedReasons: summarizeSportSettlementSkips(sportSettlement),
             });
         }
-        return sportSettlement;
+        return sportMonitorResult;
     } catch (error: any) {
         latestSportSettlementRun = {
             running: false,

@@ -10,8 +10,13 @@ import {
 } from '../services/sportAgentTools.service';
 import {
     acceptSportPosition,
+    cancelSportPosition,
+    confirmSportPositionFunding,
+    getSportPosition,
+    listMySportFills,
     listMySportPositions,
     listMySportTickets,
+    listSportPositionFills,
     listSportPositions,
     postSportPosition,
 } from '../services/sportPosition.service';
@@ -52,10 +57,54 @@ router.post('/positions/:id/accept', authenticateSolana, async (req: Request, re
     try {
         const data = await acceptSportPosition(requireWallet(req), req.params.id, {
             clientOrderId: req.body?.clientOrderId,
+            stakeSol: req.body?.stakeSol,
         });
         res.status(201).json({ success: true, data });
     } catch (error: any) {
         sendError(res, error, 'Failed to accept SPORT position');
+    }
+});
+
+router.post('/positions/:id/confirm-funding', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await confirmSportPositionFunding(requireWallet(req), req.params.id, {
+            fundingTx: req.body?.fundingTx,
+            txSignature: req.body?.txSignature,
+        });
+        res.status(data.matched === true ? 201 : 200).json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to confirm SPORT position funding');
+    }
+});
+
+router.post('/positions/:id/cancel', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await cancelSportPosition(requireWallet(req), req.params.id, {
+            cancelTx: req.body?.cancelTx,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to cancel SPORT position');
+    }
+});
+
+router.get('/positions/by-id/:id', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await getSportPosition(requireWallet(req), req.params.id);
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to get SPORT position');
+    }
+});
+
+router.get('/positions/:id/fills', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await listSportPositionFills(requireWallet(req), req.params.id, {
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list SPORT position fills');
     }
 });
 
@@ -94,6 +143,18 @@ router.get('/me/positions', authenticateSolana, async (req: Request, res: Respon
         res.json({ success: true, data });
     } catch (error: any) {
         sendError(res, error, 'Failed to list wallet SPORT positions');
+    }
+});
+
+router.get('/me/fills', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await listMySportFills(requireWallet(req), {
+            status: req.query.status,
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list wallet SPORT fills');
     }
 });
 

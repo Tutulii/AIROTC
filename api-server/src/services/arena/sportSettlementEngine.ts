@@ -338,7 +338,7 @@ export async function runSportSettlement(params: {
 
         const txRecorded = Boolean(releaseTx || refundTx);
         const terminalStatus = sellerPayoutAction(settlementAction) ? 'released' : 'refunded';
-        settled.push(await settleArenaMatch(match.id, {
+        const settledMatch = await settleArenaMatch(match.id, {
             outcomeId: outcome.id,
             winnerWallet: winnerWallet || undefined,
             settlementAction,
@@ -359,7 +359,20 @@ export async function runSportSettlement(params: {
                 } : null,
                 outcomeRefresh,
             },
-        }));
+        });
+        if (match.ticketId && prismaAny.sportPositionFill?.updateMany) {
+            await prismaAny.sportPositionFill.updateMany({
+                where: { ticketId: match.ticketId },
+                data: {
+                    status: terminalStatus === 'released' || terminalStatus === 'refunded' ? 'settled' : terminalStatus,
+                    winnerWallet: winnerWallet || null,
+                    releaseTx: releaseTx || null,
+                    refundTx: refundTx || null,
+                    settledAt: new Date(),
+                },
+            });
+        }
+        settled.push(settledMatch);
     }
 
     return {

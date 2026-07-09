@@ -58,8 +58,12 @@ export type DealContext = {
 export type ExecutionResult = {
   success: boolean;
   tx?: string;
+  closeTx?: string;
+  refundedLamports?: string;
+  closed?: boolean;
   error?: string;
   step?: string;
+  dealPda?: string;
 };
 
 // ==========================================
@@ -277,6 +281,24 @@ function deriveDealPda(buyer: PublicKey, dealId: BN, programId: PublicKey): Publ
 function deriveConfigPda(programId: PublicKey): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
     [Buffer.from("config")],
+    programId
+  );
+  return pda;
+}
+
+function deriveSportPositionPda(positionId: string, programId: PublicKey): PublicKey {
+  const seedHash = crypto.createHash("sha256").update(positionId).digest();
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("sport_position"), seedHash],
+    programId
+  );
+  return pda;
+}
+
+function deriveSportPositionPdaV2(positionId: string, programId: PublicKey): PublicKey {
+  const seedHash = crypto.createHash("sha256").update(positionId).digest();
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("sport_position_v2"), seedHash],
     programId
   );
   return pda;
@@ -526,6 +548,491 @@ export async function executeCreateDeal(result: AgreementResult): Promise<Execut
     await dealTracker.updateStatus(result.ticketId, "failed", error.message);
     await executionStore.markFailed(result.ticketId, "create_deal", error.message);
     return { success: false, error: error.message || error.toString(), step: "create_deal" };
+  }
+}
+
+export async function executeCommitSportPositionsToDeal(params: {
+  ticketId: string;
+  buyerWallet: string;
+  sellerWallet: string;
+  buyerPositionVaultPda?: string | null;
+  sellerPositionVaultPda?: string | null;
+  buyerPositionId?: string | null;
+  sellerPositionId?: string | null;
+  stakeSol: number;
+  timeoutSeconds?: number;
+}): Promise<ExecutionResult> {
+  try {
+    if (!Number.isFinite(params.stakeSol) || params.stakeSol <= 0) {
+      return { success: false, error: "Invalid SPORT stake", step: "commit_sport_positions_to_deal" };
+    }
+    if (params.buyerWallet === params.sellerWallet) {
+      return { success: false, error: "Buyer and seller cannot be same wallet", step: "commit_sport_positions_to_deal" };
+    }
+
+    const { program, wallet, programId } = getAnchorProgram();
+    if (!(program.methods as any).commitSportPositionsToDeal) {
+      return {
+        success: false,
+        error: "commit_sport_positions_to_deal_unsupported_by_idl",
+        step: "commit_sport_positions_to_deal",
+      };
+    }
+
+    const buyer = new PublicKey(params.buyerWallet);
+    const seller = new PublicKey(params.sellerWallet);
+    const middleman = wallet.publicKey;
+    const buyerPosition = params.buyerPositionVaultPda
+      ? new PublicKey(params.buyerPositionVaultPda)
+      : params.buyerPositionId
+        ? deriveSportPositionPda(params.buyerPositionId, programId)
+        : null;
+    const sellerPosition = params.sellerPositionVaultPda
+      ? new PublicKey(params.sellerPositionVaultPda)
+      : params.sellerPositionId
+        ? deriveSportPositionPda(params.sellerPositionId, programId)
+        : null;
+
+    if (!buyerPosition || !sellerPosition) {
+      return {
+        success: false,
+        error: "missing_sport_position_vaults",
+        step: "commit_sport_positions_to_deal",
+      };
+    }
+
+    const dealId = new BN(crypto.randomBytes(8));
+    const dealPda = deriveDealPda(buyer, dealId, programId);
+    const configPda = deriveConfigPda(programId);
+    const timeoutSeconds = params.timeoutSeconds || Math.floor(Date.now() / 1000) + 14 * 24 * 60 * 60;
+    const timeoutDate = new Date(timeoutSeconds * 1000);
+    const buyerAgent = await walletRegistry.getOrCreateAgent(params.buyerWallet);
+    const sellerAgent = await walletRegistry.getOrCreateAgent(params.sellerWallet);
+    const middlemanAgent = await walletRegistry.getOrCreateAgent(middleman.toBase58());
+
+    dealContexts[params.ticketId] = {
+      dealId,
+      dealPda,
+      configPda,
+      buyer,
+      seller,
+      middleman,
+      programId,
+      tokenMint: NATIVE_MINT,
+    };
+
+    await prisma.executionContext.upsert({
+      where: { ticketId: params.ticketId },
+      update: {
+        dealIdBn: dealId.toString(16),
+        dealPda: dealPda.toBase58(),
+        configPda: configPda.toBase58(),
+        buyerWallet: buyer.toBase58(),
+        sellerWallet: seller.toBase58(),
+        middlemanWallet: middleman.toBase58(),
+        programId: programId.toBase58(),
+        tokenMint: NATIVE_MINT.toBase58(),
+        lastSuccessfulStep: "commit_sport_positions_to_deal",
+        status: "payment_locked",
+      },
+      create: {
+        ticketId: params.ticketId,
+        dealIdBn: dealId.toString(16),
+        dealPda: dealPda.toBase58(),
+        configPda: configPda.toBase58(),
+        buyerWallet: buyer.toBase58(),
+        sellerWallet: seller.toBase58(),
+        middlemanWallet: middleman.toBase58(),
+        programId: programId.toBase58(),
+        tokenMint: NATIVE_MINT.toBase58(),
+        lastSuccessfulStep: "commit_sport_positions_to_deal",
+        status: "payment_locked",
+      },
+    });
+
+    await dealTracker.initDeal({
+      ticketId: params.ticketId,
+      buyerId: buyerAgent.id,
+      sellerId: sellerAgent.id,
+      middlemanId: middlemanAgent.id,
+      price: params.stakeSol,
+      collateralBuyer: 0,
+      collateralSeller: params.stakeSol,
+      timeout: timeoutDate,
+    });
+
+    const executionLogger = logger.withContext({ ticket_id: params.ticketId });
+    executionLogger.info("tx_sent", {
+      step: "commit_sport_positions_to_deal",
+      buyer: buyer.toBase58(),
+      seller: seller.toBase58(),
+      buyerPosition: buyerPosition.toBase58(),
+      sellerPosition: sellerPosition.toBase58(),
+    });
+
+    const tx = await withRetry(
+      async () => {
+        const { program } = getAnchorProgram();
+        const preInstructions = [
+          await getPriorityFeeIx((program.provider as any).connection),
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+        ];
+        return await (program.methods as any)
+          .commitSportPositionsToDeal(dealId, new BN(timeoutSeconds))
+          .accounts({
+            buyerPosition,
+            sellerPosition,
+            deal: dealPda,
+            middleman,
+            buyer,
+            seller,
+            mint: NATIVE_MINT,
+            config: configPda,
+            systemProgram: SystemProgram.programId,
+          })
+          .preInstructions(preInstructions)
+          .signers([])
+          .rpc();
+      },
+      { label: "commit_sport_positions_to_deal", ticketId: params.ticketId, step: "commit_sport_positions_to_deal" }
+    );
+
+    await dealTracker.storeOnChainId(params.ticketId, dealPda.toBase58());
+    await dealTracker.updateStatus(params.ticketId, "payment_locked");
+    await executionStore.markSuccess(params.ticketId, "commit_sport_positions_to_deal", tx);
+
+    executionLogger.info("tx_confirmed", {
+      step: "commit_sport_positions_to_deal",
+      tx,
+      dealPda: dealPda.toBase58(),
+    });
+
+    return {
+      success: true,
+      tx,
+      step: "commit_sport_positions_to_deal",
+      dealPda: dealPda.toBase58(),
+    };
+  } catch (error: any) {
+    const executionLogger = logger.withContext({ ticket_id: params.ticketId });
+    executionLogger.error("tx_failed", { step: "commit_sport_positions_to_deal" }, error);
+    await dealTracker.updateStatus(params.ticketId, "failed", error.message);
+    await executionStore.markFailed(params.ticketId, "commit_sport_positions_to_deal", error.message);
+    return {
+      success: false,
+      error: error.message || String(error),
+      step: "commit_sport_positions_to_deal",
+    };
+  }
+}
+
+export async function executeCommitSportPositionFillToDeal(params: {
+  ticketId: string;
+  buyerWallet: string;
+  sellerWallet: string;
+  buyerPositionVaultPda?: string | null;
+  sellerPositionVaultPda?: string | null;
+  buyerPositionId?: string | null;
+  sellerPositionId?: string | null;
+  fillLamports: string;
+  timeoutSeconds?: number;
+}): Promise<ExecutionResult> {
+  try {
+    if (!/^\d+$/.test(params.fillLamports) || BigInt(params.fillLamports) <= 0n) {
+      return { success: false, error: "Invalid SPORT fill amount", step: "commit_sport_position_fill_to_deal" };
+    }
+    if (params.buyerWallet === params.sellerWallet) {
+      return { success: false, error: "Buyer and seller cannot be same wallet", step: "commit_sport_position_fill_to_deal" };
+    }
+
+    const { program, wallet, programId } = getAnchorProgram();
+    if (!(program.methods as any).commitSportPositionFillToDeal) {
+      return {
+        success: false,
+        error: "commit_sport_position_fill_to_deal_unsupported_by_idl",
+        step: "commit_sport_position_fill_to_deal",
+      };
+    }
+
+    const buyer = new PublicKey(params.buyerWallet);
+    const seller = new PublicKey(params.sellerWallet);
+    const middleman = wallet.publicKey;
+    const buyerPosition = params.buyerPositionVaultPda
+      ? new PublicKey(params.buyerPositionVaultPda)
+      : params.buyerPositionId
+        ? deriveSportPositionPdaV2(params.buyerPositionId, programId)
+        : null;
+    const sellerPosition = params.sellerPositionVaultPda
+      ? new PublicKey(params.sellerPositionVaultPda)
+      : params.sellerPositionId
+        ? deriveSportPositionPdaV2(params.sellerPositionId, programId)
+        : null;
+
+    if (!buyerPosition || !sellerPosition) {
+      return {
+        success: false,
+        error: "missing_sport_position_v2_vaults",
+        step: "commit_sport_position_fill_to_deal",
+      };
+    }
+
+    const fillLamports = new BN(params.fillLamports);
+    const stakeSol = Number(fillLamports.toString()) / LAMPORTS_PER_SOL;
+    const dealId = new BN(crypto.randomBytes(8));
+    const dealPda = deriveDealPda(buyer, dealId, programId);
+    const configPda = deriveConfigPda(programId);
+    const timeoutSeconds = params.timeoutSeconds || Math.floor(Date.now() / 1000) + 14 * 24 * 60 * 60;
+    const timeoutDate = new Date(timeoutSeconds * 1000);
+    const buyerAgent = await walletRegistry.getOrCreateAgent(params.buyerWallet);
+    const sellerAgent = await walletRegistry.getOrCreateAgent(params.sellerWallet);
+    const middlemanAgent = await walletRegistry.getOrCreateAgent(middleman.toBase58());
+
+    dealContexts[params.ticketId] = {
+      dealId,
+      dealPda,
+      configPda,
+      buyer,
+      seller,
+      middleman,
+      programId,
+      tokenMint: NATIVE_MINT,
+    };
+
+    await prisma.executionContext.upsert({
+      where: { ticketId: params.ticketId },
+      update: {
+        dealIdBn: dealId.toString(16),
+        dealPda: dealPda.toBase58(),
+        configPda: configPda.toBase58(),
+        buyerWallet: buyer.toBase58(),
+        sellerWallet: seller.toBase58(),
+        middlemanWallet: middleman.toBase58(),
+        programId: programId.toBase58(),
+        tokenMint: NATIVE_MINT.toBase58(),
+        lastSuccessfulStep: "commit_sport_position_fill_to_deal",
+        status: "payment_locked",
+      },
+      create: {
+        ticketId: params.ticketId,
+        dealIdBn: dealId.toString(16),
+        dealPda: dealPda.toBase58(),
+        configPda: configPda.toBase58(),
+        buyerWallet: buyer.toBase58(),
+        sellerWallet: seller.toBase58(),
+        middlemanWallet: middleman.toBase58(),
+        programId: programId.toBase58(),
+        tokenMint: NATIVE_MINT.toBase58(),
+        lastSuccessfulStep: "commit_sport_position_fill_to_deal",
+        status: "payment_locked",
+      },
+    });
+
+    await dealTracker.initDeal({
+      ticketId: params.ticketId,
+      buyerId: buyerAgent.id,
+      sellerId: sellerAgent.id,
+      middlemanId: middlemanAgent.id,
+      price: stakeSol,
+      collateralBuyer: 0,
+      collateralSeller: stakeSol,
+      timeout: timeoutDate,
+    });
+
+    const executionLogger = logger.withContext({ ticket_id: params.ticketId });
+    executionLogger.info("tx_sent", {
+      step: "commit_sport_position_fill_to_deal",
+      buyer: buyer.toBase58(),
+      seller: seller.toBase58(),
+      buyerPosition: buyerPosition.toBase58(),
+      sellerPosition: sellerPosition.toBase58(),
+      fillLamports: fillLamports.toString(),
+    });
+
+    const tx = await withRetry(
+      async () => {
+        const { program } = getAnchorProgram();
+        const preInstructions = [
+          await getPriorityFeeIx((program.provider as any).connection),
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+        ];
+        return await (program.methods as any)
+          .commitSportPositionFillToDeal(dealId, fillLamports, new BN(timeoutSeconds))
+          .accounts({
+            buyerPosition,
+            sellerPosition,
+            deal: dealPda,
+            middleman,
+            buyer,
+            seller,
+            mint: NATIVE_MINT,
+            config: configPda,
+            systemProgram: SystemProgram.programId,
+          })
+          .preInstructions(preInstructions)
+          .signers([])
+          .rpc();
+      },
+      { label: "commit_sport_position_fill_to_deal", ticketId: params.ticketId, step: "commit_sport_position_fill_to_deal" }
+    );
+
+    await dealTracker.storeOnChainId(params.ticketId, dealPda.toBase58());
+    await dealTracker.updateStatus(params.ticketId, "payment_locked");
+    await executionStore.markSuccess(params.ticketId, "commit_sport_position_fill_to_deal", tx);
+
+    executionLogger.info("tx_confirmed", {
+      step: "commit_sport_position_fill_to_deal",
+      tx,
+      dealPda: dealPda.toBase58(),
+    });
+
+    return {
+      success: true,
+      tx,
+      step: "commit_sport_position_fill_to_deal",
+      dealPda: dealPda.toBase58(),
+    };
+  } catch (error: any) {
+    const executionLogger = logger.withContext({ ticket_id: params.ticketId });
+    executionLogger.error("tx_failed", { step: "commit_sport_position_fill_to_deal" }, error);
+    await dealTracker.updateStatus(params.ticketId, "failed", error.message);
+    await executionStore.markFailed(params.ticketId, "commit_sport_position_fill_to_deal", error.message);
+    return {
+      success: false,
+      error: error.message || String(error),
+      step: "commit_sport_position_fill_to_deal",
+    };
+  }
+}
+
+export async function executeRefundExpiredSportPositionRemaining(params: {
+  positionId: string;
+  ownerWallet: string;
+  vaultPda?: string | null;
+  closeIfNoCommittedStake?: boolean;
+}): Promise<ExecutionResult> {
+  try {
+    const { program, wallet, programId } = getAnchorProgram();
+    if (!(program.methods as any).refundExpiredSportPositionRemaining) {
+      return {
+        success: false,
+        error: "refund_expired_sport_position_remaining_unsupported_by_idl",
+        step: "refund_expired_sport_position_remaining",
+      };
+    }
+
+    const owner = new PublicKey(params.ownerWallet);
+    const keeper = wallet.publicKey;
+    const sportPosition = params.vaultPda
+      ? new PublicKey(params.vaultPda)
+      : deriveSportPositionPdaV2(params.positionId, programId);
+    const configPda = deriveConfigPda(programId);
+    const accountBefore = await (program.account as any).sportPositionVaultV2.fetch(sportPosition);
+    const availableStake = new BN(accountBefore.availableStake || 0);
+    const committedStake = new BN(accountBefore.committedStake || 0);
+
+    if (availableStake.lte(new BN(0))) {
+      return {
+        success: false,
+        error: "sport_position_no_available_stake_to_refund",
+        step: "refund_expired_sport_position_remaining",
+      };
+    }
+
+    const executionLogger = logger.withContext({ sport_position_id: params.positionId });
+    executionLogger.info("tx_sent", {
+      step: "refund_expired_sport_position_remaining",
+      owner: owner.toBase58(),
+      sportPosition: sportPosition.toBase58(),
+      availableStake: availableStake.toString(),
+    });
+
+    const tx = await withRetry(
+      async () => {
+        const { program } = getAnchorProgram();
+        const preInstructions = [
+          await getPriorityFeeIx((program.provider as any).connection),
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 220_000 }),
+        ];
+        return await (program.methods as any)
+          .refundExpiredSportPositionRemaining()
+          .accounts({
+            sportPosition,
+            owner,
+            keeper,
+            config: configPda,
+          })
+          .preInstructions(preInstructions)
+          .signers([])
+          .rpc();
+      },
+      {
+        label: "refund_expired_sport_position_remaining",
+        ticketId: params.positionId,
+        step: "refund_expired_sport_position_remaining",
+      }
+    );
+
+    let closeTx: string | undefined;
+    if (params.closeIfNoCommittedStake !== false && committedStake.eq(new BN(0))) {
+      try {
+        closeTx = await withRetry(
+          async () => {
+            const { program } = getAnchorProgram();
+            if (!(program.methods as any).closeExpiredSportPositionV2IfEmpty) return undefined as any;
+            const preInstructions = [
+              await getPriorityFeeIx((program.provider as any).connection),
+              ComputeBudgetProgram.setComputeUnitLimit({ units: 160_000 }),
+            ];
+            return await (program.methods as any)
+              .closeExpiredSportPositionV2IfEmpty()
+              .accounts({
+                sportPosition,
+                owner,
+                keeper,
+                config: configPda,
+              })
+              .preInstructions(preInstructions)
+              .signers([])
+              .rpc();
+          },
+          {
+            label: "close_expired_sport_position_v2_if_empty",
+            ticketId: params.positionId,
+            step: "close_expired_sport_position_v2_if_empty",
+          }
+        );
+      } catch (closeError: any) {
+        executionLogger.warn("expired_sport_position_close_failed", {
+          error: closeError?.message || String(closeError),
+          sportPosition: sportPosition.toBase58(),
+        });
+      }
+    }
+
+    executionLogger.info("tx_confirmed", {
+      step: "refund_expired_sport_position_remaining",
+      tx,
+      closeTx: closeTx || null,
+      sportPosition: sportPosition.toBase58(),
+      refundedLamports: availableStake.toString(),
+    });
+
+    return {
+      success: true,
+      tx,
+      closeTx,
+      closed: Boolean(closeTx),
+      refundedLamports: availableStake.toString(),
+      step: "refund_expired_sport_position_remaining",
+    };
+  } catch (error: any) {
+    const executionLogger = logger.withContext({ sport_position_id: params.positionId });
+    executionLogger.error("tx_failed", { step: "refund_expired_sport_position_remaining" }, error);
+    return {
+      success: false,
+      error: error.message || String(error),
+      step: "refund_expired_sport_position_remaining",
+    };
   }
 }
 

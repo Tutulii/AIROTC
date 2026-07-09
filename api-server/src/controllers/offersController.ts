@@ -15,6 +15,14 @@ function sanitizeOffer<T extends Record<string, any>>(offer: T): T {
         creatorRewardWallet?: string | null;
         creatorFundingWallet?: string | null;
     };
+    if (rest.rollupMode === 'SPORT') {
+        const { collateral: _hiddenCollateral, ...sportRest } = rest;
+        return {
+            ...sportRest,
+            stake: sportRest.price,
+            stakeModel: 'equal_stake',
+        } as unknown as T;
+    }
     return rest as T;
 }
 

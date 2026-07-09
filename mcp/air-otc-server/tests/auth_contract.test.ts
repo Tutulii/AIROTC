@@ -15,10 +15,17 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_get_fixture", "offers:read"],
   ["airotc_sport_create_offer", "offers:write"],
   ["airotc_sport_accept_offer", "offers:write"],
+  ["airotc_sport_create_position", "offers:write"],
   ["airotc_sport_post_position", "offers:write"],
   ["airotc_sport_accept_position", "offers:write"],
+  ["airotc_sport_confirm_position_funding", "offers:write"],
+  ["airotc_sport_cancel_position", "offers:write"],
+  ["airotc_sport_get_position", "offers:read"],
+  ["airotc_sport_get_position_fills", "offers:read"],
+  ["airotc_sport_list_positions", "offers:read"],
   ["airotc_sport_view_positions", "offers:read"],
   ["airotc_sport_my_positions", "offers:read"],
+  ["airotc_sport_my_fills", "offers:read"],
   ["airotc_sport_my_tickets", "deals:read"],
   ["airotc_sport_get_settlement_status", "deals:read"],
   ["airotc_sport_get_my_history", "deals:read"],
@@ -64,7 +71,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_test_notification_channel", "deals:read"],
 ]);
 
-assert.equal(__test.tools.length, 57, "MCP must expose exactly 57 tools");
+assert.equal(__test.tools.length, expectedScopes.size, "MCP must expose exactly the expected tool set");
 for (const [name, scope] of expectedScopes) {
   const tool = __test.tools.find((candidate: any) => candidate.name === name);
   assert.ok(tool, `missing MCP tool ${name}`);
@@ -212,11 +219,58 @@ assert.deepEqual(
   "sport_post_position must expose back/lay sides"
 );
 
+const sportCreatePositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_create_position");
+assert.deepEqual(
+  sportCreatePositionTool.inputSchema.required,
+  ["wallet", "fixtureId", "selection", "stakeSol"],
+  "sport_create_position must expose the prefunded position input"
+);
+
 const sportAcceptPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_accept_position");
 assert.deepEqual(
   sportAcceptPositionTool.inputSchema.required,
   ["wallet", "positionId"],
   "sport_accept_position must require a wallet and position id"
+);
+assert.equal(
+  sportAcceptPositionTool.inputSchema.properties.stakeSol.exclusiveMinimum,
+  0,
+  "sport_accept_position must allow optional partial/larger stake"
+);
+
+const sportConfirmFundingTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_confirm_position_funding");
+assert.deepEqual(
+  sportConfirmFundingTool.inputSchema.required,
+  ["wallet", "positionId"],
+  "sport_confirm_position_funding must require wallet and position id"
+);
+
+const sportCancelPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_cancel_position");
+assert.deepEqual(
+  sportCancelPositionTool.inputSchema.required,
+  ["wallet", "positionId"],
+  "sport_cancel_position must require wallet and position id"
+);
+
+const sportGetPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_position");
+assert.deepEqual(
+  sportGetPositionTool.inputSchema.required,
+  ["wallet", "positionId"],
+  "sport_get_position must require wallet and position id"
+);
+
+const sportGetPositionFillsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_position_fills");
+assert.deepEqual(
+  sportGetPositionFillsTool.inputSchema.required,
+  ["wallet", "positionId"],
+  "sport_get_position_fills must require wallet and position id"
+);
+
+const sportListPositionsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_list_positions");
+assert.equal(
+  sportListPositionsTool.inputSchema.properties.status.default,
+  "funded_open",
+  "sport_list_positions must default to funded open positions only"
 );
 
 const sportViewPositionsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_view_positions");
@@ -231,6 +285,13 @@ assert.deepEqual(
   sportMyPositionsTool.inputSchema.required,
   ["wallet"],
   "sport_my_positions must require wallet"
+);
+
+const sportMyFillsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_my_fills");
+assert.deepEqual(
+  sportMyFillsTool.inputSchema.required,
+  ["wallet"],
+  "sport_my_fills must require wallet"
 );
 
 const sportMyTicketsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_my_tickets");

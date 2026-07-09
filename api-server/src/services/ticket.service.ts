@@ -28,6 +28,48 @@ function toSafeNumber(value: unknown): number {
     return parsed;
 }
 
+function serializeTicketOffer(ticket: {
+    rollupMode: string;
+    offer: {
+        id: string;
+        mode: string;
+        asset: string;
+        price: unknown;
+        collateral: unknown;
+        status?: string;
+        fixtureId?: string | null;
+        marketType?: string | null;
+        selection?: string | null;
+    };
+}, redactPrivateTerms: boolean) {
+    const base = {
+        id: ticket.offer.id,
+        type: ticket.offer.mode,
+        asset: ticket.offer.asset,
+        status: ticket.offer.status,
+        fixtureId: ticket.offer.fixtureId || null,
+        marketType: ticket.offer.marketType || null,
+        selection: ticket.offer.selection || null,
+        privateTermsRedacted: redactPrivateTerms,
+    };
+
+    if (ticket.rollupMode === 'SPORT') {
+        const stake = redactPrivateTerms ? null : toSafeNumber(ticket.offer.price);
+        return {
+            ...base,
+            price: stake,
+            stake,
+            stakeModel: 'equal_stake',
+        };
+    }
+
+    return {
+        ...base,
+        price: redactPrivateTerms ? null : toSafeNumber(ticket.offer.price),
+        collateral: redactPrivateTerms ? null : toSafeNumber(ticket.offer.collateral),
+    };
+}
+
 function summarizeTicket<T extends {
     rollupMode: string;
     offer: {
@@ -59,18 +101,7 @@ function summarizeTicket<T extends {
         messageCount: ticket._count?.messages ?? 0,
         lastMessage: lastMessage || null,
         privateTermsRedacted: redactPrivateTerms,
-        offer: {
-            id: ticket.offer.id,
-            type: ticket.offer.mode,
-            asset: ticket.offer.asset,
-            status: ticket.offer.status,
-            fixtureId: ticket.offer.fixtureId || null,
-            marketType: ticket.offer.marketType || null,
-            selection: ticket.offer.selection || null,
-            price: redactPrivateTerms ? null : toSafeNumber(ticket.offer.price),
-            collateral: redactPrivateTerms ? null : toSafeNumber(ticket.offer.collateral),
-            privateTermsRedacted: redactPrivateTerms,
-        },
+        offer: serializeTicketOffer(ticket, redactPrivateTerms),
     };
 }
 
@@ -190,7 +221,7 @@ export const acceptOfferService = async (
                     offerId: offer.id,
                     buyer: buyerWallet,
                     seller: sellerWallet,
-                    status: 'negotiating',
+                    status: (offer as any).rollupMode === 'SPORT' ? 'awaiting_deposits' : 'negotiating',
                     rollupMode: (offer as any).rollupMode || 'ER',
                 },
                 select: {
@@ -263,17 +294,7 @@ export const getTicketByIdService = async (ticketId: string, wallet: string) => 
     return {
         ...ticket,
         privateTermsRedacted: redactPrivateTerms,
-        offer: {
-            id: ticket.offer.id,
-            type: ticket.offer.mode,
-            asset: ticket.offer.asset,
-            fixtureId: ticket.offer.fixtureId || null,
-            marketType: ticket.offer.marketType || null,
-            selection: ticket.offer.selection || null,
-            price: redactPrivateTerms ? null : ticket.offer.price,
-            collateral: redactPrivateTerms ? null : ticket.offer.collateral,
-            privateTermsRedacted: redactPrivateTerms,
-        }
+        offer: serializeTicketOffer(ticket, redactPrivateTerms),
     };
 };
 

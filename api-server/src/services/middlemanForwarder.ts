@@ -60,25 +60,37 @@ export const middlemanForwarder = {
         collateral: number | null;
         tokenMint?: string | null;
         rollupMode?: string | null;
+        sportPositionVaults?: {
+            buyerPositionVaultPda?: string | null;
+            sellerPositionVaultPda?: string | null;
+            buyerPositionId?: string | null;
+            sellerPositionId?: string | null;
+            stakeLamports?: string | null;
+            fillId?: string | null;
+            fillLamports?: string | null;
+            vaultVersion?: string | null;
+        } | null;
     }): Promise<{
         success: boolean;
         middlemanTicketId?: string;
         phase?: string;
         dealPda?: string | null;
+        tx?: string | null;
         status?: string;
         depositInstructions?: {
             escrowPda: string;
             buyer: {
                 wallet: string;
                 stake?: number;
-                payment: number;
-                collateral: number;
+                payment?: number;
+                collateral?: number;
+                protocolDustLamports?: number;
                 total: number;
             };
             seller: {
                 wallet: string;
                 stake?: number;
-                collateral: number;
+                collateral?: number;
                 total: number;
             };
         } | null;
@@ -104,6 +116,7 @@ export const middlemanForwarder = {
                 sellerRewardWallet: params.sellerRewardWallet || null,
                 buyerFundingWallet: params.buyerFundingWallet || null,
                 sellerFundingWallet: params.sellerFundingWallet || null,
+                sportPositionVaults: params.sportPositionVaults || null,
             });
 
             const timeoutMs = params.rollupMode === 'SPORT' ? 60_000 : 5_000;
@@ -124,19 +137,21 @@ export const middlemanForwarder = {
                 status?: string;
                 phase?: string;
                 dealPda?: string | null;
+                tx?: string | null;
                 depositInstructions?: {
                     escrowPda: string;
                     buyer: {
                         wallet: string;
                         stake?: number;
-                        payment: number;
-                        collateral: number;
+                        payment?: number;
+                        collateral?: number;
+                        protocolDustLamports?: number;
                         total: number;
                     };
                     seller: {
                         wallet: string;
                         stake?: number;
-                        collateral: number;
+                        collateral?: number;
                         total: number;
                     };
                 } | null;
@@ -146,6 +161,7 @@ export const middlemanForwarder = {
                 middlemanTicketId?: string;
                 phase?: string;
                 dealPda?: string | null;
+                tx?: string | null;
                 status?: string;
                 depositInstructions?: typeof data.depositInstructions;
             } = {
@@ -154,6 +170,7 @@ export const middlemanForwarder = {
             };
             if (data.phase) result.phase = data.phase;
             if (Object.prototype.hasOwnProperty.call(data, 'dealPda')) result.dealPda = data.dealPda || null;
+            if (Object.prototype.hasOwnProperty.call(data, 'tx')) result.tx = data.tx || null;
             if (data.status) result.status = data.status;
             if (Object.prototype.hasOwnProperty.call(data, 'depositInstructions')) {
                 result.depositInstructions = data.depositInstructions || null;
@@ -284,6 +301,64 @@ export const middlemanForwarder = {
                 tx: data.tx,
                 onChainAction: data.onChainAction,
                 status: data.status,
+                raw: data,
+            };
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
+    },
+
+    async forwardExpiredSportPositionRefund(params: {
+        positionId: string;
+        ownerWallet: string;
+        vaultPda?: string | null;
+        closeIfNoCommittedStake?: boolean;
+    }): Promise<{
+        success: boolean;
+        tx?: string;
+        closeTx?: string;
+        refundedLamports?: string;
+        closed?: boolean;
+        error?: string;
+        raw?: any;
+    }> {
+        try {
+            const path = `/v1/sport/positions/${encodeURIComponent(params.positionId)}/refund-expired`;
+            const body = JSON.stringify({
+                ownerWallet: params.ownerWallet,
+                vaultPda: params.vaultPda || null,
+                closeIfNoCommittedStake: params.closeIfNoCommittedStake !== false,
+            });
+
+            const res = await fetch(`${MIDDLEMAN_URL}${path}`, {
+                method: 'POST',
+                headers: buildSignedHeaders('POST', path, body),
+                body,
+                signal: AbortSignal.timeout(60000),
+            });
+
+            const text = await res.text();
+            let data: any = null;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch {
+                data = { raw: text };
+            }
+
+            if (!res.ok || !data?.success) {
+                return {
+                    success: false,
+                    error: data?.error || `Status ${res.status}`,
+                    raw: data,
+                };
+            }
+
+            return {
+                success: true,
+                tx: data.tx,
+                closeTx: data.closeTx,
+                refundedLamports: data.refundedLamports,
+                closed: Boolean(data.closed),
                 raw: data,
             };
         } catch (err: any) {

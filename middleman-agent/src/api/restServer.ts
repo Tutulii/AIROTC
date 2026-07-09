@@ -1,5 +1,5 @@
 import express from 'express';
-import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { eventBus } from '../services/eventBus';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
@@ -37,7 +37,7 @@ import { settlementTargetStore } from '../state/settlementTargetStore';
 import { rewardTargetStore } from '../state/rewardTargetStore';
 import { getAgentDWallet, isConfidentialEscrowReady } from '../services/confidentialExecutionService';
 import { executeDeal, executeRelease } from '../services/executionService';
-import { executeCancelDeal, executeFractionalSplit, executeSettleToBuyerPhase } from '../services/onChainExecutionService';
+import { executeCancelDeal, executeCommitSportPositionFillToDeal, executeCommitSportPositionsToDeal, executeFractionalSplit, executeRefundExpiredSportPositionRemaining, executeSettleToBuyerPhase, type ExecutionResult } from '../services/onChainExecutionService';
 import { executeSportSettlement } from '../services/sportSettlementBridge';
 import { loadConfig } from '../config';
 import { registerObservatoryTicketMapping } from '../services/observatoryBridge';
@@ -46,7 +46,6 @@ import { prisma } from '../lib/prisma';
 import { verifyAuditChain } from '../services/auditTrail';
 import dealTimelineRouter from './dealTimeline';
 import { resolveEscrowTermsForTicket } from '../services/escrowTermsResolver';
-import { dealPipeline } from '../services/dealPipeline';
 
 let server: any;
 
@@ -747,6 +746,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 sellerRewardWallet,
                 buyerFundingWallet,
                 sellerFundingWallet,
+                sportPositionVaults,
             } = req.body;
 
             if (!buyerWallet || !sellerWallet) {
@@ -835,10 +835,38 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 res.status(400).json({ error: "SPORT stake must be greater than zero." });
                 return;
             }
-            const sportProtocolBuyerCollateralLamports = isSportMode
-                ? Math.max(1, Number(process.env.SPORT_PROTOCOL_BUYER_COLLATERAL_LAMPORTS || "1"))
-                : 0;
-            const sportProtocolBuyerCollateral = sportProtocolBuyerCollateralLamports / LAMPORTS_PER_SOL;
+            const sportVaults = sportPositionVaults && typeof sportPositionVaults === 'object'
+                ? sportPositionVaults as Record<string, unknown>
+                : {};
+            const sportBuyerPositionVault = isSportMode
+                ? validateSettlementWallet(
+                    sportVaults.buyerPositionVaultPda || sportVaults.buyerVaultPda || sportVaults.buyer,
+                    "sportPositionVaults.buyerPositionVaultPda"
+                )
+                : null;
+            const sportSellerPositionVault = isSportMode
+                ? validateSettlementWallet(
+                    sportVaults.sellerPositionVaultPda || sportVaults.sellerVaultPda || sportVaults.seller,
+                    "sportPositionVaults.sellerPositionVaultPda"
+                )
+                : null;
+            const sportBuyerPositionId = typeof sportVaults.buyerPositionId === 'string' ? sportVaults.buyerPositionId : null;
+            const sportSellerPositionId = typeof sportVaults.sellerPositionId === 'string' ? sportVaults.sellerPositionId : null;
+            const sportFillLamports = typeof sportVaults.fillLamports === 'string' && /^\d+$/.test(sportVaults.fillLamports)
+                ? sportVaults.fillLamports
+                : typeof sportVaults.stakeLamports === 'string' && /^\d+$/.test(sportVaults.stakeLamports)
+                    ? sportVaults.stakeLamports
+                    : null;
+            const sportVaultVersion = typeof sportVaults.vaultVersion === 'string' ? sportVaults.vaultVersion : null;
+            const isSportPartialFill = isSportMode && (sportVaultVersion === 'v2' || Boolean(sportVaults.fillId || sportVaults.fillLamports));
+            if (isSportMode && (!sportBuyerPositionVault || !sportSellerPositionVault)) {
+                res.status(400).json({ error: "SPORT matched deals require prefunded buyer/seller position vaults." });
+                return;
+            }
+            if (isSportPartialFill && !sportFillLamports) {
+                res.status(400).json({ error: "SPORT partial-fill matched deals require fillLamports." });
+                return;
+            }
 
             // 1. Register both wallets in the internal registry
             const { walletRegistry } = await import('../state/walletRegistry');
@@ -929,25 +957,47 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 }, buyerAgent.id, `External matched deal: ${parsedAmount || amount || 1} ${asset || 'SOL'} @ ${parsedPrice}`);
             }
 
-            let sportPipelineResult: Awaited<ReturnType<typeof dealPipeline.start>> | null = null;
+            let sportPipelineResult: ExecutionResult | null = null;
             if (isSportMode) {
-                sportPipelineResult = await dealPipeline.start({
-                    ticketId,
-                    buyer: buyerWallet,
-                    seller: sellerWallet,
-                    price: sportStake,
-                    collateralBuyer: sportProtocolBuyerCollateral,
-                    collateralSeller: sportStake,
-                    assetType: resolveSportEscrowAssetType(rollupMode, asset, tokenMint),
-                    tokenMint,
-                    decimals: decimals ? parseInt(decimals) : undefined,
-                    confidence: 100,
-                    rollupMode: 'SPORT',
-                    negotiationSource: 'OFFCHAIN',
-                });
+                sportPipelineResult = isSportPartialFill
+                    ? await executeCommitSportPositionFillToDeal({
+                        ticketId,
+                        buyerWallet,
+                        sellerWallet,
+                        buyerPositionVaultPda: sportBuyerPositionVault,
+                        sellerPositionVaultPda: sportSellerPositionVault,
+                        buyerPositionId: sportBuyerPositionId,
+                        sellerPositionId: sportSellerPositionId,
+                        fillLamports: sportFillLamports!,
+                    })
+                    : await executeCommitSportPositionsToDeal({
+                        ticketId,
+                        buyerWallet,
+                        sellerWallet,
+                        buyerPositionVaultPda: sportBuyerPositionVault,
+                        sellerPositionVaultPda: sportSellerPositionVault,
+                        buyerPositionId: sportBuyerPositionId,
+                        sellerPositionId: sportSellerPositionId,
+                        stakeSol: sportStake,
+                    });
 
                 if (!sportPipelineResult.success || !sportPipelineResult.dealPda) {
-                    throw new Error(sportPipelineResult.error || "sport_escrow_creation_failed");
+                    throw new Error(sportPipelineResult.error || "sport_position_commit_failed");
+                }
+
+                dealPhaseManager.setEscrowPda(ticketId, sportPipelineResult.dealPda);
+                const sportDeal = dealPhaseManager.getDeal(ticketId);
+                if (sportDeal) {
+                    sportDeal.terms = {
+                        price: sportStake,
+                        collateral_buyer: 0,
+                        collateral_seller: sportStake,
+                        asset_type: resolveSportEscrowAssetType(rollupMode, asset, tokenMint),
+                    };
+                    sportDeal.buyer_deposited = true;
+                    sportDeal.seller_deposited = true;
+                    sportDeal.payment_locked = true;
+                    dealPhaseManager.transition(sportDeal, "awaiting_result", "system", "AUTO");
                 }
             }
 
@@ -957,7 +1007,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 type: "buy",
                 creator: buyerWallet,
                 content: isSportMode
-                    ? `SPORT wager matched. Escrow is live at ${sportPipelineResult?.dealPda}. Chat is conversation-only; TxLINE final outcome decides settlement automatically.`
+                    ? `SPORT wager matched. Prefunded stakes are locked in escrow ${sportPipelineResult?.dealPda}. Chat is conversation-only; TxLINE final outcome decides settlement automatically.`
                     : strictPerOpaque
                     ? `Matched PER deal opened for ${(parsedAmount || amount || 1)} ${asset || 'SOL'}. Private negotiation continues in rollup mode.`
                     : `Matched deal: ${parsedAmount || amount || 1} ${asset || 'SOL'} @ ${parsedPrice} (Col: ${parsedCol})`,
@@ -968,8 +1018,8 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             if (isSportMode) {
                 eventBus.publish("middleman_response", {
                     ticket_id: ticketId,
-                    content: `SPORT wager locked from offer terms. Escrow: ${sportPipelineResult?.dealPda}. Buyer deposits ${sportStake} ${asset || 'SOL'} plus ${sportProtocolBuyerCollateralLamports} protocol dust lamport, and seller deposits ${sportStake} ${asset || 'SOL'}. No economic collateral or delivery step is used; settlement runs automatically from TxLINE final result.`,
-                    phase: "awaiting_deposits",
+                    content: `SPORT wager locked from prefunded position vaults. Escrow: ${sportPipelineResult?.dealPda}. No deposit or delivery step is used; settlement runs automatically from TxLINE final result.`,
+                    phase: "awaiting_result",
                     timestamp: new Date().toISOString()
                 });
             } else {
@@ -1013,25 +1063,17 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 status: "matched",
                 buyer: buyerWallet,
                 seller: sellerWallet,
-                phase: isSportMode ? "awaiting_deposits" : "negotiation",
+                phase: isSportMode ? "awaiting_result" : "negotiation",
                 dealPda: sportPipelineResult?.dealPda || null,
-                depositInstructions: sportPipelineResult?.dealPda ? {
-                    escrowPda: sportPipelineResult.dealPda,
-                    buyer: {
-                        wallet: buyerWallet,
-                        stake: sportStake,
-                        payment: sportStake,
-                        collateral: sportProtocolBuyerCollateral,
-                        protocolDustLamports: sportProtocolBuyerCollateralLamports,
-                        total: sportStake + sportProtocolBuyerCollateral,
-                    },
-                    seller: {
-                        wallet: sellerWallet,
-                        stake: sportStake,
-                        collateral: 0,
-                        total: sportStake,
-                    },
+                depositInstructions: null,
+                prefundedPositionVaults: isSportMode ? {
+                    buyer: sportBuyerPositionVault,
+                    seller: sportSellerPositionVault,
+                    stake: sportStake,
+                    fillLamports: sportFillLamports,
+                    vaultVersion: sportVaultVersion || 'v1',
                 } : null,
+                tx: sportPipelineResult?.tx || null,
             });
 
         } catch (e: any) {
@@ -1320,6 +1362,46 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 fixtureId: req.body?.fixtureId,
                 outcomeWinner: req.body?.outcomeWinner,
                 winnerWallet: req.body?.winnerWallet,
+            });
+
+            res.status(result.success ? 200 : 502).json(result);
+        } catch (e: any) {
+            const statusCode = Number.isInteger(e?.statusCode) ? e.statusCode : 500;
+            res.status(statusCode).json({
+                success: false,
+                error: e?.message || String(e),
+            });
+        }
+    });
+
+    app.post('/v1/sport/positions/:positionId/refund-expired', verifyBridgeHmac, bridgeRateLimiter, async (req, res) => {
+        try {
+            const positionId = String(req.params.positionId || '').trim();
+            const ownerWallet = validateSettlementWallet(req.body?.ownerWallet, "ownerWallet");
+            const vaultPda = req.body?.vaultPda
+                ? validateSettlementWallet(req.body.vaultPda, "vaultPda")
+                : null;
+
+            if (!positionId) {
+                res.status(400).json({
+                    success: false,
+                    error: "positionId_required",
+                });
+                return;
+            }
+            if (!ownerWallet) {
+                res.status(400).json({
+                    success: false,
+                    error: "ownerWallet_required",
+                });
+                return;
+            }
+
+            const result = await executeRefundExpiredSportPositionRemaining({
+                positionId,
+                ownerWallet,
+                vaultPda,
+                closeIfNoCommittedStake: req.body?.closeIfNoCommittedStake !== false,
             });
 
             res.status(result.success ? 200 : 502).json(result);

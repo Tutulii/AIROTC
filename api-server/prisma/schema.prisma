@@ -221,6 +221,9 @@ model ArenaMatch {
   takerPositionId       String?
   makerSide             String?
   stakeLamports         String?
+  makerVaultPda         String?
+  takerVaultPda         String?
+  matchCommitTx         String?
   signalConfidence      Float?
 
   makerWallet           String
@@ -273,8 +276,19 @@ model SportPosition {
   selection         String
   side              String
   stakeLamports     String
+  filledLamports    String   @default("0")
+  remainingLamports String   @default("0")
+  refundedLamports  String   @default("0")
+  vaultVersion      String   @default("v2")
   agentWallet       String
-  status            String   @default("open")
+  status            String   @default("funding_required")
+  vaultPda          String?
+  fundingTx         String?
+  fundedLamports    String?
+  fundedAt          DateTime?
+  fundingExpiresAt  DateTime?
+  cancelTx          String?
+  matchedAt         DateTime?
   matchedPositionId String?
   matchId           String?
   offerId           String?
@@ -286,11 +300,58 @@ model SportPosition {
 
   @@unique([agentWallet, clientOrderId])
   @@index([fixtureId, status, stakeLamports, createdAt])
+  @@index([fixtureId, selection, side, status, fundedAt])
+  @@index([fixtureId, selection, side, status, remainingLamports])
   @@index([agentWallet, status, createdAt])
   @@index([expiresAt, status])
   @@index([matchId])
   @@index([offerId])
   @@index([ticketId])
+  @@index([vaultPda])
+  @@index([vaultVersion])
+  @@index([fundedAt])
+}
+
+model SportPositionFill {
+  id             String    @id @default(uuid())
+  fixtureId      String
+  selection      String
+  backPositionId String
+  layPositionId  String
+  backWallet     String
+  layWallet      String
+  fillLamports   String
+  ticketId       String?
+  escrowPda      String?
+  commitTx       String?
+  status         String    @default("committing")
+  winnerWallet   String?
+  releaseTx      String?
+  refundTx       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  settledAt      DateTime?
+
+  @@index([fixtureId, status, createdAt])
+  @@index([backPositionId, createdAt])
+  @@index([layPositionId, createdAt])
+  @@index([ticketId])
+  @@index([status, createdAt])
+}
+
+model SportPositionFundingEvent {
+  id          String   @id @default(uuid())
+  positionId  String
+  wallet      String
+  event       String
+  txSignature String?
+  lamports    String?
+  metadata    Json
+  createdAt   DateTime @default(now())
+
+  @@index([positionId, createdAt])
+  @@index([wallet, createdAt])
+  @@index([event, createdAt])
 }
 
 model McpAccessToken {

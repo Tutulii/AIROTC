@@ -16,8 +16,12 @@ const prismaMock = {
     },
     arenaFixture: {
         findMany: vi.fn(),
+        findUnique: vi.fn(),
     },
     arenaOutcome: {
+        findMany: vi.fn(),
+    },
+    sportPosition: {
         findMany: vi.fn(),
     },
     agentStrategyTemplate: {
@@ -47,7 +51,9 @@ describe('SPORT agent tools service', () => {
         prismaMock.offer.findMany.mockReset();
         prismaMock.arenaMatch.findMany.mockReset();
         prismaMock.arenaFixture.findMany.mockReset();
+        prismaMock.arenaFixture.findUnique.mockReset();
         prismaMock.arenaOutcome.findMany.mockReset();
+        prismaMock.sportPosition.findMany.mockReset();
         prismaMock.agentStrategyTemplate.findMany.mockReset();
         prismaMock.agentStrategyTemplate.findUnique.mockReset();
         prismaMock.agentStrategyTemplate.upsert.mockReset();
@@ -129,7 +135,7 @@ describe('SPORT agent tools service', () => {
         });
     });
 
-    it('saves a strategy template and creates a SPORT offer from it', async () => {
+    it('saves a strategy template and creates a prefunded SPORT position draft from it', async () => {
         prismaMock.agent.upsert.mockResolvedValue({ id: 'agent-1', wallet: WALLET });
         prismaMock.agentStrategyTemplate.upsert.mockResolvedValue({
             id: 'template-1',
@@ -164,43 +170,57 @@ describe('SPORT agent tools service', () => {
                 asset: null,
             },
         });
+        prismaMock.arenaFixture.findUnique.mockResolvedValue({
+            fixtureId: '18179549',
+            status: 'upcoming',
+            startsAt: new Date('2099-07-04T10:00:00.000Z'),
+            raw: { source: 'txline' },
+        });
 
         const tx = {
-            agent: { upsert: vi.fn().mockResolvedValue({ id: 'agent-1', wallet: WALLET }) },
-            arenaFixture: { findUnique: vi.fn().mockResolvedValue({ fixtureId: '18179549' }) },
-            offer: {
-                create: vi.fn().mockResolvedValue({
-                    id: 'offer-1',
-                    creatorId: 'agent-1',
-                    asset: 'TXLINE:18179549:1X2:part1',
-                    mode: 'sell',
-                    amount: 1,
-                    price: 0.1,
-                    collateral: 0,
-                    rollupMode: 'SPORT',
+            arenaFixture: {
+                findUnique: vi.fn().mockResolvedValue({
                     fixtureId: '18179549',
-                    marketType: '1X2',
-                    selection: 'part1',
-                    createdAt: new Date('2026-07-04T08:01:00.000Z'),
-                    updatedAt: new Date('2026-07-04T08:01:00.000Z'),
+                    status: 'upcoming',
+                    startsAt: new Date('2099-07-04T10:00:00.000Z'),
+                    raw: { source: 'txline' },
                 }),
             },
-            arenaMatch: {
+            sportPosition: {
+                findUnique: vi.fn().mockResolvedValue(null),
+                updateMany: vi.fn().mockResolvedValue({ count: 0 }),
                 create: vi.fn().mockResolvedValue({
-                    id: 'match-1',
+                    id: 'position-1',
                     fixtureId: '18179549',
-                    offerId: 'offer-1',
-                    strategy: 'template:standard_sell',
-                    marketType: '1X2',
                     selection: 'part1',
-                    direction: 'SELL_SELECTION',
-                    makerWallet: WALLET,
-                    rollupMode: 'SPORT',
-                    status: 'offer_created',
-                    proof: {},
+                    side: 'lay',
+                    stakeLamports: '100000000',
+                    agentWallet: WALLET,
+                    status: 'funding_required',
+                    expiresAt: new Date('2099-07-04T10:00:00.000Z'),
+                    fundingExpiresAt: new Date('2099-07-04T08:10:00.000Z'),
+                    clientOrderId: 'template:standard_sell:18179549:part1:test',
                     createdAt: new Date('2026-07-04T08:01:00.000Z'),
                     updatedAt: new Date('2026-07-04T08:01:00.000Z'),
                 }),
+                update: vi.fn().mockImplementation(({ data }) => Promise.resolve({
+                    id: 'position-1',
+                    fixtureId: '18179549',
+                    selection: 'part1',
+                    side: 'lay',
+                    stakeLamports: '100000000',
+                    agentWallet: WALLET,
+                    status: 'funding_required',
+                    vaultPda: data.vaultPda,
+                    expiresAt: new Date('2099-07-04T10:00:00.000Z'),
+                    fundingExpiresAt: new Date('2099-07-04T08:10:00.000Z'),
+                    clientOrderId: 'template:standard_sell:18179549:part1:test',
+                    createdAt: new Date('2026-07-04T08:01:00.000Z'),
+                    updatedAt: new Date('2026-07-04T08:01:00.000Z'),
+                })),
+            },
+            sportPositionFundingEvent: {
+                create: vi.fn().mockResolvedValue({ id: 'event-1' }),
             },
         };
         prismaMock.$transaction.mockImplementation((fn: any) => fn(tx));
@@ -224,45 +244,46 @@ describe('SPORT agent tools service', () => {
         });
         const result: any = await createSportOfferFromTemplate(WALLET, 'standard_sell', {
             fixtureId: '18179549',
+            overrides: { clientOrderId: 'template:standard_sell:18179549:part1:test' },
         });
 
         expect(template.name).toBe('standard_sell');
-        expect(tx.offer.create).toHaveBeenCalledWith(expect.objectContaining({
+        expect(tx.sportPosition.create).toHaveBeenCalledWith(expect.objectContaining({
             data: expect.objectContaining({
-                asset: 'TXLINE:18179549:1X2:part1',
-                rollupMode: 'SPORT',
                 fixtureId: '18179549',
-                collateral: 0,
+                side: 'lay',
+                stakeLamports: '100000000',
+                status: 'funding_required',
             }),
         }));
-        expect(result.offer.id).toBe('offer-1');
-        expect(result.arenaMatch.strategy).toBe('template:standard_sell');
+        expect(result.position.id).toBe('position-1');
+        expect(result.position.status).toBe('funding_required');
+        expect(result.fundingInstructions.amountLamports).toBe('100000000');
+        expect(result.deprecatedOfferFlow).toBe(false);
     });
 
     it('discovers active SPORT agents with reputation attached', async () => {
-        prismaMock.offer.findMany.mockResolvedValue([
+        prismaMock.sportPosition.findMany.mockResolvedValue([
             {
-                id: 'offer-1',
-                creator: { wallet: WALLET },
+                id: 'position-1',
+                agentWallet: WALLET,
                 fixtureId: '18179549',
-                marketType: '1X2',
                 selection: 'part1',
-                mode: 'sell',
-                amount: 1,
-                price: 0.1,
-                collateral: 0.2,
+                side: 'lay',
+                stakeLamports: '100000000',
+                status: 'funded_open',
+                fundedAt: new Date('2026-07-04T08:00:00.000Z'),
                 createdAt: new Date('2026-07-04T08:00:00.000Z'),
             },
             {
-                id: 'legacy-offer',
-                creator: { wallet: OTHER },
+                id: 'legacy-position',
+                agentWallet: OTHER,
                 fixtureId: 'espn:mlb:401815979',
-                marketType: 'moneyline',
                 selection: 'part1',
-                mode: 'sell',
-                amount: 1,
-                price: 0.1,
-                collateral: 0.2,
+                side: 'lay',
+                stakeLamports: '100000000',
+                status: 'funded_open',
+                fundedAt: new Date('2026-07-04T08:30:00.000Z'),
                 createdAt: new Date('2026-07-04T08:30:00.000Z'),
             },
         ]);
@@ -314,8 +335,17 @@ describe('SPORT agent tools service', () => {
             wallet: WALLET,
             score: 77,
             activeSportOffers: 1,
+            activeSportPositions: 1,
             settledSportMatches: 3,
-            markets: ['1X2'],
+            markets: expect.arrayContaining(['1X2_PARTICIPANT_RESULT']),
+            activeOfferSamples: [
+                expect.objectContaining({
+                    positionId: 'position-1',
+                    stake: 0.1,
+                    stakeModel: 'equal_stake',
+                }),
+            ],
         });
+        expect(result.data[0].activeOfferSamples[0].collateral).toBeUndefined();
     });
 });

@@ -165,7 +165,7 @@ describe("Torque reward wallet marketplace bridge", () => {
       id: "sport-ticket-1",
       buyer: "buyer-wallet",
       seller: "seller-wallet",
-      status: "negotiating",
+      status: "awaiting_deposits",
       rollupMode: "SPORT",
     });
     forwardOfferAcceptedMock.mockResolvedValue({
@@ -226,9 +226,25 @@ describe("Torque reward wallet marketplace bridge", () => {
           mathOnly: true,
           phase: "awaiting_deposits",
           dealPda: "escrow-pda-1",
+          depositInstructions: {
+            escrowPda: "escrow-pda-1",
+            stakeModel: "equal_stake",
+            buyer: {
+              wallet: "buyer-wallet",
+              stake: 4,
+              total: 4,
+            },
+            seller: {
+              wallet: "seller-wallet",
+              stake: 4,
+              total: 4,
+            },
+          },
         }),
       })
     );
+    const responseBody = (res.json as any).mock.calls[0][0];
+    expect(JSON.stringify(responseBody.sportEscrow.depositInstructions)).not.toContain("collateral");
   });
 
   it("stores SPORT ticket chat without forwarding it to the middleman brain", async () => {

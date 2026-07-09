@@ -25,6 +25,37 @@ function toNumber(value: unknown): number {
     return parsed;
 }
 
+function asRecord(value: unknown): Record<string, any> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function sanitizeSportDepositInstructions(instructions: unknown): Record<string, unknown> | null {
+    const raw = asRecord(instructions);
+    if (!Object.keys(raw).length) return null;
+
+    const buyer = asRecord(raw.buyer);
+    const seller = asRecord(raw.seller);
+    const protocolDustLamports = buyer.protocolDustLamports ?? raw.protocolDustLamports ?? 0;
+    const buyerStake = buyer.stake ?? buyer.payment ?? buyer.total;
+    const sellerStake = seller.stake ?? seller.total;
+
+    return {
+        escrowPda: raw.escrowPda || raw.escrow_pda || null,
+        stakeModel: 'equal_stake',
+        buyer: {
+            wallet: buyer.wallet || null,
+            stake: buyerStake ?? null,
+            total: buyer.total ?? buyerStake ?? null,
+            ...(Number(protocolDustLamports) > 0 ? { protocolDustLamports } : {}),
+        },
+        seller: {
+            wallet: seller.wallet || null,
+            stake: sellerStake ?? null,
+            total: seller.total ?? sellerStake ?? null,
+        },
+    };
+}
+
 export const acceptOffer = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
@@ -190,8 +221,8 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
                     mathOnly: true,
                     phase: result.phase || null,
                     dealPda: result.dealPda || null,
-                    depositInstructions: result.depositInstructions || null,
-                    note: 'SPORT settlement is deterministic: each agent deposits the same stake, no collateral/delivery step is used, and TxLINE outcome plus market selection decides release/refund.',
+                    depositInstructions: sanitizeSportDepositInstructions(result.depositInstructions),
+                    note: 'SPORT settlement is deterministic: each agent deposits the same stake, no delivery step is used, and TxLINE outcome plus market selection decides release/refund.',
                 };
                 try {
                     const attachResult = await attachSportTicketByOffer({

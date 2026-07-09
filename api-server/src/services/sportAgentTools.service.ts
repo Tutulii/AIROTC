@@ -2,6 +2,7 @@ import { PublicKey } from '@solana/web3.js';
 import { prisma } from '../lib/prisma';
 import { serializeArenaMatch } from './arena/arenaMatch.service';
 import { getReputationProfile } from './reputationProfile.service';
+import { postSportPosition } from './sportPosition.service';
 
 const prismaAny = prisma as any;
 
@@ -141,6 +142,14 @@ function sanitizeOffer<T extends Record<string, any>>(offer: T): T {
         creatorRewardWallet?: string | null;
         creatorFundingWallet?: string | null;
     };
+    if (rest.rollupMode === 'SPORT') {
+        const { collateral: _hiddenCollateral, ...sportRest } = rest;
+        return {
+            ...sportRest,
+            stake: sportRest.price,
+            stakeModel: 'equal_stake',
+        } as unknown as T;
+    }
     return rest as T;
 }
 
@@ -436,62 +445,16 @@ export async function createSportOfferFromTemplate(
     if (!marketType) throw httpError('marketType_required', 400);
     if (!selection) throw httpError('selection_required', 400);
 
-    const result = await prisma.$transaction(async (tx) => {
-        const agent = await tx.agent.upsert({
-            where: { wallet },
-            update: {},
-            create: { wallet },
-        });
+    if (marketType !== '1X2_PARTICIPANT_RESULT' && marketType !== '1X2') {
+        throw httpError('sport_template_market_not_supported_for_positions', 400);
+    }
 
-        let fixture: any = null;
-        try {
-            fixture = await (tx as any).arenaFixture.findUnique({ where: { fixtureId } });
-        } catch {
-            fixture = null;
-        }
-
-        const offer = await tx.offer.create({
-            data: {
-                creatorId: agent.id,
-                asset: sportAsset({ fixtureId, marketType, selection, asset: defaults.asset }),
-                price: defaults.price,
-                amount: defaults.amount,
-                mode: defaults.mode,
-                rollupMode: 'SPORT',
-                collateral: 0,
-                tokenMint: null,
-                tokenDecimals: 9,
-                creatorSettlementWallet: defaults.settlementWallet || null,
-                creatorRewardWallet: defaults.rewardWallet || null,
-                creatorFundingWallet: defaults.fundingWallet || null,
-                fixtureId,
-                marketType,
-                selection,
-            },
-        });
-
-        const arenaMatch = await (tx as any).arenaMatch.create({
-            data: {
-                fixtureId,
-                offerId: offer.id,
-                strategy: `template:${name}`,
-                marketType,
-                selection,
-                direction: defaults.mode === 'sell' ? 'SELL_SELECTION' : 'BUY_SELECTION',
-                makerWallet: wallet,
-                rollupMode: 'SPORT',
-                status: 'offer_created',
-                startedAt: new Date(),
-                proof: {
-                    createdBy: 'sport_strategy_template',
-                    templateName: name,
-                    fixtureKnown: Boolean(fixture),
-                    settlementSource: 'txline',
-                },
-            },
-        });
-
-        return { offer, arenaMatch };
+    const positionResult = await postSportPosition(wallet, {
+        fixtureId,
+        selection,
+        side: defaults.mode === 'sell' ? 'lay' : 'back',
+        stakeSol: String(defaults.price),
+        clientOrderId: trimString(overrides.clientOrderId) || `template:${name}:${fixtureId}:${selection}:${Date.now()}`,
     });
 
     return {
@@ -499,8 +462,10 @@ export async function createSportOfferFromTemplate(
             id: template.id,
             name: template.name,
         },
-        offer: sanitizeOffer(result.offer),
-        arenaMatch: serializeArenaMatch(result.arenaMatch),
+        position: (positionResult as any).position,
+        fundingInstructions: (positionResult as any).fundingInstructions || null,
+        deprecatedOfferFlow: false,
+        note: 'SPORT templates now create prefunded position drafts. Fund the returned vault before the position is public or matchable.',
     };
 }
 
@@ -514,19 +479,19 @@ export async function discoverSportAgents(options: {
     const fixtureId = trimString(options.fixtureId);
     const marketType = trimString(options.marketType);
     const minSettledPredictions = Math.max(0, Math.floor(Number(options.minSettledPredictions || 0)));
+    const includePositionBook = !marketType || marketType === '1X2' || marketType === '1X2_PARTICIPANT_RESULT';
 
-    const [rawOffers, rawRecentMatches] = await Promise.all([
-        prisma.offer.findMany({
-            where: {
-                rollupMode: 'SPORT',
-                status: 'active',
-                ...(fixtureId ? { fixtureId } : {}),
-                ...(marketType ? { marketType } : {}),
-            },
-            include: { creator: { select: { wallet: true } } },
-            orderBy: { createdAt: 'desc' },
-            take: 250,
-        }),
+    const [rawPositions, rawRecentMatches] = await Promise.all([
+        includePositionBook
+            ? prismaAny.sportPosition.findMany({
+                where: {
+                    status: 'funded_open',
+                    ...(fixtureId ? { fixtureId } : {}),
+                },
+                orderBy: [{ fundedAt: 'desc' }, { createdAt: 'desc' }],
+                take: 250,
+            })
+            : Promise.resolve([]),
         prismaAny.arenaMatch.findMany({
             where: {
                 rollupMode: 'SPORT',
@@ -538,20 +503,20 @@ export async function discoverSportAgents(options: {
         }),
     ]);
     const fixtureIds = [...new Set([
-        ...(rawOffers as any[]).map((offer: any) => trimString(offer.fixtureId)),
+        ...(rawPositions as any[]).map((position: any) => trimString(position.fixtureId)),
         ...(rawRecentMatches as any[]).map((match: any) => trimString(match.fixtureId)),
     ].filter(Boolean) as string[])];
     const fixtures = fixtureIds.length > 0 && prismaAny.arenaFixture?.findMany
         ? await prismaAny.arenaFixture.findMany({ where: { fixtureId: { in: fixtureIds } } })
         : [];
     const fixturesById = new Map((fixtures as any[]).map((fixture: any) => [fixture.fixtureId, fixture]));
-    const offers = (rawOffers as any[]).filter((offer: any) =>
-        isTrustedSportMatch({ fixtureId: offer.fixtureId }, fixturesById.get(offer.fixtureId))
+    const positions = (rawPositions as any[]).filter((position: any) =>
+        isTrustedSportMatch({ fixtureId: position.fixtureId }, fixturesById.get(position.fixtureId))
     );
     const recentMatches = (rawRecentMatches as any[]).filter((match: any) =>
         isTrustedSportMatch(match, fixturesById.get(match.fixtureId))
     );
-    const ignoredLegacyOffers = (rawOffers as any[]).length - offers.length;
+    const ignoredLegacyOffers = (rawPositions as any[]).length - positions.length;
     const ignoredLegacyMatches = (rawRecentMatches as any[]).length - recentMatches.length;
 
     const walletMap = new Map<string, any>();
@@ -561,7 +526,9 @@ export async function discoverSportAgents(options: {
             walletMap.set(wallet, {
                 wallet,
                 activeSportOffers: 0,
+                activeSportPositions: 0,
                 activeOfferSamples: [],
+                activePositionSamples: [],
                 pendingSportMatches: 0,
                 settledSportMatches: 0,
                 markets: new Set<string>(),
@@ -572,26 +539,33 @@ export async function discoverSportAgents(options: {
         return walletMap.get(wallet);
     };
 
-    for (const offer of offers as any[]) {
-        const entry = touch(offer.creator?.wallet);
+    for (const position of positions as any[]) {
+        const entry = touch(position.agentWallet);
         if (!entry) continue;
         entry.activeSportOffers += 1;
+        entry.activeSportPositions += 1;
         if (entry.activeOfferSamples.length < 3) {
-            entry.activeOfferSamples.push({
-                offerId: offer.id,
-                fixtureId: offer.fixtureId,
-                marketType: offer.marketType,
-                selection: offer.selection,
-                mode: offer.mode,
-                price: offer.price,
-                amount: offer.amount,
-                collateral: offer.collateral,
-                createdAt: serializeDate(offer.createdAt),
-            });
+            const sample = {
+                positionId: position.id,
+                fixtureId: position.fixtureId,
+                marketType: '1X2_PARTICIPANT_RESULT',
+                selection: position.selection,
+                side: position.side,
+                stakeLamports: position.stakeLamports,
+                stake: round(Number(BigInt(position.stakeLamports)) / 1_000_000_000),
+                stakeModel: 'equal_stake',
+                fundedAt: serializeDate(position.fundedAt),
+                createdAt: serializeDate(position.createdAt),
+            };
+            entry.activeOfferSamples.push(sample);
+            entry.activePositionSamples.push(sample);
         }
-        if (offer.marketType) entry.markets.add(offer.marketType);
-        if (offer.fixtureId) entry.fixtures.add(offer.fixtureId);
-        entry.lastActiveAtMs = Math.max(entry.lastActiveAtMs, new Date(offer.createdAt).getTime());
+        entry.markets.add('1X2_PARTICIPANT_RESULT');
+        if (position.fixtureId) entry.fixtures.add(position.fixtureId);
+        entry.lastActiveAtMs = Math.max(
+            entry.lastActiveAtMs,
+            new Date(position.fundedAt || position.createdAt).getTime(),
+        );
     }
 
     for (const match of recentMatches as any[]) {
@@ -620,6 +594,7 @@ export async function discoverSportAgents(options: {
                 trustSummary: profile.trustSummary,
                 recommendedCounterpartyAction: profile.recommendedCounterpartyAction,
                 activeSportOffers: entry.activeSportOffers,
+                activeSportPositions: entry.activeSportPositions,
                 pendingSportMatches: entry.pendingSportMatches,
                 settledSportMatches: profile.predictionReputation.evaluableSettledPredictions,
                 accuracyPct: profile.predictionReputation.accuracyPct,
@@ -627,6 +602,7 @@ export async function discoverSportAgents(options: {
                 markets: Array.from(entry.markets).sort(),
                 fixtureIds: Array.from(entry.fixtures).slice(0, 10),
                 activeOfferSamples: entry.activeOfferSamples,
+                activePositionSamples: entry.activePositionSamples,
                 lastActiveAt: entry.lastActiveAtMs > 0 ? new Date(entry.lastActiveAtMs).toISOString() : null,
             };
         }),
