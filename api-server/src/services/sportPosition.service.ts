@@ -9,6 +9,7 @@ import { attachSportTicketByOffer } from './arena/sportSettlementEngine';
 import { serializeArenaMatch } from './arena/arenaMatch.service';
 import { webhooks } from './webhookDelivery';
 import { CONNECTION, ESCROW_PROGRAM_ID } from '../solana/program';
+import { getOutcomeForFixture } from './arena/outcomeBacktest';
 
 const prismaAny = prisma as any;
 const SPORT_MARKET_TYPE = '1X2_PARTICIPANT_RESULT';
@@ -79,6 +80,16 @@ async function recordFundingEvent(tx: any, params: {
 
 function httpError(message: string, statusCode = 400): Error {
     return Object.assign(new Error(message), { statusCode });
+}
+
+function observeNotification(promise: Promise<unknown> | void, context: Record<string, unknown>): void {
+    if (!promise || typeof (promise as Promise<unknown>).catch !== 'function') return;
+    void (promise as Promise<unknown>).catch((error: any) => {
+        logger.warn('sport_position_notification_failed', {
+            ...context,
+            error: error?.message || String(error),
+        });
+    });
 }
 
 function trimString(value: unknown): string | undefined {
@@ -777,6 +788,56 @@ function serializeFill(row: any): Record<string, unknown> {
     };
 }
 
+function uniqueWallets(...wallets: Array<unknown>): string[] {
+    return [...new Set(wallets.map((wallet) => trimString(wallet)).filter(Boolean) as string[])];
+}
+
+function sportPositionEventPayload(row: any): Record<string, unknown> {
+    const serialized = serializePosition(row);
+    return {
+        mode: 'SPORT',
+        positionId: serialized.id,
+        fixtureId: serialized.fixtureId,
+        selection: serialized.selection,
+        side: serialized.side,
+        stakeLamports: serialized.stakeLamports,
+        stakeSol: serialized.stakeSol,
+        filledLamports: serialized.filledLamports,
+        filledSol: serialized.filledSol,
+        remainingLamports: serialized.remainingLamports,
+        remainingSol: serialized.remainingSol,
+        vaultPda: serialized.vaultPda,
+        vaultVersion: serialized.vaultVersion,
+        status: serialized.status,
+    };
+}
+
+function sportMatchEventPayload(artifacts: MatchArtifacts, attach: MiddlemanAttachResult): Record<string, unknown> {
+    const fillLamports = artifacts.fillLamports || artifacts.fill?.fillLamports || artifacts.position?.stakeLamports || '0';
+    const sportEscrow = attach.sportEscrow && typeof attach.sportEscrow === 'object' ? attach.sportEscrow as Record<string, unknown> : {};
+    return {
+        mode: 'SPORT',
+        ticketId: artifacts.ticket.id,
+        matchId: artifacts.arenaMatch.id,
+        fixtureId: artifacts.arenaMatch.fixtureId || artifacts.position.fixtureId,
+        marketType: SPORT_MARKET_TYPE,
+        selection: artifacts.arenaMatch.selection || artifacts.position.selection,
+        matchKind: artifacts.matchKind || null,
+        status: 'awaiting_result',
+        settlementSource: 'txline',
+        buyerWallet: artifacts.ticket.buyer,
+        sellerWallet: artifacts.ticket.seller,
+        makerPositionId: artifacts.arenaMatch.makerPositionId || artifacts.counterpartyPosition?.id || null,
+        takerPositionId: artifacts.arenaMatch.takerPositionId || artifacts.position?.id || null,
+        fillId: artifacts.fill?.id || null,
+        fillLamports,
+        fillSol: lamportsToSolNumber(bigintString(fillLamports)),
+        escrowPda: sportEscrow.dealPda || null,
+        tx: artifacts.fill?.commitTx || null,
+        note: 'SPORT chat is informational only; TxLINE final result decides settlement.',
+    };
+}
+
 function serializeTicket(ticket: any): Record<string, unknown> | null {
     if (!ticket) return null;
     return {
@@ -1132,6 +1193,18 @@ async function attachEscrowOrCompensate(artifacts: MatchArtifacts): Promise<Midd
                 error: error?.message,
             });
         });
+    const eventPayload = sportMatchEventPayload(artifacts, { arenaMatch, sportEscrow });
+    const wallets = uniqueWallets(artifacts.ticket.buyer, artifacts.ticket.seller);
+    observeNotification(webhooks.positionFilled(wallets, eventPayload, artifacts.ticket.id), {
+        ticketId: artifacts.ticket.id,
+        matchId: artifacts.arenaMatch.id,
+        event: 'position.filled',
+    });
+    observeNotification(webhooks.matchAwaitingResult(wallets, eventPayload, artifacts.ticket.id), {
+        ticketId: artifacts.ticket.id,
+        matchId: artifacts.arenaMatch.id,
+        event: 'match.awaiting_result',
+    });
 
     return { arenaMatch, sportEscrow };
 }
@@ -1525,6 +1598,14 @@ export async function confirmSportPositionFunding(walletInput: string, positionI
     });
 
     const matched = await tryMatchFundedPosition(positionId, now);
+    observeNotification(webhooks.positionFunded(wallet, {
+        ...sportPositionEventPayload(funded),
+        fundingTx: fundingTx || current.fundingTx || null,
+    }), {
+        positionId,
+        wallet,
+        event: 'position.funded',
+    });
     return matched || {
         matched: false,
         status: 'funded_open',
@@ -1738,6 +1819,279 @@ export async function executeSportPositionFunding(walletInput: string, positionI
         positionId,
         confirmation,
     };
+}
+
+function compactCreateAndFundResult(created: Record<string, unknown>, funding: Record<string, unknown>): Record<string, unknown> {
+    const confirmation = asRecord(funding.confirmation);
+    const confirmationPosition = asRecord(confirmation.position);
+    const createdPosition = asRecord(created.position);
+    const position = Object.keys(confirmationPosition).length > 0 ? confirmationPosition : createdPosition;
+    const matched = confirmation.matched === true;
+    const status = matched
+        ? 'matched'
+        : trimString(position.status) || trimString(confirmation.status) || 'funded_open';
+    return {
+        success: true,
+        status,
+        positionId: trimString(position.id) || trimString(funding.positionId) || null,
+        fixtureId: position.fixtureId || (created.position as any)?.fixtureId || null,
+        selection: position.selection || (created.position as any)?.selection || null,
+        side: position.side || (created.position as any)?.side || null,
+        stakeLamports: position.stakeLamports || null,
+        stakeSol: position.stakeSol ?? null,
+        filledSol: position.filledSol ?? 0,
+        remainingSol: position.remainingSol ?? null,
+        vaultPda: funding.vaultPda || position.vaultPda || null,
+        initTx: funding.initTx || null,
+        fundingTx: funding.fundingTx || funding.tx || null,
+        matched,
+        matchId: confirmation.matchId || (confirmation.arenaMatch as any)?.id || null,
+        ticketId: confirmation.ticketId || (confirmation.ticket as any)?.id || null,
+        message: matched ? 'Matched and awaiting TxLINE result.' : 'Ready to match!',
+        position,
+        confirmation,
+    };
+}
+
+export async function createAndFundSportPosition(walletInput: string, input: {
+    fixtureId?: unknown;
+    selection?: unknown;
+    side?: unknown;
+    stakeSol?: unknown;
+    clientOrderId?: unknown;
+    walletKeypair?: unknown;
+    ownerKeypair?: unknown;
+}): Promise<Record<string, unknown>> {
+    const wallet = validateWallet(walletInput);
+    const created = await postSportPosition(wallet, {
+        fixtureId: input.fixtureId,
+        selection: input.selection,
+        side: input.side,
+        stakeSol: input.stakeSol,
+        clientOrderId: input.clientOrderId,
+    });
+    const positionId = trimString((created.position as any)?.id);
+    if (!positionId) throw httpError('sport_position_create_failed', 500);
+    try {
+        const funding = await executeSportPositionFunding(wallet, positionId, {
+            walletKeypair: input.walletKeypair,
+            ownerKeypair: input.ownerKeypair,
+        });
+        return compactCreateAndFundResult(created, funding);
+    } catch (error: any) {
+        throw httpError(
+            `sport_create_and_fund_failed:${error?.message || 'funding_failed'}:positionId=${positionId}`,
+            Number(error?.statusCode) || 502,
+        );
+    }
+}
+
+function firstStringFrom(raw: Record<string, unknown>, keys: string[]): string | null {
+    for (const key of keys) {
+        const value = key.split('.').reduce((current: any, part) => current?.[part], raw as any);
+        if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return null;
+}
+
+function fixtureTeams(fixture: any): Record<string, unknown> {
+    const raw = asRecord(fixture?.raw);
+    return {
+        part1: fixture?.homeTeam
+            || firstStringFrom(raw, ['Participant1', 'homeTeam', 'teams.home.name', 'Data.Participant1'])
+            || null,
+        part2: fixture?.awayTeam
+            || firstStringFrom(raw, ['Participant2', 'awayTeam', 'teams.away.name', 'Data.Participant2'])
+            || null,
+    };
+}
+
+function scoreLabel(score: Record<string, unknown> | null): string | null {
+    if (!score || typeof score.homeScore !== 'number' || typeof score.awayScore !== 'number') return null;
+    return `${score.homeScore}-${score.awayScore}`;
+}
+
+function serializeCompactScore(row: any): Record<string, unknown> | null {
+    if (!row) return null;
+    return {
+        homeScore: typeof row.homeScore === 'number' ? row.homeScore : null,
+        awayScore: typeof row.awayScore === 'number' ? row.awayScore : null,
+        status: row.status || 'unknown',
+        source: row.source || null,
+        timestamp: row.sourceTimestamp instanceof Date ? row.sourceTimestamp.toISOString() : row.sourceTimestamp || null,
+    };
+}
+
+function serializeCompactOutcome(row: any): Record<string, unknown> | null {
+    if (!row) return null;
+    return {
+        settled: true,
+        winner: row.winner || null,
+        score: `${row.homeScore}-${row.awayScore}`,
+        homeScore: row.homeScore,
+        awayScore: row.awayScore,
+        source: row.source || 'txline',
+        settledAt: row.settledAt instanceof Date ? row.settledAt.toISOString() : row.settledAt || null,
+        timestamp: row.sourceTimestamp instanceof Date ? row.sourceTimestamp.toISOString() : row.sourceTimestamp || null,
+    };
+}
+
+function serializeCompactOdds(row: any): Record<string, unknown> {
+    return {
+        market: row.market,
+        selection: row.selection,
+        odds: row.odds,
+        impliedProbability: row.impliedProbability ?? null,
+        source: row.source || null,
+        timestamp: row.sourceTimestamp instanceof Date ? row.sourceTimestamp.toISOString() : row.sourceTimestamp || null,
+    };
+}
+
+async function latestScoreForFixture(fixtureId: string): Promise<Record<string, unknown> | null> {
+    const score = prismaAny.arenaScoreUpdate?.findFirst
+        ? await prismaAny.arenaScoreUpdate.findFirst({
+            where: { fixtureId },
+            orderBy: [{ sourceTimestamp: 'desc' }, { createdAt: 'desc' }],
+        })
+        : null;
+    return serializeCompactScore(score);
+}
+
+async function storedOutcomeForFixture(fixtureId: string): Promise<Record<string, unknown> | null> {
+    if (!prismaAny.arenaOutcome?.findUnique) return null;
+    const outcome = await prismaAny.arenaOutcome.findUnique({ where: { fixtureId } });
+    return serializeCompactOutcome(outcome);
+}
+
+async function latestOddsForFixture(fixtureId: string): Promise<Record<string, unknown>[]> {
+    if (!prismaAny.arenaOddsUpdate?.findMany) return [];
+    const rows = await prismaAny.arenaOddsUpdate.findMany({
+        where: { fixtureId },
+        orderBy: [{ sourceTimestamp: 'desc' }, { createdAt: 'desc' }],
+        take: 12,
+    });
+    const seen = new Set<string>();
+    const compact: Record<string, unknown>[] = [];
+    for (const row of rows || []) {
+        const key = `${row.market}:${row.selection}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        compact.push(serializeCompactOdds(row));
+        if (compact.length >= 6) break;
+    }
+    return compact;
+}
+
+async function openLiquiditySummary(fixtureId: string): Promise<Record<string, unknown>> {
+    if (!prismaAny.sportPosition?.findMany) return { count: 0, totalRemainingLamports: '0', totalRemainingSol: 0 };
+    const rows = await prismaAny.sportPosition.findMany({
+        where: {
+            fixtureId,
+            status: { in: ['funded_open', 'partially_filled'] },
+            remainingLamports: { not: '0' },
+        },
+        take: 100,
+    });
+    const total = (rows || []).reduce((sum: bigint, row: any) => sum + BigInt(positionRemainingLamports(row)), 0n);
+    return {
+        count: rows?.length || 0,
+        totalRemainingLamports: total.toString(),
+        totalRemainingSol: lamportsToSolNumber(total),
+    };
+}
+
+export async function getSportFixtureSummary(fixtureIdInput: unknown): Promise<Record<string, unknown>> {
+    const fixtureId = trimString(fixtureIdInput);
+    if (!fixtureId) throw httpError('fixtureId_required', 400);
+    const fixture = await prismaAny.arenaFixture.findUnique({ where: { fixtureId } });
+    if (!fixture) throw httpError('sport_fixture_not_found', 404);
+    const [latestScore, latestOdds, openLiquidity, outcome] = await Promise.all([
+        latestScoreForFixture(fixtureId),
+        latestOddsForFixture(fixtureId),
+        openLiquiditySummary(fixtureId),
+        storedOutcomeForFixture(fixtureId),
+    ]);
+    const outcomeScore = outcome
+        ? {
+            homeScore: outcome.homeScore,
+            awayScore: outcome.awayScore,
+            status: 'final',
+            source: outcome.source,
+            timestamp: outcome.timestamp || outcome.settledAt,
+            label: outcome.score,
+        }
+        : null;
+    return {
+        fixtureId,
+        sport: fixture.sport || 'football',
+        status: fixture.status || 'unknown',
+        startsAt: fixture.startsAt instanceof Date ? fixture.startsAt.toISOString() : fixture.startsAt || null,
+        teams: fixtureTeams(fixture),
+        marketType: SPORT_MARKET_TYPE,
+        marketSelections: ['part1', 'draw', 'part2'],
+        latestScore: outcomeScore || {
+            ...latestScore,
+            label: scoreLabel(latestScore),
+        },
+        result: outcome || {
+            settled: false,
+            winner: null,
+            score: null,
+        },
+        latestOdds,
+        openLiquidity,
+        source: fixtureSource(fixture) || 'txline',
+        rawIncluded: false,
+    };
+}
+
+export async function getSportResultSummary(fixtureIdInput: unknown): Promise<Record<string, unknown>> {
+    const fixtureId = trimString(fixtureIdInput);
+    if (!fixtureId) throw httpError('fixtureId_required', 400);
+    const [fixture, latestScore] = await Promise.all([
+        prismaAny.arenaFixture.findUnique({ where: { fixtureId } }),
+        latestScoreForFixture(fixtureId),
+    ]);
+    if (!fixture) throw httpError('sport_fixture_not_found', 404);
+    try {
+        const outcome = await getOutcomeForFixture(fixtureId);
+        const outcomeScore = {
+            homeScore: outcome.homeScore,
+            awayScore: outcome.awayScore,
+            status: 'final',
+            source: outcome.source || 'txline',
+            timestamp: outcome.settledAt || null,
+            label: `${outcome.homeScore}-${outcome.awayScore}`,
+        };
+        return {
+            fixtureId,
+            settled: true,
+            status: 'final',
+            teams: fixtureTeams(fixture),
+            winner: outcome.winner || null,
+            score: `${outcome.homeScore}-${outcome.awayScore}`,
+            homeScore: outcome.homeScore,
+            awayScore: outcome.awayScore,
+            source: outcome.source || 'txline',
+            settledAt: outcome.settledAt || null,
+            latestScore: outcomeScore,
+            rawIncluded: false,
+        };
+    } catch (error: any) {
+        return {
+            fixtureId,
+            settled: false,
+            status: fixture.status || latestScore?.status || 'pending',
+            teams: fixtureTeams(fixture),
+            winner: null,
+            score: scoreLabel(latestScore),
+            latestScore,
+            reason: error?.message === 'txline_outcome_not_found'
+                ? 'txline_outcome_not_available_yet'
+                : error?.message || 'result_pending',
+            rawIncluded: false,
+        };
+    }
 }
 
 export async function acceptSportPosition(walletInput: string, positionIdInput: unknown, input: {
@@ -1989,8 +2343,8 @@ export async function sweepExpiredSportPositionRefunds(options: {
         const refundedLamports = BigInt(bigintString(bridgeResult.refundedLamports, remaining.toString()));
         const alreadyRefunded = BigInt(bigintString(candidate.refundedLamports));
         const nextStatus = filled > 0n ? 'filled' : 'cancelled';
-        const updated = await prisma.$transaction(async (tx) => {
-            const row = await (tx as any).sportPosition.update({
+	        const updated = await prisma.$transaction(async (tx) => {
+	            const row = await (tx as any).sportPosition.update({
                 where: { id: candidate.id },
                 data: {
                     status: nextStatus,
@@ -2013,12 +2367,31 @@ export async function sweepExpiredSportPositionRefunds(options: {
                     closed: Boolean(bridgeResult.closed),
                     sweptAt: now.toISOString(),
                 },
-            });
-            return row;
+	            });
+	            return row;
+	        });
+        const notificationPayload = {
+            ...sportPositionEventPayload(updated),
+            previousStatus,
+            refundTx: bridgeResult.tx || null,
+            closeTx: bridgeResult.closeTx || null,
+            refundedLamports: refundedLamports.toString(),
+            refundedSol: lamportsToSolNumber(refundedLamports),
+            sweptAt: now.toISOString(),
+        };
+        observeNotification(webhooks.positionExpired(candidate.agentWallet, notificationPayload), {
+            positionId: candidate.id,
+            wallet: candidate.agentWallet,
+            event: 'position.expired',
+        });
+        observeNotification(webhooks.positionRefunded(candidate.agentWallet, notificationPayload), {
+            positionId: candidate.id,
+            wallet: candidate.agentWallet,
+            event: 'position.refunded',
         });
 
-        refunded.push({
-            positionId: candidate.id,
+	        refunded.push({
+	            positionId: candidate.id,
             wallet: candidate.agentWallet,
             refundedLamports: refundedLamports.toString(),
             refundTx: bridgeResult.tx || null,

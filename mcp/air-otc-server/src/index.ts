@@ -116,6 +116,12 @@ const AGENT_EVENT_NAMES = [
   "deal.completed",
   "deal.cancelled",
   "deal.refunded",
+  "position.funded",
+  "position.filled",
+  "position.expired",
+  "position.refunded",
+  "match.awaiting_result",
+  "match.settled",
   "reputation.update",
 ] as const;
 const TELEGRAM_NOTIFICATION_EVENT_NAMES = [
@@ -128,6 +134,11 @@ const TELEGRAM_NOTIFICATION_EVENT_NAMES = [
   "deal.deposit_received",
   "deal.delivery_confirmed",
   "deal.completed",
+  "position.funded",
+  "position.filled",
+  "position.refunded",
+  "match.awaiting_result",
+  "match.settled",
 ] as const;
 
 function parseScopes(value: string | string[] | undefined, fallback: Set<Scope>): Set<Scope> {
@@ -1267,6 +1278,56 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_get_fixture_summary",
+    title: "Sport Get Fixture Summary",
+    description:
+      "Fetch a compact SPORT fixture summary for agents: teams, status, latest score, latest odds, and open liquidity. Does not include raw TxLINE replay data. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        fixtureId: { type: "string" },
+      },
+      ["fixtureId"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/fixtures/${encodeURIComponent(args.fixtureId)}/summary`,
+          {},
+          config.apiUrl,
+          { authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_get_result",
+    title: "Sport Get Result",
+    description:
+      "Fetch a compact TxLINE result for a SPORT fixture: winner, score, settled flag, and source. Returns pending instead of dumping raw replay when no final result exists. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        fixtureId: { type: "string" },
+      },
+      ["fixtureId"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/results/${encodeURIComponent(args.fixtureId)}`,
+          {},
+          config.apiUrl,
+          { authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_sport_create_offer",
     title: "Sport Create Offer",
     description:
@@ -1371,6 +1432,55 @@ const tools: ToolDefinition[] = [
               side: args.side || "back",
               stakeSol: args.stakeSol,
               clientOrderId: args.clientOrderId,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_create_and_fund_position",
+    title: "Sport Create And Fund Position",
+    description:
+      "One-click SPORT automation: create a position, execute on-chain vault funding, and confirm it. Uses walletKeypair if supplied, otherwise the API-backed encrypted funding session. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        fixtureId: { type: "string" },
+        selection: { type: "string", enum: ["part1", "draw", "part2"] },
+        side: { type: "string", enum: ["back", "lay"], default: "back" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+        walletKeypair: {
+          type: "string",
+          description:
+            "Optional base58-encoded 64-byte Solana secret key or JSON array string. If omitted, the API uses the registered encrypted funding session for this wallet.",
+        },
+      },
+      ["wallet", "fixtureId", "selection", "stakeSol"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const explicitKeypair = typeof args.walletKeypair === "string" && args.walletKeypair.trim()
+        ? args.walletKeypair.trim()
+        : "";
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/positions/create-and-fund",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              selection: args.selection,
+              side: args.side || "back",
+              stakeSol: args.stakeSol,
+              clientOrderId: args.clientOrderId,
+              ...(explicitKeypair ? { walletKeypair: explicitKeypair } : {}),
             }),
           },
           config.apiUrl,

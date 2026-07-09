@@ -15,9 +15,12 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_get_reputation_leaderboard", "offers:read"],
   ["airotc_sport_list_matches", "offers:read"],
   ["airotc_sport_get_fixture", "offers:read"],
+  ["airotc_sport_get_fixture_summary", "offers:read"],
+  ["airotc_sport_get_result", "offers:read"],
   ["airotc_sport_create_offer", "offers:write"],
   ["airotc_sport_accept_offer", "offers:write"],
   ["airotc_sport_create_position", "offers:write"],
+  ["airotc_sport_create_and_fund_position", "offers:write"],
   ["airotc_sport_post_position", "offers:write"],
   ["airotc_sport_accept_position", "offers:write"],
   ["airotc_sport_counter_position", "offers:write"],
@@ -210,6 +213,20 @@ assert.deepEqual(
   "sport_get_fixture must require fixtureId"
 );
 
+const sportFixtureSummaryTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_fixture_summary");
+assert.deepEqual(
+  sportFixtureSummaryTool.inputSchema.required,
+  ["fixtureId"],
+  "sport_get_fixture_summary must require fixtureId"
+);
+
+const sportResultTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_result");
+assert.deepEqual(
+  sportResultTool.inputSchema.required,
+  ["fixtureId"],
+  "sport_get_result must require fixtureId"
+);
+
 const sportCreateTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_create_offer");
 assert.deepEqual(
   sportCreateTool.inputSchema.required,
@@ -234,6 +251,19 @@ assert.deepEqual(
   sportCreatePositionTool.inputSchema.required,
   ["wallet", "fixtureId", "selection", "stakeSol"],
   "sport_create_position must expose the prefunded position input"
+);
+
+const sportCreateAndFundPositionTool = __test.tools.find(
+  (candidate: any) => candidate.name === "airotc_sport_create_and_fund_position"
+);
+assert.deepEqual(
+  sportCreateAndFundPositionTool.inputSchema.required,
+  ["wallet", "fixtureId", "selection", "stakeSol"],
+  "sport_create_and_fund_position must expose one-click SPORT input"
+);
+assert.ok(
+  sportCreateAndFundPositionTool.inputSchema.properties.walletKeypair.description.includes("registered encrypted funding session"),
+  "sport_create_and_fund_position should document session-backed funding"
 );
 
 const sportAcceptPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_accept_position");

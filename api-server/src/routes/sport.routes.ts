@@ -15,9 +15,12 @@ import {
     cancelSportPosition,
     clearSportFundingSession,
     confirmSportPositionFunding,
+    createAndFundSportPosition,
     executeSportPositionFunding,
     getSportFundingSessionStatus,
     getSportPosition,
+    getSportFixtureSummary,
+    getSportResultSummary,
     listMySportFills,
     listMySportPositions,
     listMySportTickets,
@@ -56,6 +59,23 @@ router.post('/positions', authenticateSolana, async (req: Request, res: Response
         res.status(data.matched === true ? 201 : 202).json({ success: true, data });
     } catch (error: any) {
         sendError(res, error, 'Failed to post SPORT position');
+    }
+});
+
+router.post('/positions/create-and-fund', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await createAndFundSportPosition(requireWallet(req), {
+            fixtureId: req.body?.fixtureId,
+            selection: req.body?.selection,
+            side: req.body?.side,
+            stakeSol: req.body?.stakeSol,
+            clientOrderId: req.body?.clientOrderId,
+            walletKeypair: req.body?.walletKeypair,
+            ownerKeypair: req.body?.ownerKeypair,
+        });
+        res.status(data.matched === true ? 201 : 200).json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to create and fund SPORT position');
     }
 });
 
@@ -153,6 +173,24 @@ router.get('/positions/:id/fills', authenticateSolana, async (req: Request, res:
         res.json({ success: true, data });
     } catch (error: any) {
         sendError(res, error, 'Failed to list SPORT position fills');
+    }
+});
+
+router.get('/fixtures/:fixtureId/summary', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await getSportFixtureSummary(req.params.fixtureId);
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to get SPORT fixture summary');
+    }
+});
+
+router.get('/results/:fixtureId', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await getSportResultSummary(req.params.fixtureId);
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to get SPORT result');
     }
 });
 

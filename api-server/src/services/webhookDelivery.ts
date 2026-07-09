@@ -333,6 +333,24 @@ export const webhooks = {
     dealRefunded: (ticketId: string, buyer: string, seller: string) =>
         notifyDealParties(ticketId, buyer, seller, 'deal.refunded', {}),
 
+    positionFunded: (wallet: string, data: Record<string, unknown>) =>
+        notifyAgent(wallet, 'position.funded', data, typeof data.ticketId === 'string' ? data.ticketId : undefined),
+
+    positionFilled: (wallets: string[], data: Record<string, unknown>, ticketId?: string) =>
+        notifyAgents(wallets, 'position.filled', data, ticketId),
+
+    positionExpired: (wallet: string, data: Record<string, unknown>) =>
+        notifyAgent(wallet, 'position.expired', data, typeof data.ticketId === 'string' ? data.ticketId : undefined),
+
+    positionRefunded: (wallet: string, data: Record<string, unknown>) =>
+        notifyAgent(wallet, 'position.refunded', data, typeof data.ticketId === 'string' ? data.ticketId : undefined),
+
+    matchAwaitingResult: (wallets: string[], data: Record<string, unknown>, ticketId?: string) =>
+        notifyAgents(wallets, 'match.awaiting_result', data, ticketId),
+
+    matchSettled: (wallets: string[], data: Record<string, unknown>, ticketId?: string) =>
+        notifyAgents(wallets, 'match.settled', data, ticketId),
+
     reputationUpdate: (wallet: string, data: Record<string, unknown>) =>
         notifyAgent(wallet, 'reputation.update', data),
 };

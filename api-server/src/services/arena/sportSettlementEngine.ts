@@ -72,6 +72,14 @@ function observeNotification(promise: Promise<unknown> | void, context: Record<s
     });
 }
 
+function doubledLamports(value: unknown): string | null {
+    if (typeof value === 'string' && /^\d+$/.test(value)) return (BigInt(value) * 2n).toString();
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+        return (BigInt(Math.floor(value)) * 2n).toString();
+    }
+    return null;
+}
+
 function emitSportSettlementNotifications(input: {
     match: any;
     outcome: any;
@@ -100,11 +108,23 @@ function emitSportSettlementNotifications(input: {
         releaseTx: input.releaseTx || null,
         refundTx: input.refundTx || null,
     };
+    const payoutLamports = doubledLamports(input.match.stakeLamports);
 
     observeNotification(webhooks.dealCompleted(ticketId, buyer, seller, data), {
         ticketId,
         matchId: input.match.id,
         event: 'deal.completed',
+    });
+    observeNotification(webhooks.matchSettled([buyer, seller], {
+        ...data,
+        ticketId,
+        payoutLamports,
+        payoutSol: payoutLamports ? Number(BigInt(payoutLamports)) / 1_000_000_000 : null,
+        tx: input.releaseTx || input.refundTx || null,
+    }, ticketId), {
+        ticketId,
+        matchId: input.match.id,
+        event: 'match.settled',
     });
 
     if (input.settlementAction === 'void_refund') {
@@ -112,6 +132,28 @@ function emitSportSettlementNotifications(input: {
             ticketId,
             matchId: input.match.id,
             event: 'deal.refunded',
+        });
+        observeNotification(webhooks.positionRefunded(buyer, {
+            ...data,
+            ticketId,
+            wallet: buyer,
+            tx: input.refundTx || null,
+        }), {
+            ticketId,
+            matchId: input.match.id,
+            event: 'position.refunded',
+            wallet: buyer,
+        });
+        observeNotification(webhooks.positionRefunded(seller, {
+            ...data,
+            ticketId,
+            wallet: seller,
+            tx: input.refundTx || null,
+        }), {
+            ticketId,
+            matchId: input.match.id,
+            event: 'position.refunded',
+            wallet: seller,
         });
     }
 }

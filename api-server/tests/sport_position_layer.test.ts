@@ -21,6 +21,11 @@ const {
     attachSportTicketByOfferMock: vi.fn(),
     webhooksMock: {
         dealMatched: vi.fn(),
+        positionFunded: vi.fn(),
+        positionFilled: vi.fn(),
+        positionExpired: vi.fn(),
+        positionRefunded: vi.fn(),
+        matchAwaitingResult: vi.fn(),
     },
 }));
 
@@ -28,6 +33,7 @@ const fixtureRows = new Map<string, any>();
 const sportPositionRows = new Map<string, any>();
 const sportPositionFillRows = new Map<string, any>();
 const sportFundingSessionRows = new Map<string, any>();
+const outcomeRows = new Map<string, any>();
 const offerRows = new Map<string, any>();
 const ticketRows = new Map<string, any>();
 const arenaMatchRows = new Map<string, any>();
@@ -232,6 +238,9 @@ const tx = {
     arenaFixture: {
         findUnique: vi.fn(async ({ where }) => fixtureRows.get(where.fixtureId) || null),
     },
+    arenaOutcome: {
+        findUnique: vi.fn(async ({ where }) => outcomeRows.get(where.fixtureId) || null),
+    },
     sportPositionFundingEvent: {
         create: vi.fn(async ({ data }) => {
             const row = stored({ id: `funding-event-${++fundingEventSeq}`, ...clone(data) });
@@ -272,6 +281,7 @@ describe('SPORT position layer', () => {
         sportPositionRows.clear();
         sportPositionFillRows.clear();
         sportFundingSessionRows.clear();
+        outcomeRows.clear();
         offerRows.clear();
         ticketRows.clear();
         arenaMatchRows.clear();
@@ -421,6 +431,48 @@ describe('SPORT position layer', () => {
         await expect(listMySportPositions(MAKER, { status: 'funding_required' })).resolves.toMatchObject({
             count: 1,
             positions: [expect.objectContaining({ id: result.position.id, status: 'funding_required' })],
+        });
+    });
+
+    it('returns compact fixture and result summaries without raw TxLINE replay payloads', async () => {
+        outcomeRows.set('18198205', stored({
+            id: 'outcome-1',
+            fixtureId: '18198205',
+            status: 'final',
+            homeScore: 2,
+            awayScore: 0,
+            winner: 'part1',
+            source: 'txline_score',
+            sourceTimestamp: new Date('2026-07-07T14:00:00.000Z'),
+            settledAt: new Date('2026-07-07T14:01:00.000Z'),
+            raw: { proof: 'stored-outcome' },
+        }));
+        const {
+            getSportFixtureSummary,
+            getSportResultSummary,
+        } = await import('../src/services/sportPosition.service');
+
+        await expect(getSportFixtureSummary('18198205')).resolves.toMatchObject({
+            fixtureId: '18198205',
+            marketSelections: ['part1', 'draw', 'part2'],
+            latestScore: {
+                homeScore: 2,
+                awayScore: 0,
+                label: '2-0',
+            },
+            result: {
+                settled: true,
+                winner: 'part1',
+                score: '2-0',
+            },
+            rawIncluded: false,
+        });
+        await expect(getSportResultSummary('18198205')).resolves.toMatchObject({
+            fixtureId: '18198205',
+            settled: true,
+            winner: 'part1',
+            score: '2-0',
+            rawIncluded: false,
         });
     });
 
@@ -577,6 +629,59 @@ describe('SPORT position layer', () => {
             wallet,
             active: false,
         });
+    });
+
+    it('creates and funds a SPORT position in one call through a registered funding session', async () => {
+        const keypair = nacl.sign.keyPair();
+        const wallet = bs58.encode(keypair.publicKey);
+        fixtureRows.set('18198207', stored({
+            id: 'fixture-3',
+            fixtureId: '18198207',
+            status: 'upcoming',
+            startsAt: STARTS_AT,
+            raw: { source: 'txline' },
+        }));
+        const {
+            createAndFundSportPosition,
+            registerSportFundingSession,
+        } = await import('../src/services/sportPosition.service');
+
+        await registerSportFundingSession(wallet, {
+            walletKeypair: bs58.encode(keypair.secretKey),
+            ttlSeconds: 900,
+        });
+        const result: any = await createAndFundSportPosition(wallet, {
+            fixtureId: '18198207',
+            selection: 'part1',
+            side: 'back',
+            stakeSol: '0.01',
+            clientOrderId: 'one-click-position',
+        });
+
+        expect(result).toMatchObject({
+            success: true,
+            status: 'funded_open',
+            fixtureId: '18198207',
+            selection: 'part1',
+            side: 'back',
+            stakeSol: 0.01,
+            fundingTx: 'sport-position-fund-tx',
+            matched: false,
+            message: 'Ready to match!',
+        });
+        expect(result.positionId).toMatch(/^position-/);
+        expect(middlemanForwarderMock.forwardSportPositionFunding).toHaveBeenCalledWith(
+            expect.objectContaining({
+                ownerWallet: wallet,
+                ownerKeypair: bs58.encode(keypair.secretKey),
+                stakeLamports: '10000000',
+            })
+        );
+        expect(webhooksMock.positionFunded).toHaveBeenCalledWith(wallet, expect.objectContaining({
+            positionId: result.positionId,
+            fixtureId: '18198207',
+            status: 'funded_open',
+        }));
     });
 
     it('leaves a draft retryable when middleman funding execution fails', async () => {

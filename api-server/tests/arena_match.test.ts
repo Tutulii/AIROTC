@@ -13,6 +13,8 @@ const { webhooksMock } = vi.hoisted(() => ({
     webhooksMock: {
         dealCompleted: vi.fn(),
         dealRefunded: vi.fn(),
+        matchSettled: vi.fn(),
+        positionRefunded: vi.fn(),
     },
 }));
 
