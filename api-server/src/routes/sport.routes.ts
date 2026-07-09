@@ -1,10 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { authenticateSolana } from '../middleware/auth';
 import {
+    createSportPositionFromPreset,
     createSportOfferFromTemplate,
     deleteStrategyTemplate,
     discoverSportAgents,
     listMySportTrades,
+    listStrategyPresets,
     listStrategyTemplates,
     upsertStrategyTemplate,
 } from '../services/sportAgentTools.service';
@@ -200,6 +202,26 @@ router.get('/strategy-templates', authenticateSolana, async (req: Request, res: 
         res.json({ success: true, data });
     } catch (error: any) {
         sendError(res, error, 'Failed to list SPORT strategy templates');
+    }
+});
+
+router.get('/strategy-presets', authenticateSolana, async (_req: Request, res: Response): Promise<void> => {
+    try {
+        res.json({ success: true, data: listStrategyPresets() });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list SPORT strategy presets');
+    }
+});
+
+router.post('/strategy-presets/:name/positions', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await createSportPositionFromPreset(requireWallet(req), req.params.name, {
+            fixtureId: req.body?.fixtureId,
+            overrides: req.body?.overrides,
+        });
+        res.status(201).json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to create SPORT position from strategy preset');
     }
 });
 

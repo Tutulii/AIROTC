@@ -10,6 +10,44 @@ const MAX_HISTORY_LIMIT = 200;
 const MAX_DISCOVERY_LIMIT = 50;
 const TEMPLATE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 const EVALUABLE_STATUSES = new Set(['settled', 'released', 'refunded']);
+const SPORT_STRATEGY_PRESETS = [
+    {
+        name: 'favorite_back',
+        description: 'Back the selected side with a small equal-stake position.',
+        defaults: {
+            mode: 'buy',
+            amount: 1,
+            price: 0.05,
+            collateral: 0,
+            marketType: '1X2',
+            selection: 'part1',
+        },
+    },
+    {
+        name: 'underdog_layer',
+        description: 'Lay the selected side, useful when an agent thinks the market is overpricing an underdog.',
+        defaults: {
+            mode: 'sell',
+            amount: 1,
+            price: 0.05,
+            collateral: 0,
+            marketType: '1X2',
+            selection: 'part2',
+        },
+    },
+    {
+        name: 'draw_hedge',
+        description: 'Back draw on 1X2 markets as a simple hedge against two-sided directional exposure.',
+        defaults: {
+            mode: 'buy',
+            amount: 1,
+            price: 0.05,
+            collateral: 0,
+            marketType: '1X2',
+            selection: 'draw',
+        },
+    },
+] as const;
 
 type SportRole = 'maker' | 'taker';
 
@@ -190,12 +228,65 @@ function normalizeOfferDefaults(raw: unknown): Record<string, any> {
 
 function mergeTemplateDefaults(templateDefaults: unknown, overrides: unknown): Record<string, any> {
     const base = normalizeOfferDefaults(templateDefaults);
-    const patch = asRecord(overrides);
+    const patch = { ...asRecord(overrides) };
+    if (patch.stakeSol !== undefined && patch.price === undefined) patch.price = patch.stakeSol;
+    if (patch.side === 'back' && patch.mode === undefined) patch.mode = 'buy';
+    if (patch.side === 'lay' && patch.mode === undefined) patch.mode = 'sell';
     const merged = {
         ...base,
         ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined && value !== null && value !== '')),
     };
     return normalizeOfferDefaults(merged);
+}
+
+function serializeStrategyPreset(preset: typeof SPORT_STRATEGY_PRESETS[number]): Record<string, unknown> {
+    return {
+        name: preset.name,
+        description: preset.description,
+        defaults: preset.defaults,
+        creates: 'prefunded_position_draft',
+        fundingRequired: true,
+        overrideFields: ['fixtureId', 'selection', 'stakeSol', 'side', 'clientOrderId'],
+    };
+}
+
+async function createSportPositionFromDefaults(
+    wallet: string,
+    source: { type: 'template' | 'preset'; name: string; id?: string | null },
+    defaultsRaw: unknown,
+    input: { fixtureId?: unknown; overrides?: unknown } = {},
+): Promise<Record<string, unknown>> {
+    const overrides = asRecord(input.overrides);
+    const defaults = mergeTemplateDefaults(defaultsRaw, overrides);
+    const fixtureId = trimString(input.fixtureId) || trimString(overrides.fixtureId);
+    const marketType = trimString(defaults.marketType) || trimString(overrides.marketType);
+    const selection = trimString(defaults.selection) || trimString(overrides.selection);
+    if (!fixtureId) throw httpError('fixtureId_required', 400);
+    if (!marketType) throw httpError('marketType_required', 400);
+    if (!selection) throw httpError('selection_required', 400);
+
+    if (marketType !== '1X2_PARTICIPANT_RESULT' && marketType !== '1X2') {
+        throw httpError('sport_template_market_not_supported_for_positions', 400);
+    }
+
+    const positionResult = await postSportPosition(wallet, {
+        fixtureId,
+        selection,
+        side: defaults.mode === 'sell' ? 'lay' : 'back',
+        stakeSol: String(defaults.price),
+        clientOrderId: trimString(overrides.clientOrderId) || `${source.type}:${source.name}:${fixtureId}:${selection}:${Date.now()}`,
+    });
+
+    return {
+        [source.type]: {
+            id: source.id || undefined,
+            name: source.name,
+        },
+        position: (positionResult as any).position,
+        fundingInstructions: (positionResult as any).fundingInstructions || null,
+        deprecatedOfferFlow: false,
+        note: 'SPORT strategy flows create prefunded position drafts. Fund the returned vault before the position is public or matchable.',
+    };
 }
 
 export async function listMySportTrades(
@@ -379,6 +470,13 @@ export async function listStrategyTemplates(walletInput: string): Promise<Record
     };
 }
 
+export function listStrategyPresets(): Record<string, unknown> {
+    return {
+        count: SPORT_STRATEGY_PRESETS.length,
+        data: SPORT_STRATEGY_PRESETS.map(serializeStrategyPreset),
+    };
+}
+
 export async function upsertStrategyTemplate(
     walletInput: string,
     input: { name?: unknown; description?: unknown; defaults?: unknown; enabled?: unknown },
@@ -436,37 +534,21 @@ export async function createSportOfferFromTemplate(
         throw httpError('strategy_template_not_found_or_disabled', 404);
     }
 
-    const overrides = asRecord(input.overrides);
-    const defaults = mergeTemplateDefaults(template.defaults, overrides);
-    const fixtureId = trimString(input.fixtureId) || trimString(overrides.fixtureId);
-    const marketType = trimString(defaults.marketType) || trimString(overrides.marketType);
-    const selection = trimString(defaults.selection) || trimString(overrides.selection);
-    if (!fixtureId) throw httpError('fixtureId_required', 400);
-    if (!marketType) throw httpError('marketType_required', 400);
-    if (!selection) throw httpError('selection_required', 400);
+    return createSportPositionFromDefaults(wallet, { type: 'template', name, id: template.id }, template.defaults, input);
+}
 
-    if (marketType !== '1X2_PARTICIPANT_RESULT' && marketType !== '1X2') {
-        throw httpError('sport_template_market_not_supported_for_positions', 400);
+export async function createSportPositionFromPreset(
+    walletInput: string,
+    nameInput: unknown,
+    input: { fixtureId?: unknown; overrides?: unknown } = {},
+): Promise<Record<string, unknown>> {
+    const wallet = validateWallet(walletInput);
+    const name = normalizeTemplateName(nameInput);
+    const preset = SPORT_STRATEGY_PRESETS.find((candidate) => candidate.name === name);
+    if (!preset) {
+        throw httpError('strategy_preset_not_found', 404);
     }
-
-    const positionResult = await postSportPosition(wallet, {
-        fixtureId,
-        selection,
-        side: defaults.mode === 'sell' ? 'lay' : 'back',
-        stakeSol: String(defaults.price),
-        clientOrderId: trimString(overrides.clientOrderId) || `template:${name}:${fixtureId}:${selection}:${Date.now()}`,
-    });
-
-    return {
-        template: {
-            id: template.id,
-            name: template.name,
-        },
-        position: (positionResult as any).position,
-        fundingInstructions: (positionResult as any).fundingInstructions || null,
-        deprecatedOfferFlow: false,
-        note: 'SPORT templates now create prefunded position drafts. Fund the returned vault before the position is public or matchable.',
-    };
+    return createSportPositionFromDefaults(wallet, { type: 'preset', name }, preset.defaults, input);
 }
 
 export async function discoverSportAgents(options: {

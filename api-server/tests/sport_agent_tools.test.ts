@@ -226,7 +226,9 @@ describe('SPORT agent tools service', () => {
         prismaMock.$transaction.mockImplementation((fn: any) => fn(tx));
 
         const {
+            createSportPositionFromPreset,
             createSportOfferFromTemplate,
+            listStrategyPresets,
             upsertStrategyTemplate,
         } = await import('../src/services/sportAgentTools.service');
 
@@ -260,6 +262,30 @@ describe('SPORT agent tools service', () => {
         expect(result.position.status).toBe('funding_required');
         expect(result.fundingInstructions.amountLamports).toBe('100000000');
         expect(result.deprecatedOfferFlow).toBe(false);
+
+        const presets: any = listStrategyPresets();
+        expect(presets.data.map((preset: any) => preset.name)).toEqual(
+            expect.arrayContaining(['favorite_back', 'underdog_layer', 'draw_hedge'])
+        );
+
+        const presetResult: any = await createSportPositionFromPreset(WALLET, 'underdog_layer', {
+            fixtureId: '18179549',
+            overrides: {
+                selection: 'part2',
+                stakeSol: 0.08,
+                clientOrderId: 'preset:underdog_layer:18179549:part2:test',
+            },
+        });
+        expect(tx.sportPosition.create).toHaveBeenLastCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                fixtureId: '18179549',
+                selection: 'part2',
+                side: 'lay',
+                stakeLamports: '80000000',
+                status: 'funding_required',
+            }),
+        }));
+        expect(presetResult.preset.name).toBe('underdog_layer');
     });
 
     it('discovers active SPORT agents with reputation attached', async () => {

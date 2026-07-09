@@ -1792,6 +1792,32 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_list_strategy_presets",
+    title: "Sport List Strategy Presets",
+    description:
+      "List built-in SPORT strategy presets such as favorite_back, underdog_layer, and draw_hedge. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/strategy-presets",
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_sport_save_strategy_template",
     title: "Sport Save Strategy Template",
     description:
@@ -1885,6 +1911,45 @@ const tools: ToolDefinition[] = [
       return toolOutput(
         await httpJson(
           `/v1/sport/strategy-templates/${encodeURIComponent(args.name)}/offers`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              overrides: args.overrides || {},
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_create_position_from_preset",
+    title: "Sport Create Position From Preset",
+    description:
+      "Create a prefunded SPORT position draft from a built-in preset. Returns vault funding instructions; fund it before matching. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        name: { type: "string", enum: ["favorite_back", "underdog_layer", "draw_hedge"] },
+        fixtureId: { type: "string" },
+        overrides: {
+          type: "object",
+          additionalProperties: true,
+          description: "Optional overrides for selection, stakeSol, side, marketType, and clientOrderId.",
+        },
+      },
+      ["wallet", "name", "fixtureId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/strategy-presets/${encodeURIComponent(args.name)}/positions`,
           {
             method: "POST",
             body: JSON.stringify({

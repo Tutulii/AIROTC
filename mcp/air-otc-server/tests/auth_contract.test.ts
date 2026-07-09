@@ -33,9 +33,11 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_get_my_history", "deals:read"],
   ["airotc_sport_discover_agents", "offers:read"],
   ["airotc_sport_list_strategy_templates", "offers:read"],
+  ["airotc_sport_list_strategy_presets", "offers:read"],
   ["airotc_sport_save_strategy_template", "offers:write"],
   ["airotc_sport_delete_strategy_template", "offers:write"],
   ["airotc_sport_create_offer_from_template", "offers:write"],
+  ["airotc_sport_create_position_from_preset", "offers:write"],
   ["airotc_sport_settlement_automation_status", "deals:read"],
   ["airotc_sport_ingestion_status", "deals:read"],
   ["airotc_sport_start_ingestion", "sport:admin"],
@@ -359,6 +361,13 @@ assert.deepEqual(
   "sport_list_strategy_templates must require wallet"
 );
 
+const sportPresetListTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_list_strategy_presets");
+assert.deepEqual(
+  sportPresetListTool.inputSchema.required,
+  ["wallet"],
+  "sport_list_strategy_presets must require wallet"
+);
+
 const sportTemplateSaveTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_save_strategy_template");
 assert.deepEqual(
   sportTemplateSaveTool.inputSchema.required,
@@ -371,6 +380,13 @@ assert.deepEqual(
   sportTemplateOfferTool.inputSchema.required,
   ["wallet", "name", "fixtureId"],
   "sport_create_offer_from_template must require wallet, template name, and fixture"
+);
+
+const sportPresetPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_create_position_from_preset");
+assert.deepEqual(
+  sportPresetPositionTool.inputSchema.required,
+  ["wallet", "name", "fixtureId"],
+  "sport_create_position_from_preset must require wallet, preset name, and fixture"
 );
 
 const sportAutomationTool = __test.tools.find(
