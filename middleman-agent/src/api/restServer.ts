@@ -37,7 +37,7 @@ import { settlementTargetStore } from '../state/settlementTargetStore';
 import { rewardTargetStore } from '../state/rewardTargetStore';
 import { getAgentDWallet, isConfidentialEscrowReady } from '../services/confidentialExecutionService';
 import { executeDeal, executeRelease } from '../services/executionService';
-import { executeCancelDeal, executeCommitSportPositionFillToDeal, executeCommitSportPositionsToDeal, executeFractionalSplit, executeRefundExpiredSportPositionRemaining, executeSettleToBuyerPhase, type ExecutionResult } from '../services/onChainExecutionService';
+import { executeCancelDeal, executeCommitSportPositionFillToDeal, executeCommitSportPositionsToDeal, executeFractionalSplit, executeFundSportPositionV2, executeRefundExpiredSportPositionRemaining, executeSettleToBuyerPhase, type ExecutionResult } from '../services/onChainExecutionService';
 import { executeSportSettlement } from '../services/sportSettlementBridge';
 import { loadConfig } from '../config';
 import { registerObservatoryTicketMapping } from '../services/observatoryBridge';
@@ -1402,6 +1402,60 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 ownerWallet,
                 vaultPda,
                 closeIfNoCommittedStake: req.body?.closeIfNoCommittedStake !== false,
+            });
+
+            res.status(result.success ? 200 : 502).json(result);
+        } catch (e: any) {
+            const statusCode = Number.isInteger(e?.statusCode) ? e.statusCode : 500;
+            res.status(statusCode).json({
+                success: false,
+                error: e?.message || String(e),
+            });
+        }
+    });
+
+    app.post('/v1/sport/positions/:positionId/execute-funding', verifyBridgeHmac, bridgeRateLimiter, async (req, res) => {
+        try {
+            const positionId = String(req.params.positionId || '').trim();
+            const ownerWallet = validateSettlementWallet(req.body?.ownerWallet, "ownerWallet");
+            const vaultPda = req.body?.vaultPda
+                ? validateSettlementWallet(req.body.vaultPda, "vaultPda")
+                : null;
+            const fixtureId = typeof req.body?.fixtureId === 'string' ? req.body.fixtureId.trim() : '';
+            const marketType = typeof req.body?.marketType === 'string' ? req.body.marketType.trim() : '';
+            const selection = typeof req.body?.selection === 'string' ? req.body.selection.trim() : '';
+            const side = req.body?.side === 'lay' ? 'lay' : 'back';
+            const stakeLamports = typeof req.body?.stakeLamports === 'string' ? req.body.stakeLamports.trim() : '';
+            const expiresAtUnix = Number(req.body?.expiresAtUnix);
+
+            if (!positionId) {
+                res.status(400).json({ success: false, error: "positionId_required" });
+                return;
+            }
+            if (!ownerWallet) {
+                res.status(400).json({ success: false, error: "ownerWallet_required" });
+                return;
+            }
+            if (!fixtureId || !marketType || !selection || !stakeLamports || !Number.isFinite(expiresAtUnix)) {
+                res.status(400).json({ success: false, error: "sport_position_funding_payload_invalid" });
+                return;
+            }
+            if (!req.body?.ownerKeypair) {
+                res.status(400).json({ success: false, error: "ownerKeypair_required" });
+                return;
+            }
+
+            const result = await executeFundSportPositionV2({
+                positionId,
+                ownerWallet,
+                ownerKeypair: req.body.ownerKeypair,
+                fixtureId,
+                marketType,
+                selection,
+                side,
+                stakeLamports,
+                expiresAtUnix,
+                vaultPda,
             });
 
             res.status(result.success ? 200 : 502).json(result);

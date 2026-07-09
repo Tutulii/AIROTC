@@ -1271,6 +1271,140 @@ export async function confirmSportPositionFunding(walletInput: string, positionI
     };
 }
 
+export async function executeSportPositionFunding(walletInput: string, positionIdInput: unknown, input: {
+    walletKeypair?: unknown;
+    ownerKeypair?: unknown;
+} = {}): Promise<Record<string, unknown>> {
+    const wallet = validateWallet(walletInput);
+    const positionId = trimString(positionIdInput);
+    if (!positionId) throw httpError('position_id_required', 400);
+    const ownerKeypair = input.walletKeypair ?? input.ownerKeypair;
+    if (!ownerKeypair) throw httpError('walletKeypair_required', 400);
+    const cluster = String(process.env.SOLANA_CLUSTER || 'devnet').toLowerCase();
+    if ((cluster === 'mainnet' || cluster === 'mainnet-beta') && process.env.SPORT_POSITION_EXECUTE_FUNDING_ALLOW_MAINNET !== 'true') {
+        throw httpError('sport_execute_funding_mainnet_disabled', 403);
+    }
+
+    const current = await prismaAny.sportPosition.findUnique({ where: { id: positionId } });
+    if (!current) throw httpError('sport_position_not_found', 404);
+    if (current.agentWallet !== wallet) throw httpError('sport_position_wallet_mismatch', 403);
+    if (!current.vaultPda) throw httpError('sport_position_missing_vault', 409);
+    if ((current.vaultVersion || 'v1') !== 'v2') {
+        throw httpError('sport_execute_funding_requires_v2_position', 409);
+    }
+    if (current.status === 'funded_open' || current.status === 'partially_filled' || current.status === 'matched' || current.status === 'filled') {
+        const confirmed = await confirmSportPositionFunding(wallet, positionId, {
+            fundingTx: current.fundingTx || undefined,
+        });
+        return {
+            executed: false,
+            idempotent: true,
+            fundingTx: current.fundingTx || null,
+            position: serializePosition(current),
+            confirmation: confirmed,
+        };
+    }
+    if (current.status !== 'funding_required') {
+        throw httpError('sport_position_not_awaiting_funding', 409);
+    }
+    const expiresAtUnix = unixSeconds(current.fundingExpiresAt);
+    if (!expiresAtUnix) throw httpError('sport_position_missing_funding_expiry', 409);
+    if (new Date(current.fundingExpiresAt).getTime() <= Date.now()) {
+        await prismaAny.sportPosition.update({
+            where: { id: positionId },
+            data: { status: 'expired' },
+        });
+        throw httpError('sport_position_funding_window_expired', 409);
+    }
+
+    try {
+        await prismaAny.sportPositionFundingEvent?.create?.({
+            data: {
+                positionId,
+                wallet,
+                event: 'funding_execution_started',
+                lamports: current.stakeLamports,
+                metadata: jsonValue({
+                    vaultPda: current.vaultPda,
+                    vaultVersion: current.vaultVersion || 'v2',
+                    cluster,
+                }),
+            },
+        });
+    } catch (error: any) {
+        logger.warn('sport_position_funding_execution_event_failed', {
+            positionId,
+            error: error?.message || String(error),
+        });
+    }
+
+    const result = await middlemanForwarder.forwardSportPositionFunding({
+        positionId,
+        ownerWallet: wallet,
+        ownerKeypair,
+        fixtureId: current.fixtureId,
+        marketType: SPORT_MARKET_TYPE,
+        selection: current.selection,
+        side: current.side === 'lay' ? 'lay' : 'back',
+        stakeLamports: current.stakeLamports,
+        expiresAtUnix,
+        vaultPda: current.vaultPda,
+    });
+
+    if (!result.success || !result.fundingTx) {
+        try {
+            await prismaAny.sportPositionFundingEvent?.create?.({
+                data: {
+                    positionId,
+                    wallet,
+                    event: 'funding_execution_failed',
+                    lamports: current.stakeLamports,
+                    metadata: jsonValue({
+                        error: result.error || 'sport_position_funding_execution_failed',
+                        vaultPda: current.vaultPda,
+                    }),
+                },
+            });
+        } catch {
+            // Best-effort audit event; funding failure remains the returned error.
+        }
+        throw httpError(result.error || 'sport_position_funding_execution_failed', 502);
+    }
+
+    try {
+        await prismaAny.sportPositionFundingEvent?.create?.({
+            data: {
+                positionId,
+                wallet,
+                event: 'funding_executed',
+                txSignature: result.fundingTx,
+                lamports: current.stakeLamports,
+                metadata: jsonValue({
+                    initTx: result.initTx || null,
+                    fundingTx: result.fundingTx,
+                    vaultPda: result.vaultPda || current.vaultPda,
+                }),
+            },
+        });
+    } catch {
+        // Best-effort audit event; the chain transaction is the source of truth.
+    }
+
+    const confirmation = await confirmSportPositionFunding(wallet, positionId, {
+        fundingTx: result.fundingTx,
+    });
+
+    return {
+        executed: true,
+        initTx: result.initTx || null,
+        fundingTx: result.fundingTx,
+        tx: result.fundingTx,
+        vaultPda: result.vaultPda || current.vaultPda,
+        positionId,
+        confirmation,
+    };
+}
+
 export async function acceptSportPosition(walletInput: string, positionIdInput: unknown, input: {
     clientOrderId?: unknown;
     stakeSol?: unknown;

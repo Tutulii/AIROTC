@@ -1326,6 +1326,56 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_execute_funding",
+    title: "Sport Execute Funding",
+    description:
+      "Initialize and fund a SPORT position vault on-chain, then confirm funding through AIR OTC. Devnet agent automation path; requires a 64-byte Solana wallet keypair via walletKeypair or AIR_OTC_WALLET_PRIVATE_KEY. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        walletKeypair: {
+          type: "string",
+          description:
+            "Optional base58-encoded 64-byte Solana secret key or JSON array string. If omitted, AIR_OTC_WALLET_PRIVATE_KEY from the MCP runtime is used.",
+        },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const explicitKeypair = typeof args.walletKeypair === "string" && args.walletKeypair.trim()
+        ? args.walletKeypair.trim()
+        : "";
+      const walletKeypair = explicitKeypair || config.walletPrivateKey;
+      if (!walletKeypair) {
+        throw new Error("sport_execute_funding_wallet_keypair_required");
+      }
+      if (!explicitKeypair) {
+        const configuredWallet = walletAuth();
+        if (!configuredWallet || configuredWallet.publicKey !== wallet) {
+          throw new Error("sport_execute_funding_configured_wallet_mismatch");
+        }
+      }
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/execute-funding`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              walletKeypair,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_sport_cancel_position",
     title: "Sport Cancel Position",
     description:

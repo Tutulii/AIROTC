@@ -365,4 +365,76 @@ export const middlemanForwarder = {
             return { success: false, error: err.message };
         }
     },
+
+    async forwardSportPositionFunding(params: {
+        positionId: string;
+        ownerWallet: string;
+        ownerKeypair: unknown;
+        fixtureId: string;
+        marketType: string;
+        selection: string;
+        side: 'back' | 'lay';
+        stakeLamports: string;
+        expiresAtUnix: number;
+        vaultPda?: string | null;
+    }): Promise<{
+        success: boolean;
+        tx?: string;
+        initTx?: string;
+        fundingTx?: string;
+        vaultPda?: string;
+        ownerWallet?: string;
+        error?: string;
+        raw?: any;
+    }> {
+        try {
+            const path = `/v1/sport/positions/${encodeURIComponent(params.positionId)}/execute-funding`;
+            const body = JSON.stringify({
+                ownerWallet: params.ownerWallet,
+                ownerKeypair: params.ownerKeypair,
+                fixtureId: params.fixtureId,
+                marketType: params.marketType,
+                selection: params.selection,
+                side: params.side,
+                stakeLamports: params.stakeLamports,
+                expiresAtUnix: params.expiresAtUnix,
+                vaultPda: params.vaultPda || null,
+            });
+
+            const res = await fetch(`${MIDDLEMAN_URL}${path}`, {
+                method: 'POST',
+                headers: buildSignedHeaders('POST', path, body),
+                body,
+                signal: AbortSignal.timeout(90000),
+            });
+
+            const text = await res.text();
+            let data: any = null;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch {
+                data = { raw: text };
+            }
+
+            if (!res.ok || !data?.success) {
+                return {
+                    success: false,
+                    error: data?.error || `Status ${res.status}`,
+                    raw: data,
+                };
+            }
+
+            return {
+                success: true,
+                tx: data.tx,
+                initTx: data.initTx,
+                fundingTx: data.fundingTx || data.tx,
+                vaultPda: data.vaultPda,
+                ownerWallet: data.ownerWallet,
+                raw: data,
+            };
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
+    },
 };

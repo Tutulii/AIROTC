@@ -14,6 +14,7 @@ const {
         middlemanForwarderMock: {
             forwardOfferAccepted: vi.fn(),
             forwardExpiredSportPositionRefund: vi.fn(),
+            forwardSportPositionFunding: vi.fn(),
         },
     attachSportTicketByOfferMock: vi.fn(),
     webhooksMock: {
@@ -292,6 +293,14 @@ describe('SPORT position layer', () => {
             refundedLamports: '40000000',
             closed: true,
         });
+        middlemanForwarderMock.forwardSportPositionFunding.mockResolvedValue({
+            success: true,
+            initTx: 'sport-position-init-tx',
+            fundingTx: 'sport-position-fund-tx',
+            tx: 'sport-position-fund-tx',
+            vaultPda: '6N77J7cCsKq75kyQJJKE6qQqpZ43aT4dpXkhwcZfCLWK',
+            ownerWallet: MAKER,
+        });
         attachSportTicketByOfferMock.mockResolvedValue({
             match: { id: 'match-1', escrowPda: 'sport-escrow-pda', status: 'escrow_attached' },
         });
@@ -380,6 +389,81 @@ describe('SPORT position layer', () => {
             else process.env.NODE_ENV = originalNodeEnv;
             process.env.SPORT_POSITION_ALLOW_SERVER_RECORDED_FUNDING = 'true';
         }
+    });
+
+    it('executes on-chain funding through middleman and confirms the position', async () => {
+        const { executeSportPositionFunding, postSportPosition } = await import('../src/services/sportPosition.service');
+        const draft: any = await postSportPosition(MAKER, {
+            fixtureId: '18198205',
+            selection: 'part1',
+            side: 'back',
+            stakeSol: '0.03',
+        });
+
+        const result: any = await executeSportPositionFunding(MAKER, draft.position.id, {
+            walletKeypair: 'test-secret-keypair',
+        });
+
+        expect(middlemanForwarderMock.forwardSportPositionFunding).toHaveBeenCalledWith({
+            positionId: draft.position.id,
+            ownerWallet: MAKER,
+            ownerKeypair: 'test-secret-keypair',
+            fixtureId: '18198205',
+            marketType: '1X2_PARTICIPANT_RESULT',
+            selection: 'part1',
+            side: 'back',
+            stakeLamports: '30000000',
+            expiresAtUnix: Math.floor(new Date(draft.position.fundingExpiresAt).getTime() / 1000),
+            vaultPda: draft.position.vaultPda,
+        });
+        expect(result).toMatchObject({
+            executed: true,
+            initTx: 'sport-position-init-tx',
+            fundingTx: 'sport-position-fund-tx',
+            tx: 'sport-position-fund-tx',
+            positionId: draft.position.id,
+            confirmation: {
+                matched: false,
+                status: 'funded_open',
+            },
+        });
+        expect(sportPositionRows.get(draft.position.id)).toMatchObject({
+            status: 'funded_open',
+            fundingTx: 'sport-position-fund-tx',
+            fundedLamports: '30000000',
+            remainingLamports: '30000000',
+        });
+        expect(fundingEventRows.map((event) => event.event)).toEqual(
+            expect.arrayContaining(['funding_execution_started', 'funding_executed', 'funded_open'])
+        );
+    });
+
+    it('leaves a draft retryable when middleman funding execution fails', async () => {
+        middlemanForwarderMock.forwardSportPositionFunding.mockResolvedValueOnce({
+            success: false,
+            error: 'owner_balance_too_low_for_position_funding',
+        });
+        const { executeSportPositionFunding, postSportPosition } = await import('../src/services/sportPosition.service');
+        const draft: any = await postSportPosition(MAKER, {
+            fixtureId: '18198205',
+            selection: 'draw',
+            side: 'lay',
+            stakeSol: '0.02',
+        });
+
+        await expect(executeSportPositionFunding(MAKER, draft.position.id, {
+            walletKeypair: 'bad-or-empty-keypair',
+        })).rejects.toMatchObject({
+            message: 'owner_balance_too_low_for_position_funding',
+            statusCode: 502,
+        });
+        expect(sportPositionRows.get(draft.position.id)).toMatchObject({
+            status: 'funding_required',
+        });
+        expect(sportPositionRows.get(draft.position.id).fundingTx).toBeUndefined();
+        expect(fundingEventRows.map((event) => event.event)).toEqual(
+            expect.arrayContaining(['funding_execution_started', 'funding_execution_failed'])
+        );
     });
 
     it('FIFO matches only after both exact equal-stake opposite positions are funded', async () => {

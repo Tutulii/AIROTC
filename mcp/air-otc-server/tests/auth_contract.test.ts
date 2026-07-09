@@ -19,6 +19,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_post_position", "offers:write"],
   ["airotc_sport_accept_position", "offers:write"],
   ["airotc_sport_confirm_position_funding", "offers:write"],
+  ["airotc_sport_execute_funding", "offers:write"],
   ["airotc_sport_cancel_position", "offers:write"],
   ["airotc_sport_get_position", "offers:read"],
   ["airotc_sport_get_position_fills", "offers:read"],
@@ -243,6 +244,17 @@ assert.deepEqual(
   sportConfirmFundingTool.inputSchema.required,
   ["wallet", "positionId"],
   "sport_confirm_position_funding must require wallet and position id"
+);
+
+const sportExecuteFundingTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_execute_funding");
+assert.deepEqual(
+  sportExecuteFundingTool.inputSchema.required,
+  ["wallet", "positionId"],
+  "sport_execute_funding must require wallet and position id"
+);
+assert.ok(
+  sportExecuteFundingTool.inputSchema.properties.walletKeypair,
+  "sport_execute_funding must expose optional walletKeypair"
 );
 
 const sportCancelPositionTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_cancel_position");

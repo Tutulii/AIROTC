@@ -12,6 +12,7 @@ import {
     acceptSportPosition,
     cancelSportPosition,
     confirmSportPositionFunding,
+    executeSportPositionFunding,
     getSportPosition,
     listMySportFills,
     listMySportPositions,
@@ -74,6 +75,18 @@ router.post('/positions/:id/confirm-funding', authenticateSolana, async (req: Re
         res.status(data.matched === true ? 201 : 200).json({ success: true, data });
     } catch (error: any) {
         sendError(res, error, 'Failed to confirm SPORT position funding');
+    }
+});
+
+router.post('/positions/:id/execute-funding', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await executeSportPositionFunding(requireWallet(req), req.params.id, {
+            walletKeypair: req.body?.walletKeypair,
+            ownerKeypair: req.body?.ownerKeypair,
+        });
+        res.status(data.confirmation && (data.confirmation as any).matched === true ? 201 : 200).json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to execute SPORT position funding');
     }
 });
 
