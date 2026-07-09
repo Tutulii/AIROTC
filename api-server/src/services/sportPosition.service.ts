@@ -590,6 +590,12 @@ function serializePosition(row: any): Record<string, unknown> {
     const remainingLamports = positionRemainingLamports(row);
     const refundedLamports = bigintString(row.refundedLamports);
     const fills = Array.isArray(row.fills) ? row.fills.map(serializeFill) : undefined;
+    const nowMs = Date.now();
+    const fundingExpiresAtIso = row.fundingExpiresAt instanceof Date ? row.fundingExpiresAt.toISOString() : row.fundingExpiresAt || null;
+    const expiresAtIso = row.expiresAt instanceof Date ? row.expiresAt.toISOString() : row.expiresAt;
+    const fundingWindowExpired = Boolean(fundingExpiresAtIso && new Date(fundingExpiresAtIso).getTime() <= nowMs);
+    const liquidityWindowExpired = Boolean(expiresAtIso && new Date(expiresAtIso).getTime() <= nowMs);
+    const hasOpenLiquidity = ['funded_open', 'partially_filled'].includes(row.status) && BigInt(remainingLamports || '0') > 0n;
     return {
         id: row.id,
         fixtureId: row.fixtureId,
@@ -611,7 +617,13 @@ function serializePosition(row: any): Record<string, unknown> {
         fundingTx: row.fundingTx || null,
         fundedLamports: row.fundedLamports || null,
         fundedAt: row.fundedAt instanceof Date ? row.fundedAt.toISOString() : row.fundedAt || null,
-        fundingExpiresAt: row.fundingExpiresAt instanceof Date ? row.fundingExpiresAt.toISOString() : row.fundingExpiresAt || null,
+        fundingExpiresAt: fundingExpiresAtIso,
+        fundingWindow: {
+            expiresAt: fundingExpiresAtIso,
+            appliesToStatus: 'funding_required',
+            expired: fundingWindowExpired,
+            note: 'Funding expiry only applies before stake is locked. Funded liquidity remains open until liquidityWindow.expiresAt.',
+        },
         cancelTx: row.cancelTx || null,
         matchedAt: row.matchedAt instanceof Date ? row.matchedAt.toISOString() : row.matchedAt || null,
         matchedPositionId: row.matchedPositionId || null,
@@ -619,7 +631,13 @@ function serializePosition(row: any): Record<string, unknown> {
         offerId: row.offerId || null,
         ticketId: row.ticketId || null,
         fundingInstructions: row.status === 'funding_required' ? fundingInstructions(row) : null,
-        expiresAt: row.expiresAt instanceof Date ? row.expiresAt.toISOString() : row.expiresAt,
+        expiresAt: expiresAtIso,
+        liquidityWindow: {
+            expiresAt: expiresAtIso,
+            appliesToStatus: ['funded_open', 'partially_filled'],
+            expired: liquidityWindowExpired,
+        },
+        autoRefundEligibleAt: hasOpenLiquidity ? expiresAtIso : null,
         clientOrderId: row.clientOrderId || null,
         ...(fills ? { fills } : {}),
         createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,

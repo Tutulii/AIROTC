@@ -336,6 +336,29 @@ function getFundingSessionKeypair(wallet: string, authToken?: string): string | 
   return fundingSessions.get(fundingSessionKey(wallet, authToken))?.secretKeyBase58;
 }
 
+function getFundingSessionStatus(wallet: string, authToken?: string): Record<string, unknown> {
+  pruneExpiredFundingSessions();
+  const session = fundingSessions.get(fundingSessionKey(wallet, authToken));
+  if (!session) {
+    return {
+      wallet,
+      active: false,
+      storage: "mcp_process_memory_only",
+      note: "No in-memory funding session is active for this wallet and MCP token.",
+    };
+  }
+  const ttlRemainingSeconds = Math.max(0, Math.ceil((session.expiresAtMs - Date.now()) / 1000));
+  return {
+    wallet,
+    active: true,
+    sessionId: session.sessionId,
+    storage: "mcp_process_memory_only",
+    createdAt: new Date(session.createdAtMs).toISOString(),
+    expiresAt: new Date(session.expiresAtMs).toISOString(),
+    ttlRemainingSeconds,
+  };
+}
+
 function clearFundingSession(wallet: string, authToken?: string): Record<string, unknown> {
   pruneExpiredFundingSessions();
   const key = fundingSessionKey(wallet, authToken);
@@ -1589,6 +1612,25 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_funding_session_status",
+    title: "Sport Funding Session Status",
+    description:
+      "Check whether this wallet and MCP token currently have an active in-memory SPORT funding session. Does not return secret key material. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(getFundingSessionStatus(wallet, args.authToken));
+    },
+  },
+  {
     name: "airotc_sport_clear_funding_session",
     title: "Sport Clear Funding Session",
     description:
@@ -1611,7 +1653,7 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_execute_funding",
     title: "Sport Execute Funding",
     description:
-      "Initialize and fund a SPORT position vault on-chain, then confirm funding through AIR OTC. Devnet agent automation path; requires a 64-byte Solana wallet keypair via walletKeypair or AIR_OTC_WALLET_PRIVATE_KEY. Requires offers:write scope.",
+      "Initialize and fund a SPORT position vault on-chain, then confirm funding through AIR OTC. Devnet agent automation path; uses walletKeypair, a registered funding session, or AIR_OTC_WALLET_PRIVATE_KEY. Requires offers:write scope.",
     scope: "offers:write",
     inputSchema: objectSchema(
       {
@@ -1621,7 +1663,7 @@ const tools: ToolDefinition[] = [
         walletKeypair: {
           type: "string",
           description:
-            "Optional base58-encoded 64-byte Solana secret key or JSON array string. If omitted, AIR_OTC_WALLET_PRIVATE_KEY from the MCP runtime is used.",
+            "Optional base58-encoded 64-byte Solana secret key or JSON array string. If omitted, the MCP runtime uses a registered funding session first, then AIR_OTC_WALLET_PRIVATE_KEY.",
         },
       },
       ["wallet", "positionId"]

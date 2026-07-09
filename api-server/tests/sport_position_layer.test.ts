@@ -335,6 +335,17 @@ describe('SPORT position layer', () => {
                 status: 'funding_required',
                 clientOrderId: 'order-1',
                 vaultVersion: 'v2',
+                fundingWindow: {
+                    expiresAt: '2026-07-07T11:00:00.000Z',
+                    appliesToStatus: 'funding_required',
+                    expired: false,
+                },
+                liquidityWindow: {
+                    expiresAt: STARTS_AT.toISOString(),
+                    appliesToStatus: ['funded_open', 'partially_filled'],
+                    expired: false,
+                },
+                autoRefundEligibleAt: null,
             },
             fundingInstructions: {
                 type: 'sport_position_prefund',
@@ -438,6 +449,19 @@ describe('SPORT position layer', () => {
             confirmation: {
                 matched: false,
                 status: 'funded_open',
+                position: {
+                    fundingWindow: {
+                        expiresAt: '2026-07-07T11:00:00.000Z',
+                        appliesToStatus: 'funding_required',
+                        expired: false,
+                    },
+                    liquidityWindow: {
+                        expiresAt: STARTS_AT.toISOString(),
+                        appliesToStatus: ['funded_open', 'partially_filled'],
+                        expired: false,
+                    },
+                    autoRefundEligibleAt: STARTS_AT.toISOString(),
+                },
             },
         });
         expect(sportPositionRows.get(draft.position.id)).toMatchObject({

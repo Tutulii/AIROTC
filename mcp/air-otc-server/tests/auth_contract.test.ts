@@ -22,6 +22,7 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_counter_offer", "offers:write"],
   ["airotc_sport_confirm_position_funding", "offers:write"],
   ["airotc_sport_register_funding_session", "offers:write"],
+  ["airotc_sport_funding_session_status", "offers:write"],
   ["airotc_sport_clear_funding_session", "offers:write"],
   ["airotc_sport_execute_funding", "offers:write"],
   ["airotc_sport_cancel_position", "offers:write"],
@@ -293,6 +294,13 @@ assert.deepEqual(
   sportClearFundingSessionTool.inputSchema.required,
   ["wallet"],
   "sport_clear_funding_session must require wallet"
+);
+
+const sportFundingSessionStatusTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_funding_session_status");
+assert.deepEqual(
+  sportFundingSessionStatusTool.inputSchema.required,
+  ["wallet"],
+  "sport_funding_session_status must require wallet"
 );
 
 const sportExecuteFundingTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_execute_funding");
