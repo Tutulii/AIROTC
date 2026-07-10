@@ -11,6 +11,14 @@ import {
     upsertStrategyTemplate,
 } from '../services/sportAgentTools.service';
 import {
+    cancelSportIntent,
+    createSportIntent,
+    findSportMatchingLiquidity,
+    getSportEventGuide,
+    listMySportIntents,
+    listSportIntents,
+} from '../services/sportIntent.service';
+import {
     acceptSportPosition,
     cancelSportPosition,
     clearSportFundingSession,
@@ -46,6 +54,84 @@ function requireWallet(req: Request): string {
     }
     return req.wallet;
 }
+
+router.get('/events/guide', async (_req: Request, res: Response): Promise<void> => {
+    try {
+        res.json({ success: true, data: getSportEventGuide() });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to get SPORT event guide');
+    }
+});
+
+router.post('/intents', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await createSportIntent(requireWallet(req), {
+            fixtureId: req.body?.fixtureId,
+            selection: req.body?.selection,
+            side: req.body?.side,
+            stakeSol: req.body?.stakeSol,
+            minStakeSol: req.body?.minStakeSol,
+            maxStakeSol: req.body?.maxStakeSol,
+            expiresAt: req.body?.expiresAt,
+            note: req.body?.note,
+            clientIntentId: req.body?.clientIntentId,
+        });
+        res.status(201).json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to create SPORT discovery intent');
+    }
+});
+
+router.get('/intents', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await listSportIntents({
+            fixtureId: req.query.fixtureId,
+            selection: req.query.selection,
+            side: req.query.side,
+            status: req.query.status,
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list SPORT discovery intents');
+    }
+});
+
+router.get('/me/intents', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await listMySportIntents(requireWallet(req), {
+            status: req.query.status,
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to list wallet SPORT intents');
+    }
+});
+
+router.post('/intents/:id/cancel', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await cancelSportIntent(requireWallet(req), req.params.id);
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to cancel SPORT discovery intent');
+    }
+});
+
+router.get('/liquidity/matching', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const data = await findSportMatchingLiquidity(requireWallet(req), {
+            fixtureId: req.query.fixtureId,
+            selection: req.query.selection,
+            side: req.query.side,
+            stakeSol: req.query.stakeSol,
+            limit: req.query.limit,
+        });
+        res.json({ success: true, data });
+    } catch (error: any) {
+        sendError(res, error, 'Failed to find matching SPORT liquidity');
+    }
+});
 
 router.post('/positions', authenticateSolana, async (req: Request, res: Response): Promise<void> => {
     try {

@@ -88,6 +88,21 @@ export const AGENT_EVENT_CATALOG = [
         channels: LIVE_AND_TELEGRAM_CHANNELS,
     },
     {
+        event: 'intent.created',
+        description: 'A SPORT discovery intent was registered for future liquidity matching.',
+        channels: LIVE_CHANNELS,
+    },
+    {
+        event: 'intent.match_available',
+        description: 'A funded SPORT position is available for one of the agent wallet intents.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
+        event: 'liquidity.available',
+        description: 'New SPORT liquidity became available for a subscribed fixture/selection/side.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
         event: 'reputation.update',
         description: 'An agent reputation score changed.',
         channels: LIVE_CHANNELS,
@@ -120,6 +135,9 @@ export const LEGACY_WS_EVENT_ALIASES: Partial<Record<AgentEventName, string[]>> 
     'position.refunded': ['position_refunded'],
     'match.awaiting_result': ['match_awaiting_result'],
     'match.settled': ['match_settled'],
+    'intent.created': ['intent_created'],
+    'intent.match_available': ['intent_match_available'],
+    'liquidity.available': ['liquidity_available'],
     'reputation.update': ['reputation_update'],
 };
 

@@ -354,6 +354,30 @@ model SportPositionFundingEvent {
   @@index([event, createdAt])
 }
 
+model SportIntent {
+  id                String    @id @default(uuid())
+  wallet            String
+  fixtureId         String
+  marketType        String    @default("1X2_PARTICIPANT_RESULT")
+  selection         String
+  side              String
+  stakeLamports     String?
+  minStakeLamports  String?
+  maxStakeLamports  String?
+  status            String    @default("active")
+  note              String?
+  clientIntentId    String?
+  expiresAt         DateTime?
+  lastNotifiedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([wallet, clientIntentId])
+  @@index([fixtureId, selection, side, status, createdAt])
+  @@index([wallet, status, createdAt])
+  @@index([expiresAt, status])
+}
+
 model SportFundingSession {
   id                 String    @id @default(uuid())
   wallet             String    @unique

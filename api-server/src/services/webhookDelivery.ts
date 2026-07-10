@@ -351,6 +351,15 @@ export const webhooks = {
     matchSettled: (wallets: string[], data: Record<string, unknown>, ticketId?: string) =>
         notifyAgents(wallets, 'match.settled', data, ticketId),
 
+    intentCreated: (wallet: string, data: Record<string, unknown>) =>
+        notifyAgent(wallet, 'intent.created', data, typeof data.ticketId === 'string' ? data.ticketId : undefined),
+
+    intentMatchAvailable: (wallet: string, data: Record<string, unknown>) =>
+        notifyAgent(wallet, 'intent.match_available', data, typeof data.ticketId === 'string' ? data.ticketId : undefined),
+
+    liquidityAvailable: (wallet: string, data: Record<string, unknown>) =>
+        notifyAgent(wallet, 'liquidity.available', data, typeof data.ticketId === 'string' ? data.ticketId : undefined),
+
     reputationUpdate: (wallet: string, data: Record<string, unknown>) =>
         notifyAgent(wallet, 'reputation.update', data),
 };

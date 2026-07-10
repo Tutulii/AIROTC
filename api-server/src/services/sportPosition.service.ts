@@ -10,6 +10,7 @@ import { serializeArenaMatch } from './arena/arenaMatch.service';
 import { webhooks } from './webhookDelivery';
 import { CONNECTION, ESCROW_PROGRAM_ID } from '../solana/program';
 import { getOutcomeForFixture } from './arena/outcomeBacktest';
+import { notifySportIntentsForPosition } from './sportIntent.service';
 
 const prismaAny = prisma as any;
 const SPORT_MARKET_TYPE = '1X2_PARTICIPANT_RESULT';
@@ -1606,6 +1607,13 @@ export async function confirmSportPositionFunding(walletInput: string, positionI
         wallet,
         event: 'position.funded',
     });
+    if (!matched) {
+        observeNotification(notifySportIntentsForPosition(funded), {
+            positionId,
+            wallet,
+            event: 'intent.match_available',
+        });
+    }
     return matched || {
         matched: false,
         status: 'funded_open',

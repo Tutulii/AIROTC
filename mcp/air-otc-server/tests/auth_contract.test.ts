@@ -41,6 +41,12 @@ const expectedScopes = new Map<string, string | undefined>([
   ["airotc_sport_get_settlement_status", "deals:read"],
   ["airotc_sport_get_my_history", "deals:read"],
   ["airotc_sport_discover_agents", "offers:read"],
+  ["airotc_sport_create_intent", "offers:write"],
+  ["airotc_sport_list_intents", "offers:read"],
+  ["airotc_sport_list_my_intents", "offers:read"],
+  ["airotc_sport_cancel_intent", "offers:write"],
+  ["airotc_sport_find_matching_liquidity", "offers:read"],
+  ["airotc_sport_get_event_guide", undefined],
   ["airotc_sport_list_strategy_templates", "offers:read"],
   ["airotc_sport_list_strategy_presets", "offers:read"],
   ["airotc_sport_save_strategy_template", "offers:write"],
@@ -462,6 +468,56 @@ assert.equal(
   sportDiscoveryTool.inputSchema.properties.limit.maximum,
   50,
   "sport_discover_agents must cap directory page size"
+);
+
+const sportCreateIntentTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_create_intent");
+assert.deepEqual(
+  sportCreateIntentTool.inputSchema.required,
+  ["wallet", "fixtureId", "selection"],
+  "sport_create_intent must require wallet, fixture, and selection"
+);
+assert.ok(
+  sportCreateIntentTool.inputSchema.properties.side.enum.includes("back"),
+  "sport_create_intent must expose back/lay side"
+);
+
+const sportListIntentTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_list_intents");
+assert.equal(
+  sportListIntentTool.inputSchema.properties.limit.maximum,
+  100,
+  "sport_list_intents must cap page size"
+);
+
+const sportListMyIntentsTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_list_my_intents");
+assert.deepEqual(
+  sportListMyIntentsTool.inputSchema.required,
+  ["wallet"],
+  "sport_list_my_intents must require wallet"
+);
+
+const sportCancelIntentTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_cancel_intent");
+assert.deepEqual(
+  sportCancelIntentTool.inputSchema.required,
+  ["wallet", "intentId"],
+  "sport_cancel_intent must require wallet and intent id"
+);
+
+const sportFindLiquidityTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_find_matching_liquidity");
+assert.deepEqual(
+  sportFindLiquidityTool.inputSchema.required,
+  ["wallet", "fixtureId", "selection"],
+  "sport_find_matching_liquidity must require wallet, fixture, and selection"
+);
+assert.equal(
+  sportFindLiquidityTool.inputSchema.properties.limit.maximum,
+  100,
+  "sport_find_matching_liquidity must cap page size"
+);
+
+const sportEventGuideTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_get_event_guide");
+assert.ok(
+  sportEventGuideTool.inputSchema.properties.authToken,
+  "sport_get_event_guide may accept authToken but must not require it"
 );
 
 const sportTemplateListTool = __test.tools.find((candidate: any) => candidate.name === "airotc_sport_list_strategy_templates");
