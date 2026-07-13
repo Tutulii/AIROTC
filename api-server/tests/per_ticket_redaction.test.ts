@@ -166,4 +166,38 @@ describe('PER ticket redaction', () => {
         expect(result.offer.price).toBe(7);
         expect(result.offer.collateral).toBe(1.5);
     });
+
+    it('presents SPORT ticket terms as stake without public collateral wording', async () => {
+        prismaMock.ticket.findUnique.mockResolvedValue({
+            id: 'ticket-sport',
+            status: 'awaiting_deposits',
+            rollupMode: 'SPORT',
+            buyer: 'buyer-wallet',
+            seller: 'seller-wallet',
+            createdAt: new Date().toISOString(),
+            offer: {
+                id: 'offer-sport',
+                mode: 'sell',
+                asset: 'TXLINE:18179549:1X2:part1',
+                price: 0.3,
+                collateral: 0,
+                fixtureId: '18179549',
+                marketType: '1X2',
+                selection: 'part1',
+            },
+            messages: [],
+        });
+
+        const { getTicketByIdService } = await import('../src/services/ticket.service');
+        const result = await getTicketByIdService('ticket-sport', 'buyer-wallet');
+
+        expect(result.offer).toMatchObject({
+            price: 0.3,
+            stake: 0.3,
+            stakeModel: 'equal_stake',
+            fixtureId: '18179549',
+            selection: 'part1',
+        });
+        expect(Object.prototype.hasOwnProperty.call(result.offer, 'collateral')).toBe(false);
+    });
 });

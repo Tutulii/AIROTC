@@ -168,6 +168,17 @@ describe('TxLINE Day 4 Routes', () => {
 });
 
 describe('Arena Match Routes', () => {
+    it('GET /v1/arena/settlement/automation exposes SPORT auto-settlement status', async () => {
+        const { status, json } = await req('GET', '/v1/arena/settlement/automation');
+        expect(status).toBe(200);
+        expect(json.success).toBe(true);
+        expect(json.data.mode).toBe('SPORT');
+        expect(json.data).toHaveProperty('enabled');
+        expect(json.data).toHaveProperty('lastRunAt');
+        expect(json.data).toHaveProperty('lastResult');
+        expect(json.data.setAndForget).toBe(true);
+    });
+
     it('POST /v1/arena/matches rejects missing fixture or signal', async () => {
         const { status, json } = await req('POST', '/v1/arena/matches', {});
         expect(status).toBe(400);
@@ -186,6 +197,43 @@ describe('Arena Match Routes', () => {
             success: false,
             error: 'arena_maker_wallet_required',
         });
+    });
+});
+
+describe('SPORT Agent Routes', () => {
+    it('GET /v1/sport/me/history requires wallet auth', async () => {
+        const { status, json } = await req('GET', '/v1/sport/me/history');
+        expect(status).toBeGreaterThanOrEqual(400);
+        expect(json.success).toBe(false);
+    });
+
+    it('GET /v1/sport/strategy-templates requires wallet auth', async () => {
+        const { status, json } = await req('GET', '/v1/sport/strategy-templates');
+        expect(status).toBeGreaterThanOrEqual(400);
+        expect(json.success).toBe(false);
+    });
+
+    it('PUT /v1/sport/strategy-templates/:name requires wallet auth', async () => {
+        const { status, json } = await req('PUT', '/v1/sport/strategy-templates/standard_sell', {
+            defaults: {
+                mode: 'sell',
+                amount: 1,
+                price: 0.1,
+                collateral: 0.2,
+                marketType: '1X2',
+                selection: 'part1',
+            },
+        });
+        expect(status).toBeGreaterThanOrEqual(400);
+        expect(json.success).toBe(false);
+    });
+
+    it('POST /v1/sport/strategy-templates/:name/offers requires wallet auth', async () => {
+        const { status, json } = await req('POST', '/v1/sport/strategy-templates/standard_sell/offers', {
+            fixtureId: '18179549',
+        });
+        expect(status).toBeGreaterThanOrEqual(400);
+        expect(json.success).toBe(false);
     });
 });
 

@@ -169,7 +169,7 @@ describe("PER marketplace offer flow", () => {
           price: 0.1,
           amount: 1,
           mode: "sell",
-          collateral: 0.3,
+          collateral: 0,
           rollupMode: "SPORT",
           fixtureId: "fixture-1",
           marketType: "1X2_PARTICIPANT_RESULT",
@@ -201,7 +201,6 @@ describe("PER marketplace offer flow", () => {
         price: 0.1,
         amount: 1,
         mode: "sell",
-        collateral: 0.3,
         rollupMode: "SPORT",
         fixtureId: "fixture-1",
         marketType: "1X2_PARTICIPANT_RESULT",
@@ -216,6 +215,7 @@ describe("PER marketplace offer flow", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           rollupMode: "SPORT",
+          collateral: 0,
           fixtureId: "fixture-1",
           marketType: "1X2_PARTICIPANT_RESULT",
           selection: "part1",
@@ -247,6 +247,8 @@ describe("PER marketplace offer flow", () => {
         data: expect.objectContaining({
           id: "offer-sport-1",
           rollupMode: "SPORT",
+          stake: 0.1,
+          stakeModel: "equal_stake",
           fixtureId: "fixture-1",
         }),
         arenaMatch: expect.objectContaining({
@@ -257,6 +259,8 @@ describe("PER marketplace offer flow", () => {
         }),
       })
     );
+    const responseBody = (res.json as any).mock.calls[0][0];
+    expect(responseBody.data.collateral).toBeUndefined();
   });
 
   it("rejects SPORT offers without a fixture id", async () => {
@@ -374,6 +378,53 @@ describe("PER marketplace offer flow", () => {
         buyer: "buyer-wallet",
         seller: "seller-wallet",
         rollupMode: "PER",
+      })
+    );
+  });
+
+  it("creates accepted SPORT tickets directly in awaiting deposits", async () => {
+    const tx = {
+      offer: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "sport-offer-1",
+          status: "active",
+          mode: "sell",
+          rollupMode: "SPORT",
+          ticket: null,
+          creator: { wallet: "seller-wallet" },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      ticket: {
+        create: vi.fn().mockResolvedValue({
+          id: "sport-ticket-1",
+          buyer: "buyer-wallet",
+          seller: "seller-wallet",
+          status: "awaiting_deposits",
+          rollupMode: "SPORT",
+        }),
+      },
+    };
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx));
+
+    const { acceptOfferService } = await import("../src/services/ticket.service");
+    const ticket = await acceptOfferService("sport-offer-1", "buyer-wallet");
+
+    expect(tx.ticket.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          buyer: "buyer-wallet",
+          seller: "seller-wallet",
+          status: "awaiting_deposits",
+          rollupMode: "SPORT",
+        }),
+      })
+    );
+    expect(ticket).toEqual(
+      expect.objectContaining({
+        id: "sport-ticket-1",
+        status: "awaiting_deposits",
+        rollupMode: "SPORT",
       })
     );
   });

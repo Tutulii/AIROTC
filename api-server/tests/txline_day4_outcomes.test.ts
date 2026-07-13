@@ -34,7 +34,10 @@ const prismaMock = {
             const rows = where?.fixtureId
                 ? outcomeRows.filter((row) => fixtureMatches(row, where.fixtureId))
                 : outcomeRows;
-            return typeof take === 'number' ? rows.slice(0, take) : rows;
+            const sourceFiltered = where?.source?.startsWith
+                ? rows.filter((row) => String(row.source || '').startsWith(where.source.startsWith))
+                : rows;
+            return typeof take === 'number' ? sourceFiltered.slice(0, take) : sourceFiltered;
         }),
     },
     arenaScoreUpdate: {
@@ -104,6 +107,35 @@ describe('TxLINE Day 4 outcomes and backtest', () => {
         });
     });
 
+    it('derives a TxLINE outcome from game_finalised rows with omitted zero-goal fields', async () => {
+        const { deriveOutcomeFromScoreUpdate } = await import('../src/services/arena/outcomeBacktest');
+
+        const outcome = deriveOutcomeFromScoreUpdate({
+            fixtureId: '18179552',
+            status: 'final',
+            source: 'txline',
+            sourceUpdateId: 'score-finalised',
+            sourceTimestamp: new Date('2026-07-03T04:20:05.521Z'),
+            raw: {
+                GameState: 'scheduled',
+                Action: 'game_finalised',
+                Score: {
+                    Participant1: { Total: { Goals: 2, Corners: 4 } },
+                    Participant2: { Total: { YellowCards: 2, Corners: 2 } },
+                },
+            },
+        });
+
+        expect(outcome).toMatchObject({
+            fixtureId: '18179552',
+            homeScore: 2,
+            awayScore: 0,
+            winner: 'part1',
+            source: 'txline',
+            sourceUpdateId: 'score-finalised',
+        });
+    });
+
     it('does not create outcomes for non-final score updates', async () => {
         const { deriveOutcomeFromScoreUpdate } = await import('../src/services/arena/outcomeBacktest');
 
@@ -159,6 +191,124 @@ describe('TxLINE Day 4 outcomes and backtest', () => {
             homeScore: 2,
             awayScore: 2,
             winner: 'draw',
+        });
+    });
+
+    it('ignores stale fallback score rows when deriving outcomes', async () => {
+        const { deriveOutcomesFromStoredScores } = await import('../src/services/arena/outcomeBacktest');
+        scoreRows.push(
+            {
+                id: 'score-fallback',
+                fixtureId: 'fixture-1',
+                homeScore: 9,
+                awayScore: 0,
+                status: 'completed',
+                source: 'espn_scoreboard_fallback',
+                sourceUpdateId: 'fallback-final',
+                sourceTimestamp: new Date('2026-07-01T21:00:00.000Z'),
+                createdAt: new Date('2026-07-01T21:00:00.000Z'),
+                raw: { GameState: 'completed' },
+            },
+            {
+                id: 'score-txline',
+                fixtureId: 'fixture-1',
+                homeScore: 1,
+                awayScore: 2,
+                status: 'completed',
+                source: 'txline',
+                sourceUpdateId: 'txline-final',
+                sourceTimestamp: new Date('2026-07-01T20:00:00.000Z'),
+                createdAt: new Date('2026-07-01T20:00:00.000Z'),
+                raw: { GameState: 'completed' },
+            }
+        );
+
+        const result = await deriveOutcomesFromStoredScores('fixture-1');
+
+        expect(result).toMatchObject({
+            scannedScoreRows: 2,
+            storedOutcomes: 1,
+        });
+        expect(outcomeRows).toHaveLength(1);
+        expect(outcomeRows[0]).toMatchObject({
+            fixtureId: 'fixture-1',
+            homeScore: 1,
+            awayScore: 2,
+            winner: 'part2',
+            source: 'txline',
+        });
+    });
+
+    it('hides fallback outcomes from TxLINE outcome reads', async () => {
+        const { getOutcomeForFixture, listOutcomes } = await import('../src/services/arena/outcomeBacktest');
+        outcomeRows.push(
+            {
+                id: 'outcome-fallback',
+                fixtureId: 'fixture-fallback',
+                status: 'finished',
+                homeScore: 9,
+                awayScore: 0,
+                winner: 'part1',
+                source: 'espn_scoreboard_fallback',
+                sourceTimestamp: new Date('2026-07-01T21:00:00.000Z'),
+                settledAt: new Date('2026-07-01T21:00:00.000Z'),
+                raw: {},
+                createdAt: new Date('2026-07-01T21:00:00.000Z'),
+                updatedAt: new Date('2026-07-01T21:00:00.000Z'),
+            },
+            {
+                id: 'outcome-txline',
+                fixtureId: 'fixture-txline',
+                status: 'finished',
+                homeScore: 1,
+                awayScore: 2,
+                winner: 'part2',
+                source: 'txline_demo_replay',
+                sourceTimestamp: new Date('2026-07-01T20:00:00.000Z'),
+                settledAt: new Date('2026-07-01T20:00:00.000Z'),
+                raw: {},
+                createdAt: new Date('2026-07-01T20:00:00.000Z'),
+                updatedAt: new Date('2026-07-01T20:00:00.000Z'),
+            }
+        );
+
+        await expect(getOutcomeForFixture('fixture-fallback')).rejects.toThrow('txline_outcome_not_found');
+        await expect(getOutcomeForFixture('fixture-txline')).resolves.toMatchObject({
+            fixtureId: 'fixture-txline',
+            source: 'txline_demo_replay',
+        });
+        await expect(listOutcomes(10)).resolves.toMatchObject({
+            count: 1,
+            outcomes: [
+                {
+                    fixtureId: 'fixture-txline',
+                    source: 'txline_demo_replay',
+                },
+            ],
+        });
+    });
+
+    it('derives a trusted TxLINE outcome from stored score replay before returning 404', async () => {
+        const { getOutcomeForFixture } = await import('../src/services/arena/outcomeBacktest');
+        scoreRows.push({
+            fixtureId: 'fixture-replay-only',
+            homeScore: 3,
+            awayScore: 1,
+            status: 'finished',
+            source: 'txline',
+            sourceUpdateId: 'score-replay-final',
+            sourceTimestamp: new Date('2026-07-01T22:00:00.000Z'),
+            raw: { GameState: 'finished' },
+            createdAt: new Date('2026-07-01T22:00:00.000Z'),
+            updatedAt: new Date('2026-07-01T22:00:00.000Z'),
+        });
+
+        await expect(getOutcomeForFixture('fixture-replay-only')).resolves.toMatchObject({
+            fixtureId: 'fixture-replay-only',
+            homeScore: 3,
+            awayScore: 1,
+            winner: 'part1',
+            source: 'txline',
         });
     });
 

@@ -58,6 +58,51 @@ export const AGENT_EVENT_CATALOG = [
         channels: LIVE_CHANNELS,
     },
     {
+        event: 'position.funded',
+        description: 'A SPORT position stake was locked and became live liquidity.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
+        event: 'position.filled',
+        description: 'A SPORT position was filled or partially filled against another agent.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
+        event: 'position.expired',
+        description: 'A SPORT position expired before being filled.',
+        channels: LIVE_CHANNELS,
+    },
+    {
+        event: 'position.refunded',
+        description: 'Unmatched SPORT position liquidity was refunded.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
+        event: 'match.awaiting_result',
+        description: 'A SPORT match/ticket is funded and waiting for the TxLINE result.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
+        event: 'match.settled',
+        description: 'A SPORT match was settled from a TxLINE final result.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
+        event: 'intent.created',
+        description: 'A SPORT discovery intent was registered for future liquidity matching.',
+        channels: LIVE_CHANNELS,
+    },
+    {
+        event: 'intent.match_available',
+        description: 'A funded SPORT position is available for one of the agent wallet intents.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
+        event: 'liquidity.available',
+        description: 'New SPORT liquidity became available for a subscribed fixture/selection/side.',
+        channels: LIVE_AND_TELEGRAM_CHANNELS,
+    },
+    {
         event: 'reputation.update',
         description: 'An agent reputation score changed.',
         channels: LIVE_CHANNELS,
@@ -84,6 +129,15 @@ export const LEGACY_WS_EVENT_ALIASES: Partial<Record<AgentEventName, string[]>> 
     'deal.completed': ['deal_phase_changed'],
     'deal.cancelled': ['deal_phase_changed'],
     'deal.refunded': ['deal_phase_changed'],
+    'position.funded': ['position_funded'],
+    'position.filled': ['position_filled'],
+    'position.expired': ['position_expired'],
+    'position.refunded': ['position_refunded'],
+    'match.awaiting_result': ['match_awaiting_result'],
+    'match.settled': ['match_settled'],
+    'intent.created': ['intent_created'],
+    'intent.match_available': ['intent_match_available'],
+    'liquidity.available': ['liquidity_available'],
     'reputation.update': ['reputation_update'],
 };
 

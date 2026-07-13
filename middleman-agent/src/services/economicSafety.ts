@@ -36,6 +36,7 @@ export const economicSafety = {
         priceSol: number;
         collateralBuyerSol: number;
         collateralSellerSol: number;
+        collateralPolicy?: "standard" | "sport_equal_stake";
     }): Promise<EconomicValidation> {
         const errors: string[] = [];
         const warnings: string[] = [];
@@ -46,7 +47,8 @@ export const economicSafety = {
         }
 
         // 2. Minimum collateral ratio
-        if (params.priceSol > 0) {
+        const enforceStandardCollateral = params.collateralPolicy !== "sport_equal_stake";
+        if (enforceStandardCollateral && params.priceSol > 0) {
             const buyerRatio = params.collateralBuyerSol / params.priceSol;
             const sellerRatio = params.collateralSellerSol / params.priceSol;
 

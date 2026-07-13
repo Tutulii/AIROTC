@@ -21,7 +21,7 @@ describe('TxLINE Day 1 snapshot normalization', () => {
                         sport: 'football',
                         home: { name: 'Argentina' },
                         away: { name: 'Brazil' },
-                        startTime: '2026-07-01T18:00:00.000Z',
+                        startTime: '2099-07-01T18:00:00.000Z',
                         status: 'scheduled',
                         merkleRoot: 'root-abc',
                     },
@@ -35,10 +35,108 @@ describe('TxLINE Day 1 snapshot normalization', () => {
             sport: 'football',
             homeTeam: 'Argentina',
             awayTeam: 'Brazil',
-            status: 'scheduled',
+            status: 'upcoming',
         });
-        expect(fixtures[0].startsAt?.toISOString()).toBe('2026-07-01T18:00:00.000Z');
+        expect(fixtures[0].startsAt?.toISOString()).toBe('2099-07-01T18:00:00.000Z');
         expect(fixtures[0].raw).toHaveProperty('merkleRoot', 'root-abc');
+    });
+
+    it('maps TxLINE fixture statuses into AIR OTC buckets', () => {
+        const fixtures = normalizeFixturesPayload([
+            {
+                FixtureId: 18175918,
+                Competition: 'World Cup',
+                Participant1: 'Argentina',
+                Participant2: 'Cape Verde',
+                GameState: 1,
+                StartTime: 4102444800000,
+            },
+            {
+                FixtureId: 18176123,
+                Competition: 'World Cup',
+                Participant1: 'Australia',
+                Participant2: 'Egypt',
+                StartTime: 4102452000000,
+            },
+        ]);
+
+        expect(fixtures).toHaveLength(2);
+        expect(fixtures[0]).toMatchObject({
+            fixtureId: '18175918',
+            status: 'upcoming',
+            raw: {
+                GameState: 1,
+                source: 'txline',
+                sourceEndpoint: '/api/fixtures/snapshot',
+            },
+        });
+        expect(fixtures[1]).toMatchObject({
+            fixtureId: '18176123',
+            status: 'upcoming',
+        });
+        expect(fixtures[1].raw).toMatchObject({
+            marketSelections: ['part1', 'draw', 'part2'],
+            marketTypes: ['1X2_PARTICIPANT_RESULT'],
+        });
+    });
+
+    it('treats TxLINE fixtures without GameState as live during the early post-kickoff window', () => {
+        const fixtures = normalizeFixturesPayload([{
+            FixtureId: 18176123,
+            Competition: 'World Cup',
+            Participant1: 'Australia',
+            Participant2: 'Egypt',
+            StartTime: Date.now() - 30 * 60 * 1000,
+        }]);
+
+        expect(fixtures).toHaveLength(1);
+        expect(fixtures[0]).toMatchObject({
+            fixtureId: '18176123',
+            status: 'live',
+        });
+    });
+
+    it('does not keep stale GameState 1 fixtures in the upcoming bucket after the assumed live window', () => {
+        const fixtures = normalizeFixturesPayload([{
+            FixtureId: 18176124,
+            Competition: 'World Cup',
+            Participant1: 'Switzerland',
+            Participant2: 'Colombia',
+            GameState: 1,
+            StartTime: Date.now() - 5 * 60 * 60 * 1000,
+        }]);
+
+        expect(fixtures).toHaveLength(1);
+        expect(fixtures[0]).toMatchObject({
+            fixtureId: '18176124',
+            status: 'unknown',
+        });
+    });
+
+    it('treats score updates with stale GameState 1 as live when in-play evidence is present', () => {
+        const scores = normalizeScoresPayload({
+            FixtureId: 18179999,
+            GameState: 1,
+            Action: 'update',
+            Ts: 1783124800000,
+            Clock: { Running: true, Seconds: 3420 },
+            Score: {
+                Participant1: { Total: { Goals: 1 } },
+                Participant2: { Total: { Goals: 0 } },
+            },
+        });
+
+        expect(scores).toHaveLength(1);
+        expect(scores[0]).toMatchObject({
+            fixtureId: '18179999',
+            status: 'live',
+            homeScore: 1,
+            awayScore: 0,
+        });
+        expect(scores[0].raw.normalizedScoreState).toMatchObject({
+            status: 'live',
+            clock: { Running: true, Seconds: 3420 },
+        });
     });
 
     it('normalizes odds snapshots with implied probability', () => {
@@ -147,6 +245,70 @@ describe('TxLINE Day 1 snapshot normalization', () => {
         });
     });
 
+    it('normalizes single-object TxLINE SSE odds and score messages', () => {
+        const odds = normalizeOddsPayload({
+            FixtureId: 18179549,
+            MessageId: '1836172796:00003:000019-10021-stab',
+            Ts: 1783104139772,
+            Bookmaker: 'TXLineStablePriceDemargined',
+            SuperOddsType: '1X2_PARTICIPANT_RESULT',
+            GameState: null,
+            InRunning: false,
+            MarketParameters: null,
+            MarketPeriod: 'half=1',
+            PriceNames: ['part1', 'draw', 'part2'],
+            Prices: [2065, 3540, 3130],
+        });
+        const scores = normalizeScoresPayload({
+            FixtureId: 18176123,
+            GameState: 'live',
+            StartTime: 1783101600000,
+            Action: 'update',
+            Id: 1,
+            Ts: 1783101601000,
+            Score: {
+                Participant1: { Total: { Goals: 1 } },
+                Participant2: { Total: { Goals: 0 } },
+            },
+        });
+
+        expect(odds).toHaveLength(3);
+        expect(odds[0]).toMatchObject({
+            fixtureId: '18179549',
+            market: '1X2_PARTICIPANT_RESULT:half=1',
+            selection: 'part1',
+            odds: 2.065,
+        });
+        expect(scores).toHaveLength(1);
+        expect(scores[0]).toMatchObject({
+            fixtureId: '18176123',
+            homeScore: 1,
+            awayScore: 0,
+            status: 'live',
+        });
+    });
+
+    it('normalizes TxLINE final score snapshots with omitted zero-goal fields', () => {
+        const scores = normalizeScoresPayload({
+            FixtureId: 18179552,
+            GameState: 'scheduled',
+            Action: 'game_finalised',
+            Ts: 1783054805521,
+            Score: {
+                Participant1: { Total: { Goals: 2, Corners: 4 } },
+                Participant2: { Total: { YellowCards: 2, Corners: 2 } },
+            },
+        });
+
+        expect(scores).toHaveLength(1);
+        expect(scores[0]).toMatchObject({
+            fixtureId: '18179552',
+            homeScore: 2,
+            awayScore: 0,
+            status: 'final',
+        });
+    });
+
     it('parses server-sent TxLINE messages with JSON data', () => {
         const parsed = parseSseMessages('id: odds-1\nevent: odds\ndata: {"FixtureId":18172280}\n\n');
 
@@ -217,6 +379,7 @@ describe('TxLINE Day 1 snapshot normalization', () => {
         expect(config.demoReplayEndpoints).toContain('/v1/txline/demo-replay/seed');
         expect(config.demoReplayEndpoints).toContain('/v1/txline/demo-replay/proof');
         expect(config.proofModes).toEqual(['live_txline', 'demo_replay']);
+        expect(config.scoreboardFallbackEnabled).toBe(false);
     });
 
     it('calls TxLINE devnet snapshots with guest JWT and activated API token headers', async () => {
@@ -249,26 +412,9 @@ describe('TxLINE Day 1 snapshot normalization', () => {
         }
     });
 
-    it('falls back to live ESPN scoreboard fixtures when TxLINE token is absent', async () => {
+    it('does not use ESPN fixture fallback when TxLINE token is absent', async () => {
         const originalEnv = { ...process.env };
-        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-            ok: true,
-            json: async () => ({
-                events: [
-                    {
-                        id: '401',
-                        date: '2026-07-02T18:00:00.000Z',
-                        status: { type: { name: 'STATUS_SCHEDULED', state: 'pre', completed: false } },
-                        competitions: [{
-                            competitors: [
-                                { homeAway: 'home', score: '0', team: { displayName: 'Home FC' } },
-                                { homeAway: 'away', score: '0', team: { displayName: 'Away FC' } },
-                            ],
-                        }],
-                    },
-                ],
-            }),
-        } as Response);
+        const fetchMock = vi.spyOn(globalThis, 'fetch');
 
         try {
             delete process.env.TXLINE_API_TOKEN;
@@ -276,22 +422,8 @@ describe('TxLINE Day 1 snapshot normalization', () => {
             delete process.env.TXLINE_GUEST_JWT;
             delete process.env.TXLINE_SCOREBOARD_FALLBACK_ENABLED;
 
-            const fixtures = await fetchFixturesSnapshot();
-
-            expect(fixtures.length).toBeGreaterThan(0);
-            expect(fixtures[0]).toMatchObject({
-                homeTeam: 'Home FC',
-                awayTeam: 'Away FC',
-                status: 'scheduled',
-            });
-            expect(fixtures[0].fixtureId).toMatch(/^espn:/);
-            expect(fixtures[0].raw).toMatchObject({
-                source: 'espn_scoreboard_fallback',
-                fallbackFor: 'txline',
-            });
-            expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('site.api.espn.com'), expect.objectContaining({
-                method: 'GET',
-            }));
+            await expect(fetchFixturesSnapshot()).rejects.toThrow('TXLINE_API_TOKEN is required');
+            expect(fetchMock).not.toHaveBeenCalled();
         } finally {
             process.env = originalEnv;
             fetchMock.mockRestore();
@@ -299,26 +431,9 @@ describe('TxLINE Day 1 snapshot normalization', () => {
         }
     });
 
-    it('falls back to ESPN scoreboard scores for fallback fixtures', async () => {
+    it('does not use ESPN score fallback for old fallback fixture IDs', async () => {
         const originalEnv = { ...process.env };
-        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-            ok: true,
-            json: async () => ({
-                events: [
-                    {
-                        id: '401',
-                        date: '2026-07-02T18:00:00.000Z',
-                        status: { type: { name: 'STATUS_FINAL', state: 'post', completed: true } },
-                        competitions: [{
-                            competitors: [
-                                { homeAway: 'home', score: '3', team: { displayName: 'Home FC' } },
-                                { homeAway: 'away', score: '1', team: { displayName: 'Away FC' } },
-                            ],
-                        }],
-                    },
-                ],
-            }),
-        } as Response);
+        const fetchMock = vi.spyOn(globalThis, 'fetch');
 
         try {
             delete process.env.TXLINE_API_TOKEN;
@@ -326,21 +441,8 @@ describe('TxLINE Day 1 snapshot normalization', () => {
             delete process.env.TXLINE_GUEST_JWT;
             delete process.env.TXLINE_SCOREBOARD_FALLBACK_ENABLED;
 
-            const scores = await fetchScoresSnapshot('espn:mlb:401');
-
-            expect(scores).toHaveLength(1);
-            expect(scores[0]).toMatchObject({
-                fixtureId: 'espn:mlb:401',
-                homeScore: 3,
-                awayScore: 1,
-                status: 'final',
-                source: 'espn_scoreboard_fallback',
-            });
-            expect(scores[0].raw.normalizedScoreState).toMatchObject({
-                status: 'final',
-                homeScore: 3,
-                awayScore: 1,
-            });
+            await expect(fetchScoresSnapshot('espn:mlb:401')).rejects.toThrow('TXLINE_API_TOKEN is required');
+            expect(fetchMock).not.toHaveBeenCalled();
         } finally {
             process.env = originalEnv;
             fetchMock.mockRestore();

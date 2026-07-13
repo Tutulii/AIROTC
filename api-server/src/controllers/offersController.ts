@@ -15,6 +15,14 @@ function sanitizeOffer<T extends Record<string, any>>(offer: T): T {
         creatorRewardWallet?: string | null;
         creatorFundingWallet?: string | null;
     };
+    if (rest.rollupMode === 'SPORT') {
+        const { collateral: _hiddenCollateral, ...sportRest } = rest;
+        return {
+            ...sportRest,
+            stake: sportRest.price,
+            stakeModel: 'equal_stake',
+        } as unknown as T;
+    }
     return rest as T;
 }
 
@@ -88,7 +96,7 @@ export const createOffer = async (req: Request, res: Response): Promise<void> =>
                         amount,
                         mode,
                         rollupMode: resolvedRollupMode,
-                        collateral,
+                        collateral: 0,
                         tokenMint: tokenMint || null,
                         tokenDecimals,
                         creatorSettlementWallet: settlementWallet || null,

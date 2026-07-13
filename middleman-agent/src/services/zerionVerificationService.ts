@@ -73,6 +73,14 @@ const defaultDeps: VerificationDeps = {
 };
 
 function resolveAsset(context: DealPipelineContext): ResolvedAsset {
+  if (context.rollupMode === "SPORT" && MeridianOtcGuard.isSportSyntheticAsset(context.assetType)) {
+    return {
+      assetMint: UMBRA_SUPPORTED_MINTS.wSOL,
+      assetSymbol: context.assetType || "SPORT",
+      assetResolution: "native_sol",
+    };
+  }
+
   const normalizedAsset = MeridianOtcGuard.normalizeSupportedAsset(context.assetType);
 
   if (context.tokenMint) {
@@ -454,6 +462,7 @@ export function createNegotiationVerifier(deps: VerificationDeps = defaultDeps) 
         priceSol: context.price,
         collateralBuyerSol: context.collateralBuyer,
         collateralSellerSol: context.collateralSeller,
+        collateralPolicy: context.rollupMode === "SPORT" ? "sport_equal_stake" : "standard",
       });
 
       if (!econCheck.valid) {
@@ -474,6 +483,7 @@ export function createNegotiationVerifier(deps: VerificationDeps = defaultDeps) 
       buyerMint: "SOL",
       sellerMint: context.tokenMint || context.assetType,
       asset_type: context.assetType,
+      rollupMode: context.rollupMode,
     });
 
     const resolvedAsset = resolveAsset(context);

@@ -14,6 +14,7 @@ import { prisma } from '../lib/prisma';
 import { logger, logDrain, type AlertSeverity } from '../lib/logger';
 import { SUCCESSFUL_TICKET_STATUSES } from './ticketStatusPolicy';
 import { runSportSettlement } from './arena/sportSettlementEngine';
+import { sweepExpiredSportPositionRefunds } from './sportPosition.service';
 
 // ═══════════════════════════════════════════════════════
 // CONFIGURATION
@@ -60,6 +61,19 @@ interface MetricsSnapshot {
 let latestMetrics: MetricsSnapshot | null = null;
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
 let sportSettlementInterval: ReturnType<typeof setInterval> | null = null;
+let latestSportSettlementRun: {
+    running: boolean;
+    lastRunAt: string | null;
+    lastDurationMs: number | null;
+    lastResult: Record<string, unknown> | null;
+    lastError: string | null;
+} = {
+    running: false,
+    lastRunAt: null,
+    lastDurationMs: null,
+    lastResult: null,
+    lastError: null,
+};
 const startTime = Date.now();
 
 export async function cancelStaleNegotiationTickets(now: number = Date.now()): Promise<number> {
@@ -226,6 +240,17 @@ async function sweep(): Promise<MetricsSnapshot> {
 
 export async function sweepSportSettlement(): Promise<Record<string, unknown>> {
     if (!SPORT_SETTLEMENT_MONITOR_ENABLED) {
+        latestSportSettlementRun = {
+            running: false,
+            lastRunAt: new Date().toISOString(),
+            lastDurationMs: 0,
+            lastResult: {
+                mode: 'SPORT',
+                skipped: true,
+                reason: 'sport_settlement_monitor_disabled',
+            },
+            lastError: null,
+        };
         return {
             mode: 'SPORT',
             skipped: true,
@@ -233,20 +258,57 @@ export async function sweepSportSettlement(): Promise<Record<string, unknown>> {
         };
     }
 
+    const startedAt = Date.now();
+    latestSportSettlementRun = {
+        ...latestSportSettlementRun,
+        running: true,
+        lastRunAt: new Date(startedAt).toISOString(),
+        lastError: null,
+    };
+
     try {
         const sportSettlement = await runSportSettlement({
             limit: SPORT_SETTLEMENT_MONITOR_LIMIT,
             refreshOutcomes: true,
         });
-        if ((sportSettlement as any).settledCount > 0 || (sportSettlement as any).skippedCount > 0) {
+        const expiredPositionRefunds = await sweepExpiredSportPositionRefunds({
+            limit: SPORT_SETTLEMENT_MONITOR_LIMIT,
+        });
+        const sportMonitorResult = {
+            ...sportSettlement,
+            expiredPositionRefunds,
+        };
+        latestSportSettlementRun = {
+            running: false,
+            lastRunAt: new Date(startedAt).toISOString(),
+            lastDurationMs: Date.now() - startedAt,
+            lastResult: sportMonitorResult,
+            lastError: null,
+        };
+        if (
+            (sportSettlement as any).settledCount > 0
+            || (sportSettlement as any).skippedCount > 0
+            || (expiredPositionRefunds as any).refundedCount > 0
+            || (expiredPositionRefunds as any).skippedCount > 0
+        ) {
             logger.info('sport_settlement_monitor_sweep', {
                 scanned: (sportSettlement as any).scanned,
                 settledCount: (sportSettlement as any).settledCount,
                 skippedCount: (sportSettlement as any).skippedCount,
+                expiredRefundedCount: (expiredPositionRefunds as any).refundedCount,
+                expiredRefundSkippedCount: (expiredPositionRefunds as any).skippedCount,
+                skippedReasons: summarizeSportSettlementSkips(sportSettlement),
             });
         }
-        return sportSettlement;
+        return sportMonitorResult;
     } catch (error: any) {
+        latestSportSettlementRun = {
+            running: false,
+            lastRunAt: new Date(startedAt).toISOString(),
+            lastDurationMs: Date.now() - startedAt,
+            lastResult: null,
+            lastError: error?.message || 'sport_settlement_monitor_failed',
+        };
         logger.warn('sport_settlement_monitor_failed', { error: error?.message });
         return {
             mode: 'SPORT',
@@ -254,6 +316,17 @@ export async function sweepSportSettlement(): Promise<Record<string, unknown>> {
             error: error?.message || 'sport_settlement_monitor_failed',
         };
     }
+}
+
+function summarizeSportSettlementSkips(sportSettlement: Record<string, unknown>): Record<string, number> {
+    const skipped = Array.isArray((sportSettlement as any).skipped) ? (sportSettlement as any).skipped : [];
+    return skipped.reduce((summary: Record<string, number>, item: any) => {
+        const reason = typeof item?.reason === 'string' && item.reason.trim()
+            ? item.reason.trim()
+            : 'unknown';
+        summary[reason] = (summary[reason] || 0) + 1;
+        return summary;
+    }, {});
 }
 
 // ═══════════════════════════════════════════════════════
@@ -292,6 +365,25 @@ export async function getMetrics(): Promise<MetricsSnapshot> {
         return sweep();
     }
     return latestMetrics;
+}
+
+export function getSportSettlementMonitorStatus(): Record<string, unknown> {
+    return {
+        mode: 'SPORT',
+        enabled: SPORT_SETTLEMENT_MONITOR_ENABLED,
+        intervalMs: SPORT_SETTLEMENT_INTERVAL_MS,
+        limit: SPORT_SETTLEMENT_MONITOR_LIMIT,
+        running: Boolean(sportSettlementInterval),
+        activeRun: latestSportSettlementRun.running,
+        lastRunAt: latestSportSettlementRun.lastRunAt,
+        lastDurationMs: latestSportSettlementRun.lastDurationMs,
+        lastError: latestSportSettlementRun.lastError,
+        lastResult: latestSportSettlementRun.lastResult,
+        setAndForget: SPORT_SETTLEMENT_MONITOR_ENABLED,
+        note: SPORT_SETTLEMENT_MONITOR_ENABLED
+            ? 'SPORT settlement sweeps automatically on the API server; admin run_once is only a manual rescue path.'
+            : 'SPORT settlement automation is disabled by SPORT_SETTLEMENT_MONITOR_ENABLED=false.',
+    };
 }
 
 /** Get recent alerts from the log ring buffer. */

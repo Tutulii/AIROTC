@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createNegotiationVerifier } from "../src/services/zerionVerificationService";
+import { UMBRA_SUPPORTED_MINTS } from "../src/services/umbraService";
 import type { DealPipelineContext } from "../src/types/dealPipeline";
 
 const baseContext: DealPipelineContext = {
@@ -24,6 +25,7 @@ function buildDeps(overrides?: {
   zerionVerificationMode?: "hybrid" | "strict" | "rpc_only";
   zerionApiKey?: string | undefined;
   httpGetImpl?: () => Promise<any>;
+  validateEconomicSafety?: ReturnType<typeof vi.fn>;
 }) {
   return {
     getConnection: () =>
@@ -42,11 +44,13 @@ function buildDeps(overrides?: {
         zerionVerificationMode: overrides?.zerionVerificationMode ?? "hybrid",
       }) as any,
     httpGet: overrides?.httpGetImpl ?? vi.fn(),
-    validateEconomicSafety: async () => ({
-      valid: true,
-      errors: [],
-      warnings: [],
-    }),
+    validateEconomicSafety:
+      overrides?.validateEconomicSafety ??
+      vi.fn().mockResolvedValue({
+        valid: true,
+        errors: [],
+        warnings: [],
+      }),
   };
 }
 
@@ -141,5 +145,62 @@ describe("Zerion verification policy", () => {
     expect(summary.verificationScope).toBe("balance_readiness");
     expect(summary.validationSources).toEqual(["ZERION_API", "SOLANA_RPC"]);
     expect(summary.reason).toBe("zerion_strict_verification_confirmed_by_rpc_backstop");
+  });
+
+  it("uses SPORT equal-stake collateral policy for math-only SPORT escrows", async () => {
+    const validateEconomicSafety = vi.fn().mockResolvedValue({
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    const verifier = createNegotiationVerifier(
+      buildDeps({
+        network: "devnet",
+        zerionVerificationMode: "hybrid",
+        zerionApiKey: "redacted",
+        validateEconomicSafety,
+      }) as any
+    );
+
+    await verifier.verifyNegotiationForExecution({
+      ...baseContext,
+      rollupMode: "SPORT",
+      negotiationSource: "OFFCHAIN",
+      collateralBuyer: 0.000000001,
+      collateralSeller: 0.001,
+    });
+
+    expect(validateEconomicSafety).toHaveBeenCalledWith(
+      expect.objectContaining({
+        priceSol: 0.001,
+        collateralBuyerSol: 0.000000001,
+        collateralSellerSol: 0.001,
+        collateralPolicy: "sport_equal_stake",
+      })
+    );
+  });
+
+  it("resolves SPORT TxLINE synthetic markets as SOL-backed escrow assets", async () => {
+    const verifier = createNegotiationVerifier(
+      buildDeps({
+        network: "devnet",
+        zerionVerificationMode: "hybrid",
+        zerionApiKey: "redacted",
+      }) as any
+    );
+
+    const summary = await verifier.verifyNegotiationForExecution({
+      ...baseContext,
+      rollupMode: "SPORT",
+      negotiationSource: "OFFCHAIN",
+      assetType: "TXLINE:18202701:1X2_PARTICIPANT_RESULT:part1",
+      collateralBuyer: 0.000000001,
+      collateralSeller: 0.001,
+    });
+
+    expect(summary.provider).toBe("SOLANA_RPC");
+    expect(summary.assetMint).toBe(UMBRA_SUPPORTED_MINTS.wSOL);
+    expect(summary.assetResolution).toBe("native_sol");
+    expect(summary.reason).toBe("rpc_balance_check_used_on_non_mainnet_runtime");
   });
 });

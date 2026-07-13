@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Goal Kick — Playable Animation</title>
+  <style>
+    :root {
+      --pitch: #1a5c2e;
+      --pitch-line: rgba(255, 255, 255, 0.85);
+      --sky: #0d1010;
+      --white: #f5f5f5;
+      --gold: #d8b24c;
+      --orange: #d97a1e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: var(--sky);
+      color: #e7e4dd;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      gap: 1.25rem;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #a8a69f;
+    }
+
+    .stage-wrap {
+      width: min(920px, 100%);
+      border: 1px solid rgba(88, 90, 91, 0.5);
+      border-radius: 4px;
+      overflow: hidden;
+      background: #111717;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, #0a1218 0%, #0d1a12 40%, #12301c 40%, #1a5c2e 100%);
+    }
+
+    /* Pitch */
+    .pitch {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 58%;
+      background:
+        repeating-linear-gradient(
+          90deg,
+          #1f6b36 0 48px,
+          #1a5c2e 48px 96px
+        );
+    }
+
+    .pitch-line {
+      position: absolute;
+      border: 2px solid var(--pitch-line);
+      pointer-events: none;
+    }
+
+    .penalty-box {
+      right: 6%;
+      bottom: 18%;
+      width: 28%;
+      height: 52%;
+      border-right: none;
+    }
+
+    .goal-box {
+      right: 6%;
+      bottom: 28%;
+      width: 12%;
+      height: 28%;
+      border-right: none;
+    }
+
+    .halfway {
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 0;
+      border: none;
+      border-left: 2px solid rgba(255, 255, 255, 0.25);
+    }
+
+    /* Goal net */
+    .goal {
+      position: absolute;
+      right: 4.5%;
+      bottom: 32%;
+      width: 8%;
+      height: 38%;
+      border: 3px solid #e7e4dd;
+      border-right-width: 5px;
+      background:
+        linear-gradient(rgba(255,255,255,0.12) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.12) 1px, transparent 1px);
+      background-size: 10px 10px;
+      box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.35);
+      z-index: 2;
+    }
+
+    .goal-post-top {
+      position: absolute;
+      left: -2px;
+      right: -2px;
+      top: -4px;
+      height: 4px;
+      background: #fff;
+    }
+
+    /* Player — white kit */
+    .player {
+      position: absolute;
+      left: 18%;
+      bottom: 22%;
+      width: 56px;
+      height: 110px;
+      z-index: 5;
+      transform-origin: 50% 100%;
+    }
+
+    .player .head {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      width: 22px;
+      height: 22px;
+      margin-left: -11px;
+      border-radius: 50%;
+      background: #e8c4a8;
+      box-shadow: inset -2px -2px 0 rgba(0,0,0,0.08);
+    }
+
+    .player .hair {
+      position: absolute;
+      left: 50%;
+      top: -2px;
+      width: 24px;
+      height: 12px;
+      margin-left: -12px;
+      border-radius: 12px 12px 4px 4px;
+      background: #2a2218;
+    }
+
+    .player .body {
+      position: absolute;
+      left: 50%;
+      top: 22px;
+      width: 28px;
+      height: 36px;
+      margin-left: -14px;
+      border-radius: 6px 6px 4px 4px;
+      background: linear-gradient(180deg, #fff 0%, #f0f0f0 100%);
+      border: 1px solid rgba(0,0,0,0.08);
+    }
+
+    .player .number {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 10px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 800;
+      color: #222;
+      font-family: ui-monospace, monospace;
+    }
+
+    .player .shorts {
+      position: absolute;
+      left: 50%;
+      top: 56px;
+      width: 26px;
+      height: 16px;
+      margin-left: -13px;
+      border-radius: 0 0 4px 4px;
+      background: #fff;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+
+    .player .leg {
+      position: absolute;
+      width: 9px;
+      height: 32px;
+      background: linear-gradient(180deg, #f5f5f5 0 55%, #e8c4a8 55%);
+      border-radius: 3px;
+      transform-origin: top center;
+      bottom: 6px;
+    }
+
+    .player .leg-l {
+      left: 14px;
+    }
+
+    .player .leg-r {
+      right: 14px;
+    }
+
+    .player .boot {
+      position: absolute;
+      bottom: -4px;
+      left: -2px;
+      width: 14px;
+      height: 7px;
+      border-radius: 2px 6px 2px 2px;
+      background: #111;
+    }
+
+    .player .arm {
+      position: absolute;
+      top: 26px;
+      width: 8px;
+      height: 28px;
+      background: #fff;
+      border-radius: 4px;
+      transform-origin: top center;
+    }
+
+    .player .arm-l { left: 6px; transform: rotate(12deg); }
+    .player .arm-r { right: 6px; transform: rotate(-8deg); }
+
+    /* Ball */
+    .ball {
+      position: absolute;
+      left: 24%;
+      bottom: 20%;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      z-index: 6;
+      background:
+        radial-gradient(circle at 35% 30%, #fff 0 35%, #e8e8e8 36%),
+        #111;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+      background-image:
+        radial-gradient(circle at 30% 28%, #fff 0 18%, transparent 19%),
+        linear-gradient(135deg, #1a1a1a 25%, #f5f5f5 26% 50%, #1a1a1a 51% 75%, #f5f5f5 76%);
+      background-size: 100% 100%, 100% 100%;
+    }
+
+    /* GOAL flash */
+    .goal-banner {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 0.35rem;
+      z-index: 20;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .goal-banner .word {
+      font-size: clamp(2.5rem, 8vw, 4.5rem);
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      color: #fff;
+      text-shadow:
+        0 0 40px rgba(216, 178, 76, 0.8),
+        0 4px 0 rgba(0,0,0,0.3);
+    }
+
+    .goal-banner .sub {
+      font-size: 0.85rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+
+    .net-shake {
+      transform-origin: right center;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      width: min(920px, 100%);
+    }
+
+    button {
+      min-height: 44px;
+      min-width: 120px;
+      padding: 0 1.25rem;
+      border: 1px solid rgba(88, 90, 91, 0.6);
+      border-radius: 2px;
+      background: #111717;
+      color: #e7e4dd;
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+
+    button:hover {
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+
+    button.primary {
+      background: rgba(216, 178, 76, 0.15);
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .hint {
+      font-size: 0.8rem;
+      color: #585a5b;
+      text-align: center;
+      max-width: 36rem;
+      line-height: 1.45;
+    }
+
+    /* ===== ANIMATION KEYFRAMES (played via class .playing) ===== */
+
+    .stage.playing .player {
+      animation: player-approach 0.55s cubic-bezier(0.4, 0, 0.2, 1) forwards,
+                 player-kick 0.35s 0.55s cubic-bezier(0.2, 0.9, 0.3, 1) forwards,
+                 player-follow 0.5s 0.9s ease-out forwards;
+    }
+
+    .stage.playing .player .leg-r {
+      animation: kick-leg 0.35s 0.55s cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+    }
+
+    .stage.playing .player .arm-l {
+      animation: arm-swing 0.35s 0.55s ease-out forwards;
+    }
+
+    .stage.playing .ball {
+      animation: ball-flight 0.85s 0.72s cubic-bezier(0.15, 0.7, 0.25, 1) forwards;
+    }
+
+    .stage.playing .goal.net-shake {
+      animation: net-hit 0.55s 1.35s ease-out forwards;
+    }
+
+    .stage.playing .goal-banner {
+      animation: goal-pop 1.4s 1.4s cubic-bezier(0.2, 1.2, 0.3, 1) forwards;
+    }
+
+    @keyframes player-approach {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(42px); }
+    }
+
+    @keyframes player-kick {
+      0% { transform: translateX(42px) rotate(0deg); }
+      40% { transform: translateX(48px) rotate(-6deg); }
+      100% { transform: translateX(52px) rotate(4deg); }
+    }
+
+    @keyframes player-follow {
+      0% { transform: translateX(52px) rotate(4deg); }
+      100% { transform: translateX(58px) rotate(0deg); }
+    }
+
+    @keyframes kick-leg {
+      0% { transform: rotate(0deg); }
+      35% { transform: rotate(-55deg); }
+      70% { transform: rotate(28deg); }
+      100% { transform: rotate(8deg); }
+    }
+
+    @keyframes arm-swing {
+      0% { transform: rotate(12deg); }
+      50% { transform: rotate(-25deg); }
+      100% { transform: rotate(5deg); }
+    }
+
+    /* Ball path: ground → arc into net (right) */
+    @keyframes ball-flight {
+      0% {
+        left: 26%;
+        bottom: 20%;
+        transform: scale(1) rotate(0deg);
+        opacity: 1;
+      }
+      15% {
+        left: 35%;
+        bottom: 32%;
+        transform: scale(1.05) rotate(90deg);
+      }
+      45% {
+        left: 58%;
+        bottom: 48%;
+        transform: scale(0.95) rotate(220deg);
+      }
+      75% {
+        left: 78%;
+        bottom: 42%;
+        transform: scale(0.85) rotate(400deg);
+      }
+      92% {
+        left: 86%;
+        bottom: 40%;
+        transform: scale(0.75) rotate(520deg);
+      }
+      100% {
+        left: 88%;
+        bottom: 38%;
+        transform: scale(0.7) rotate(580deg);
+        opacity: 1;
+      }
+    }
+
+    @keyframes net-hit {
+      0%, 100% { transform: scaleX(1); }
+      25% { transform: scaleX(1.08) translateX(-4px); }
+      50% { transform: scaleX(0.96) translateX(2px); }
+      75% { transform: scaleX(1.04) translateX(-2px); }
+    }
+
+    @keyframes goal-pop {
+      0% {
+        opacity: 0;
+        transform: scale(0.6);
+      }
+      25% {
+        opacity: 1;
+        transform: scale(1.08);
+      }
+      55% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .stage.playing .player,
+      .stage.playing .player .leg-r,
+      .stage.playing .player .arm-l,
+      .stage.playing .ball,
+      .stage.playing .goal,
+      .stage.playing .goal-banner {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Goal kick animation</h1>
+
+  <div class="stage-wrap">
+    <div class="stage" id="stage" aria-label="Football goal animation">
+      <div class="pitch">
+        <div class="pitch-line halfway"></div>
+        <div class="pitch-line penalty-box"></div>
+        <div class="pitch-line goal-box"></div>
+      </div>
+
+      <div class="goal net-shake" aria-hidden="true">
+        <div class="goal-post-top"></div>
+      </div>
+
+      <div class="player" aria-hidden="true">
+        <div class="hair"></div>
+        <div class="head"></div>
+        <div class="arm arm-l"></div>
+        <div class="arm arm-r"></div>
+        <div class="body"><span class="number">10</span></div>
+        <div class="shorts"></div>
+        <div class="leg leg-l"><div class="boot"></div></div>
+        <div class="leg leg-r"><div class="boot"></div></div>
+      </div>
+
+      <div class="ball" aria-hidden="true"></div>
+
+      <div class="goal-banner" id="banner">
+        <div class="word">GOAL!</div>
+        <div class="sub">Full white kit · direct finish</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button type="button" class="primary" id="btnPlay">Play</button>
+    <button type="button" id="btnReplay">Replay</button>
+    <button type="button" id="btnReset">Reset</button>
+  </div>
+
+  <p class="hint">
+    White-kit striker approaches, kicks, ball flies straight into the net.
+    Open this file anytime: <code>public/animations/goal-kick.html</code>
+  </p>
+
+  <script>
+    const stage = document.getElementById("stage");
+    const btnPlay = document.getElementById("btnPlay");
+    const btnReplay = document.getElementById("btnReplay");
+    const btnReset = document.getElementById("btnReset");
+    const TOTAL_MS = 2800;
+    let timer = null;
+    let playing = false;
+
+    function reset() {
+      if (timer) clearTimeout(timer);
+      playing = false;
+      stage.classList.remove("playing");
+      // Force reflow so replay restarts cleanly
+      void stage.offsetWidth;
+      btnPlay.disabled = false;
+      btnPlay.textContent = "Play";
+    }
+
+    function play() {
+      reset();
+      playing = true;
+      btnPlay.disabled = true;
+      btnPlay.textContent = "Playing…";
+      // double rAF so browser applies reset before adding playing
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          stage.classList.add("playing");
+          timer = setTimeout(() => {
+            playing = false;
+            btnPlay.disabled = false;
+            btnPlay.textContent = "Play again";
+          }, TOTAL_MS);
+        });
+      });
+    }
+
+    btnPlay.addEventListener("click", play);
+    btnReplay.addEventListener("click", play);
+    btnReset.addEventListener("click", reset);
+
+    // Keyboard: Space / Enter = play
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space" || e.code === "Enter") {
+        e.preventDefault();
+        play();
+      }
+      if (e.code === "KeyR") reset();
+    });
+  </script>
+</body>
+</html>

@@ -1,12 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
+import { middlemanForwarder } from '../middlemanForwarder';
 import { createOfferFromStrategySignal } from './strategyOfferBridge';
-import { serializeOutcome } from './outcomeBacktest';
+import { isTrustedOutcomeSource, serializeOutcome } from './outcomeBacktest';
 import { serializeStrategySignal } from './strategyEngine';
 
 const prismaAny = prisma as any;
 
 const TERMINAL_MATCH_STATUSES = new Set(['settled', 'released', 'refunded', 'cancelled', 'failed']);
+const LAMPORTS_PER_SOL = 1_000_000_000;
 
 export interface CreateArenaMatchInput {
     fixtureId?: string;
@@ -96,6 +98,97 @@ function serializeDate(value: unknown): string | undefined {
     return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
+function lamportsToSol(value: unknown): number | undefined {
+    const raw = trimString(value);
+    if (!raw) return undefined;
+    try {
+        return Number(BigInt(raw)) / LAMPORTS_PER_SOL;
+    } catch {
+        return undefined;
+    }
+}
+
+function solToLamportsString(value: unknown): string | undefined {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) return undefined;
+    return String(Math.round(amount * LAMPORTS_PER_SOL));
+}
+
+function middlemanPhaseImpliesSportFunding(phase: unknown): boolean {
+    const normalized = trimString(phase);
+    return Boolean(normalized && [
+        'awaiting_result',
+        'settlement',
+        'completed',
+        'released',
+        'refunded',
+    ].includes(normalized));
+}
+
+function middlemanDealData(result: Awaited<ReturnType<typeof middlemanForwarder.getDealStatus>>): Record<string, any> | null {
+    if (!result.success || !result.deal) return null;
+    const deal = result.deal as any;
+    if (deal.data && typeof deal.data === 'object') return deal.data;
+    return deal && typeof deal === 'object' ? deal : null;
+}
+
+function depositLamportsFromMiddlemanTerms(match: any, deal: Record<string, any>, side: 'buyer' | 'seller'): string | undefined {
+    const terms = asRecord(deal.terms);
+    const price = Number(terms.price ?? 0);
+    const buyerCollateral = Number(terms.collateral_buyer ?? terms.collateralBuyer ?? 0);
+    const sellerCollateral = Number(terms.collateral_seller ?? terms.collateralSeller ?? 0);
+    if (side === 'buyer') {
+        return solToLamportsString(price + buyerCollateral) || trimString(match.stakeLamports);
+    }
+    return solToLamportsString(sellerCollateral || price) || trimString(match.stakeLamports);
+}
+
+async function hydrateArenaMatchDepositsFromMiddleman(match: any): Promise<any> {
+    if (!match?.ticketId || TERMINAL_MATCH_STATUSES.has(match.status)) return match;
+
+    let deal: Record<string, any> | null = null;
+    try {
+        deal = middlemanDealData(await middlemanForwarder.getDealStatus(match.ticketId));
+    } catch {
+        deal = null;
+    }
+    if (!deal) return match;
+
+    const phase = trimString(deal.phase);
+    const paymentLocked = Boolean(deal.payment_locked || deal.paymentLocked);
+    const fullyFunded = paymentLocked || middlemanPhaseImpliesSportFunding(phase);
+    if (!fullyFunded) return match;
+
+    const data: Record<string, any> = {};
+    if (!match.buyerDepositLamports) {
+        data.buyerDepositLamports = depositLamportsFromMiddlemanTerms(match, deal, 'buyer') || '1';
+    }
+    if (!match.sellerDepositLamports) {
+        data.sellerDepositLamports = depositLamportsFromMiddlemanTerms(match, deal, 'seller') || '1';
+    }
+    if (!match.buyerDepositedAt) data.buyerDepositedAt = new Date();
+    if (!match.sellerDepositedAt) data.sellerDepositedAt = new Date();
+    if (phase && match.status !== phase) data.status = phase;
+
+    if (Object.keys(data).length === 0) return match;
+
+    return prismaAny.arenaMatch.update({
+        where: { id: match.id },
+        data: {
+            ...data,
+            lastError: null,
+            proof: mergeProof(match.proof, {
+                depositSync: {
+                    source: 'middleman',
+                    phase: phase || null,
+                    paymentLocked,
+                    syncedAt: new Date().toISOString(),
+                },
+            }),
+        },
+    });
+}
+
 export function serializeArenaMatch(row: any): Record<string, unknown> {
     if (!row) return {};
     return {
@@ -106,6 +199,11 @@ export function serializeArenaMatch(row: any): Record<string, unknown> {
         marketType: row.marketType || undefined,
         selection: row.selection || undefined,
         direction: row.direction || undefined,
+        makerPositionId: row.makerPositionId || undefined,
+        takerPositionId: row.takerPositionId || undefined,
+        makerSide: row.makerSide || undefined,
+        stakeLamports: row.stakeLamports || undefined,
+        stakeSol: lamportsToSol(row.stakeLamports),
         signalConfidence: row.signalConfidence ?? undefined,
         makerWallet: row.makerWallet,
         takerWallet: row.takerWallet || undefined,
@@ -204,9 +302,10 @@ export async function getArenaSettlementStatusByTicket(ticketIdInput: string): P
     const ticketId = trimString(ticketIdInput);
     if (!ticketId) throw httpError('arena_ticket_id_required', 400);
 
-    const match = await prismaAny.arenaMatch.findFirst({ where: { ticketId } });
-    if (!match) throw httpError('arena_match_not_found_for_ticket', 404);
+    const storedMatch = await prismaAny.arenaMatch.findFirst({ where: { ticketId } });
+    if (!storedMatch) throw httpError('arena_match_not_found_for_ticket', 404);
 
+    const match = await hydrateArenaMatchDepositsFromMiddleman(storedMatch);
     const proof = await getArenaMatchProof(match.id);
     const links = asRecord(proof.links);
     const outcome = asRecord(links.outcome);
@@ -340,13 +439,39 @@ export async function attachArenaTicket(matchId: string, input: AttachTicketInpu
 }
 
 function inferMakerWins(match: any, signal: any, outcome: any): boolean | null {
+    const makerSide = trimString(match.makerSide);
     const direction = match.direction || signal?.direction;
     const selection = match.selection || signal?.selection;
     const winner = outcome?.winner || match.outcomeWinner;
-    if (!direction || !selection || !winner) return null;
+    if (!selection || !winner) return null;
+    const proof = match?.proof && typeof match.proof === 'object' && !Array.isArray(match.proof)
+        ? match.proof
+        : {};
+    if (
+        winner === 'draw'
+        && (
+            proof.marketModel === 'complement_back_draw_refund'
+            || proof.matchKind === 'complement_back_back'
+        )
+    ) {
+        return null;
+    }
+    if (makerSide === 'back') return selection === winner;
+    if (makerSide === 'lay') return selection !== winner;
+    if (!direction) return null;
     if (direction === 'BUY_SELECTION') return selection === winner;
     if (direction === 'SELL_SELECTION') return selection !== winner;
     return null;
+}
+
+function settlementActionForWinner(match: any, makerWins: boolean | null): string {
+    if (makerWins === null) return 'manual_review';
+    const winnerWallet = trimString(makerWins ? match.makerWallet : match.takerWallet);
+    const sellerWallet = trimString(match.sellerWallet);
+    const buyerWallet = trimString(match.buyerWallet);
+    if (winnerWallet && sellerWallet && winnerWallet === sellerWallet) return 'release_to_seller';
+    if (winnerWallet && buyerWallet && winnerWallet === buyerWallet) return 'release_to_buyer';
+    return makerWins ? 'release_to_maker' : 'refund_to_taker';
 }
 
 export async function settleArenaMatch(matchId: string, input: SettleArenaMatchInput = {}): Promise<Record<string, unknown>> {
@@ -364,7 +489,7 @@ export async function settleArenaMatch(matchId: string, input: SettleArenaMatchI
         || (makerWins === true ? match.makerWallet : makerWins === false ? match.takerWallet : undefined)
         || null;
     const settlementAction = trimString(input.settlementAction)
-        || (makerWins === true ? 'release_to_maker' : makerWins === false ? 'refund_to_taker' : 'manual_review');
+        || settlementActionForWinner(match, makerWins);
     const releaseTx = trimString(input.releaseTx) || match.releaseTx || null;
     const refundTx = trimString(input.refundTx) || match.refundTx || null;
     const settlementStatus = trimString(input.settlementStatus)
@@ -423,6 +548,7 @@ export async function getArenaMatchProof(matchId: string): Promise<Record<string
             : prismaAny.arenaOutcome.findUnique({ where: { fixtureId: match.fixtureId } }),
     ]);
 
+    const trustedOutcome = outcome && isTrustedOutcomeSource(outcome.source) ? outcome : null;
     const completeness = {
         hasFixture: Boolean(fixture),
         hasSignal: Boolean(signal || match.signalId),
@@ -431,7 +557,7 @@ export async function getArenaMatchProof(matchId: string): Promise<Record<string
         hasEscrow: Boolean(match.escrowPda),
         buyerDepositConfirmed: Boolean(match.buyerDepositLamports || match.buyerDepositTx),
         sellerDepositConfirmed: Boolean(match.sellerDepositLamports || match.sellerDepositTx),
-        hasOutcome: Boolean(outcome),
+        hasOutcome: Boolean(trustedOutcome),
         settlementRecorded: Boolean(match.settlementAction || match.settlementStatus || match.winnerWallet),
         terminal: TERMINAL_MATCH_STATUSES.has(match.status),
     };
@@ -450,7 +576,7 @@ export async function getArenaMatchProof(matchId: string): Promise<Record<string
                 buyer: completeness.buyerDepositConfirmed,
                 seller: completeness.sellerDepositConfirmed,
             },
-            { stage: 'txline_outcome', complete: completeness.hasOutcome, id: match.outcomeId || outcome?.id },
+            { stage: 'txline_outcome', complete: completeness.hasOutcome, id: trustedOutcome ? match.outcomeId || trustedOutcome.id : undefined },
             { stage: 'settlement', complete: completeness.settlementRecorded, action: match.settlementAction },
         ],
         links: {
@@ -459,7 +585,7 @@ export async function getArenaMatchProof(matchId: string): Promise<Record<string
             strategyOffer,
             offer,
             ticket,
-            outcome: outcome ? serializeOutcome(outcome) : null,
+            outcome: trustedOutcome ? serializeOutcome(trustedOutcome) : null,
         },
     };
 }

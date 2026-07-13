@@ -1,6 +1,10 @@
 import express from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { attachSportTicketByOfferMock } = vi.hoisted(() => ({
+    attachSportTicketByOfferMock: vi.fn(),
+}));
+
 const prismaMock = {
     agent: {
         count: vi.fn(),
@@ -12,6 +16,7 @@ const prismaMock = {
     },
     offer: {
         create: vi.fn(),
+        findUnique: vi.fn(),
     },
     ticket: {
         findUnique: vi.fn(),
@@ -26,6 +31,10 @@ const prismaMock = {
 
 vi.mock('../src/lib/prisma', () => ({
     prisma: prismaMock,
+}));
+
+vi.mock('../src/services/arena/sportSettlementEngine', () => ({
+    attachSportTicketByOffer: attachSportTicketByOfferMock,
 }));
 
 async function sendJson(
@@ -79,11 +88,13 @@ describe('Signed internal bridge routes', () => {
         prismaMock.agent.update.mockReset();
         prismaMock.agent.updateMany.mockReset();
         prismaMock.offer.create.mockReset();
+        prismaMock.offer.findUnique.mockReset();
         prismaMock.ticket.findUnique.mockReset();
         prismaMock.ticket.create.mockReset();
         prismaMock.ticket.update.mockReset();
         prismaMock.dealReputationProcessing.findUnique.mockReset();
         prismaMock.dealReputationProcessing.create.mockReset();
+        attachSportTicketByOfferMock.mockReset();
     });
 
     afterEach(() => {
@@ -289,5 +300,55 @@ describe('Signed internal bridge routes', () => {
         expect(response.status).toBe(200);
         expect(prismaMock.agent.update).not.toHaveBeenCalled();
         expect(prismaMock.dealReputationProcessing.create).not.toHaveBeenCalled();
+    });
+
+    it('hydrates SPORT arena match escrow PDA from bridge ticket phase updates', async () => {
+        prismaMock.ticket.update.mockResolvedValue({
+            id: 'ticket-sport',
+            offerId: 'offer-sport',
+            buyer: 'buyer-wallet',
+            seller: 'seller-wallet',
+            status: 'negotiating',
+        });
+        prismaMock.offer.findUnique.mockResolvedValue({ id: 'offer-sport', rollupMode: 'SPORT' });
+        attachSportTicketByOfferMock.mockResolvedValue({
+            match: {
+                id: 'match-sport',
+                ticketId: 'ticket-sport',
+                offerId: 'offer-sport',
+                escrowPda: 'EscrowPda111111111111111111111111111111111',
+            },
+        });
+
+        const { signRequest } = await import('../src/services/hmacSigner');
+        const bridgeRoutes = (await import('../src/routes/bridge.routes')).default;
+
+        const app = express();
+        app.use(express.json());
+        app.use('/v1/bridge', bridgeRoutes);
+
+        const payload = {
+            status: 'negotiating',
+            phase: 'escrow_created',
+            source: 'phase_changed',
+            escrowPda: 'EscrowPda111111111111111111111111111111111',
+        };
+        const body = JSON.stringify(payload);
+        const signed = signRequest('PATCH', '/v1/bridge/ticket/ticket-sport', body);
+        const response = await sendJson(app, 'PATCH', '/v1/bridge/ticket/ticket-sport', payload, {
+            'X-Bridge-Signature': signed.signature,
+            'X-Bridge-Timestamp': signed.timestamp,
+        });
+
+        expect(response.status).toBe(200);
+        expect(prismaMock.offer.findUnique).toHaveBeenCalledWith({
+            where: { id: 'offer-sport' },
+            select: { rollupMode: true },
+        });
+        expect(attachSportTicketByOfferMock).toHaveBeenCalledWith({
+            offerId: 'offer-sport',
+            ticketId: 'ticket-sport',
+            escrowPda: 'EscrowPda111111111111111111111111111111111',
+        });
     });
 });

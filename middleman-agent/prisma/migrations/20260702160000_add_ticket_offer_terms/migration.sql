@@ -1,0 +1,5 @@
+ALTER TABLE "Ticket"
+  ADD COLUMN "offerAsset" TEXT,
+  ADD COLUMN "offerPrice" DOUBLE PRECISION,
+  ADD COLUMN "offerAmount" DOUBLE PRECISION,
+  ADD COLUMN "offerCollateral" DOUBLE PRECISION;

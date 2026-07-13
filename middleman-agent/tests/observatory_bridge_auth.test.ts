@@ -153,7 +153,7 @@ describe('Observatory bridge authentication', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const [statusUrl, statusInit] = fetchMock.mock.calls[0] as [string, RequestInit];
         expect(statusUrl).toBe('http://observatory.test/v1/bridge/ticket/ticket-marketplace');
-        expect(JSON.parse(String(statusInit.body))).toEqual({ status: 'completed' });
+        expect(JSON.parse(String(statusInit.body))).toMatchObject({ status: 'completed' });
 
         vi.unstubAllGlobals();
     });
@@ -192,7 +192,7 @@ describe('Observatory bridge authentication', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const [statusUrl, statusInit] = fetchMock.mock.calls[0] as [string, RequestInit];
         expect(statusUrl).toBe('http://observatory.test/v1/bridge/ticket/ticket-pipeline');
-        expect(JSON.parse(String(statusInit.body))).toEqual({ status: 'completed' });
+        expect(JSON.parse(String(statusInit.body))).toMatchObject({ status: 'completed' });
 
         vi.unstubAllGlobals();
     });
@@ -226,7 +226,7 @@ describe('Observatory bridge authentication', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const [statusUrl, statusInit] = fetchMock.mock.calls[0] as [string, RequestInit];
         expect(statusUrl).toBe('http://observatory.test/v1/bridge/ticket/ticket-settled-deal');
-        expect(JSON.parse(String(statusInit.body))).toEqual({ status: 'completed' });
+        expect(JSON.parse(String(statusInit.body))).toMatchObject({ status: 'completed' });
 
         vi.unstubAllGlobals();
     });

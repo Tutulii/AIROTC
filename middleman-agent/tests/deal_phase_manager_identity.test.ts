@@ -8,6 +8,7 @@ const onChainDealFetchMock = vi.fn();
 const initDealMock = vi.fn().mockResolvedValue(undefined);
 const updateStatusMock = vi.fn().mockResolvedValue(undefined);
 const appendAuditLogMock = vi.fn();
+const ticketStoreGetMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../src/services/eventBus", () => ({
   eventBus: {
@@ -24,6 +25,12 @@ vi.mock("../src/state/dealTracker", () => ({
     initDeal: initDealMock,
     updateStatus: updateStatusMock,
     getDealByTicket: vi.fn().mockResolvedValue(null),
+  },
+}));
+
+vi.mock("../src/state/ticketStore", () => ({
+  ticketStore: {
+    getTicket: ticketStoreGetMock,
   },
 }));
 
@@ -76,6 +83,7 @@ describe("dealPhaseManager identity authorization", () => {
     onChainDealFetchMock.mockReset();
     initDealMock.mockResolvedValue(undefined);
     updateStatusMock.mockResolvedValue(undefined);
+    ticketStoreGetMock.mockResolvedValue(undefined);
   });
 
   it("allows an authenticated buyer agent id to release a wallet-addressed Normal Mode deal", async () => {
@@ -172,6 +180,42 @@ describe("dealPhaseManager identity authorization", () => {
       "deposit_blocked_missing_escrow",
       expect.any(Object)
     );
+  });
+
+  it("keeps SPORT equal-stake escrows in awaiting_result instead of delivery after payment lock", async () => {
+    const buyerWallet = "sport-buyer-wallet";
+    const sellerWallet = "sport-seller-wallet";
+    const ticketId = "ticket-sport-equal-stake";
+    ticketStoreGetMock.mockResolvedValue({
+      ticket_id: ticketId,
+      buyer: buyerWallet,
+      seller: sellerWallet,
+      rollup_mode: "SPORT",
+    });
+
+    const { dealPhaseManager } = await import("../core/dealPhaseManager");
+
+    dealPhaseManager.initDeal(ticketId, buyerWallet, sellerWallet);
+    const createResult = await dealPhaseManager.handleAction("CREATE_ESCROW", ticketId, buyerWallet, {
+      price: 3,
+      collateral_buyer: 0,
+      collateral_seller: 3,
+    });
+    dealPhaseManager.setEscrowPda(ticketId, "sport-escrow-pda");
+    await dealPhaseManager.advanceToAwaitingDeposits(ticketId);
+    await dealPhaseManager.recordDeposit(ticketId, "buyer");
+    await dealPhaseManager.recordDeposit(ticketId, "seller");
+
+    expect(createResult.success).toBe(true);
+    expect(dealPhaseManager.getPhase(ticketId)).toBe("awaiting_deposits");
+    expect(dealPhaseManager.getDeal(ticketId)?.payment_locked).toBe(false);
+
+    const lockResult = await dealPhaseManager.recordPaymentLocked(ticketId);
+
+    expect(lockResult?.success).toBe(true);
+    expect(lockResult?.new_phase).toBe("awaiting_result");
+    expect(dealPhaseManager.getPhase(ticketId)).toBe("awaiting_result");
+    expect(updateStatusMock).toHaveBeenLastCalledWith(ticketId, "payment_locked");
   });
 
   it("heals stale terminal phase state from authoritative on-chain escrow state", async () => {

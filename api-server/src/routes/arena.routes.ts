@@ -9,6 +9,8 @@ import {
     startArenaMatch,
 } from '../services/arena/arenaMatch.service';
 import { runSportSettlement } from '../services/arena/sportSettlementEngine';
+import { getSportSettlementMonitorStatus } from '../services/transactionMonitor';
+import { sweepExpiredSportPositionRefunds } from '../services/sportPosition.service';
 
 const router = Router();
 
@@ -97,11 +99,24 @@ router.post('/v1/arena/matches/:id/settle', requireArenaAdmin, async (req: Reque
 
 router.post('/v1/arena/settlement/run', requireArenaAdmin, async (req: Request, res: Response) => {
     try {
-        const result = await runSportSettlement(req.body || {});
-        res.json({ success: true, data: result });
+        const settlement = await runSportSettlement(req.body || {});
+        const expiredPositionRefunds = await sweepExpiredSportPositionRefunds({
+            limit: req.body?.limit,
+        });
+        res.json({
+            success: true,
+            data: {
+                ...settlement,
+                expiredPositionRefunds,
+            },
+        });
     } catch (error: any) {
         sendError(res, error, 'Failed to run SPORT settlement');
     }
+});
+
+router.get('/v1/arena/settlement/automation', (_req: Request, res: Response) => {
+    res.json({ success: true, data: getSportSettlementMonitorStatus() });
 });
 
 router.get('/v1/arena/matches/:id/proof', async (req: Request, res: Response) => {

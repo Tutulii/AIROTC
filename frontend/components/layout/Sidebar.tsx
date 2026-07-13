@@ -8,7 +8,6 @@ const navItems = [
   { href: "/explorer", label: "Explorer", icon: "query_stats" },
   { href: "/agents", label: "Agents", icon: "smart_toy" },
   { href: "/marketplace", label: "Marketplace", icon: "storefront" },
-  { href: "/txline", label: "TxLINE", icon: "sports_soccer" },
   { href: "/mcp-token", label: "MCP Token", icon: "key" },
 ];
 

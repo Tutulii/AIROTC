@@ -5,12 +5,12 @@ import {
     fetchFixturesSnapshot,
     fetchOddsSnapshot,
     fetchScoresSnapshot,
+    normalizeFixtureStatus,
     normalizeOddsPayload,
     normalizeScoresPayload,
     txlineActiveFixtureSource,
     txlineAuthConfigured,
     txlineBaseUrl,
-    txlineFallbackEnabled,
     txlineGuestJwtMode,
     txlineNetwork,
 } from './txlineClient';
@@ -37,7 +37,7 @@ function fixtureAutoSyncIntervalMs(): number {
 
 async function maybeAutoSyncFixtures(): Promise<void> {
     if (!fixtureAutoSyncEnabled()) return;
-    if (!txlineAuthConfigured() && !txlineFallbackEnabled()) return;
+    if (!txlineAuthConfigured()) return;
 
     const now = Date.now();
     if (now - lastFixtureAutoSyncAt < fixtureAutoSyncIntervalMs()) return;
@@ -56,6 +56,53 @@ function jsonValue(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(JSON.stringify(value ?? {})) as Prisma.InputJsonValue;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function hasFinalScoreEvidence(rawValue: unknown): boolean {
+    const raw = asRecord(rawValue);
+    const latestScoreState = asRecord(raw.latestScoreState);
+    if (Object.keys(latestScoreState).length === 0) return false;
+    return normalizeFixtureStatus(latestScoreState) === 'final';
+}
+
+function hasLiveScoreEvidence(rawValue: unknown): boolean {
+    const raw = asRecord(rawValue);
+    const latestScoreState = asRecord(raw.latestScoreState);
+    if (Object.keys(latestScoreState).length === 0) return false;
+    return normalizeFixtureStatus(latestScoreState) === 'live';
+}
+
+function scoreDerivedStatusToPreserve(existingFixture: any, nextStatus: string): 'final' | 'live' | null {
+    if (!existingFixture || nextStatus === 'final') return null;
+    if (existingFixture.status === 'final' || hasFinalScoreEvidence(existingFixture.raw)) return 'final';
+    if (nextStatus === 'live') return null;
+    if (
+        (nextStatus === 'upcoming' || nextStatus === 'unknown') &&
+        (existingFixture.status === 'live' || hasLiveScoreEvidence(existingFixture.raw))
+    ) {
+        return 'live';
+    }
+    return null;
+}
+
+function mergeFixtureSnapshotRaw(existingRawValue: unknown, nextRawValue: unknown, preservedStatus: 'final' | 'live' | null): Record<string, unknown> {
+    const existingRaw = asRecord(existingRawValue);
+    const nextRaw = asRecord(nextRawValue);
+    const merged: Record<string, unknown> = { ...nextRaw };
+
+    for (const key of ['latestScoreState', 'latestScoreUpdateId', 'latestScoreTimestamp']) {
+        if (merged[key] === undefined && existingRaw[key] !== undefined) {
+            merged[key] = existingRaw[key];
+        }
+    }
+    if (preservedStatus) {
+        merged.statusPreservedFrom = `score_replay_${preservedStatus}`;
+    }
+    return merged;
+}
+
 export function txlineRuntimeConfig(): TxlineRuntimeConfig {
     return {
         day: 4,
@@ -63,7 +110,7 @@ export function txlineRuntimeConfig(): TxlineRuntimeConfig {
         txlineNetwork: txlineNetwork(),
         txlineConfigured: txlineAuthConfigured(),
         activeFixtureSource: txlineActiveFixtureSource(),
-        scoreboardFallbackEnabled: txlineFallbackEnabled(),
+        scoreboardFallbackEnabled: false,
         txlineGuestJwtMode: txlineGuestJwtMode(),
         requiredSnapshots: [
             '/api/fixtures/snapshot',
@@ -139,6 +186,40 @@ function eventTeams(update: { fixtureId: string; raw: Record<string, unknown> },
     };
 }
 
+function withFixtureMarketMetadata(fixture: any): any {
+    if (!fixture) return fixture;
+    const raw = fixture.raw && typeof fixture.raw === 'object' && !Array.isArray(fixture.raw)
+        ? fixture.raw
+        : {};
+    const startsAt = fixture.startsAt
+        ? fixture.startsAt instanceof Date
+            ? fixture.startsAt
+            : new Date(fixture.startsAt)
+        : undefined;
+    const status = fixture.status === 'final' || hasFinalScoreEvidence(raw)
+        ? 'final'
+        : fixture.status === 'live' || hasLiveScoreEvidence(raw)
+            ? 'live'
+            : normalizeFixtureStatus({ ...raw, status: fixture.status || raw.status }, startsAt);
+    const marketSelections = Array.isArray(raw.marketSelections) && raw.marketSelections.length > 0
+        ? raw.marketSelections
+        : ['part1', 'draw', 'part2'];
+    const marketTypes = Array.isArray(raw.marketTypes) && raw.marketTypes.length > 0
+        ? raw.marketTypes
+        : ['1X2_PARTICIPANT_RESULT'];
+    return {
+        ...fixture,
+        status,
+        marketSelections,
+        marketTypes,
+        raw: {
+            ...raw,
+            marketSelections,
+            marketTypes,
+        },
+    };
+}
+
 function timelineEventsFromOdds(updates: TxlineOddsUpdate[], fixtures: Map<string, any>): ArenaTimelineEventInput[] {
     return updates.map((update) => {
         const teams = eventTeams(update, fixtures.get(update.fixtureId));
@@ -206,7 +287,12 @@ export async function recordTimelineEvents(events: ArenaTimelineEventInput[]): P
 }
 
 export async function upsertFixtures(fixtures: TxlineFixture[]): Promise<number> {
+    const existingFixtures = await fixtureMetadataById(fixtures.map((fixture) => fixture.fixtureId));
     for (const fixture of fixtures) {
+        const existingFixture = existingFixtures.get(fixture.fixtureId);
+        const preservedStatus = scoreDerivedStatusToPreserve(existingFixture, fixture.status);
+        const status = preservedStatus || fixture.status;
+        const raw = mergeFixtureSnapshotRaw(existingFixture?.raw, fixture.raw, preservedStatus);
         await prismaAny.arenaFixture.upsert({
             where: { fixtureId: fixture.fixtureId },
             update: {
@@ -214,8 +300,8 @@ export async function upsertFixtures(fixtures: TxlineFixture[]): Promise<number>
                 homeTeam: fixture.homeTeam || null,
                 awayTeam: fixture.awayTeam || null,
                 startsAt: fixture.startsAt || null,
-                status: fixture.status,
-                raw: jsonValue(fixture.raw),
+                status,
+                raw: jsonValue(raw),
             },
             create: {
                 fixtureId: fixture.fixtureId,
@@ -229,6 +315,62 @@ export async function upsertFixtures(fixtures: TxlineFixture[]): Promise<number>
         });
     }
     return fixtures.length;
+}
+
+async function updateFixtureStatusesFromScores(updates: TxlineScoreUpdate[]): Promise<void> {
+    const latestByFixture = new Map<string, TxlineScoreUpdate>();
+    for (const update of updates) {
+        const status = normalizeFixtureStatus(update.raw);
+        if (status === 'unknown') continue;
+        const current = latestByFixture.get(update.fixtureId);
+        const currentStatus = current ? normalizeFixtureStatus(current.raw) : 'unknown';
+        if (currentStatus === 'final' && status !== 'final') continue;
+        if (
+            !current ||
+            (status === 'final' && currentStatus !== 'final') ||
+            update.sourceTimestamp.getTime() >= current.sourceTimestamp.getTime()
+        ) {
+            latestByFixture.set(update.fixtureId, update);
+        }
+    }
+    if (latestByFixture.size === 0) return;
+
+    const fixtures = await fixtureMetadataById([...latestByFixture.keys()]);
+    for (const [fixtureId, update] of latestByFixture.entries()) {
+        const fixture = fixtures.get(fixtureId);
+        if (!fixture) continue;
+        const nextStatus = normalizeFixtureStatus(update.raw);
+        if (fixture.status === 'final' && nextStatus !== 'final') continue;
+        const raw = fixture.raw && typeof fixture.raw === 'object' && !Array.isArray(fixture.raw)
+            ? fixture.raw
+            : {};
+        await prismaAny.arenaFixture.upsert({
+            where: { fixtureId },
+            update: {
+                status: nextStatus,
+                raw: jsonValue({
+                    ...raw,
+                    latestScoreState: update.raw.normalizedScoreState || null,
+                    latestScoreUpdateId: update.sourceUpdateId || null,
+                    latestScoreTimestamp: update.sourceTimestamp.toISOString(),
+                }),
+            },
+            create: {
+                fixtureId,
+                sport: fixture.sport || 'football',
+                homeTeam: fixture.homeTeam || null,
+                awayTeam: fixture.awayTeam || null,
+                startsAt: fixture.startsAt || null,
+                status: nextStatus,
+                raw: jsonValue({
+                    ...raw,
+                    latestScoreState: update.raw.normalizedScoreState || null,
+                    latestScoreUpdateId: update.sourceUpdateId || null,
+                    latestScoreTimestamp: update.sourceTimestamp.toISOString(),
+                }),
+            },
+        });
+    }
 }
 
 export async function syncFixturesFromTxline(): Promise<{ count: number; fixtures: TxlineFixture[] }> {
@@ -271,6 +413,7 @@ export async function recordScoreUpdates(updates: TxlineScoreUpdate[]): Promise<
             raw: jsonValue(update.raw),
         })),
     });
+    await updateFixtureStatusesFromScores(updates);
     const fixtures = await fixtureMetadataById(updates.map((update) => update.fixtureId));
     await recordTimelineEvents(timelineEventsFromScores(updates, fixtures));
     return updates.length;
@@ -302,10 +445,29 @@ export async function ingestScoresPayload(fixtureId: string, payload: unknown): 
 
 export async function listTxlineFixtures(limit = 50): Promise<any[]> {
     await maybeAutoSyncFixtures();
-    return prismaAny.arenaFixture.findMany({
+    const cappedLimit = Math.min(Math.max(limit, 1), 100);
+    const activeSource = txlineActiveFixtureSource();
+    const candidates = await prismaAny.arenaFixture.findMany({
         orderBy: [{ startsAt: 'asc' }, { createdAt: 'desc' }],
-        take: Math.min(Math.max(limit, 1), 100),
+        take: Math.max(cappedLimit, 500),
     });
+    return candidates
+        .filter((row: any) => String(row?.raw?.source || '') !== 'espn_scoreboard_fallback')
+        .sort((left: any, right: any) => {
+            const leftSource = String(left?.raw?.source || '');
+            const rightSource = String(right?.raw?.source || '');
+            const leftActive = activeSource !== 'unconfigured' && leftSource === activeSource ? 0 : 1;
+            const rightActive = activeSource !== 'unconfigured' && rightSource === activeSource ? 0 : 1;
+            if (leftActive !== rightActive) return leftActive - rightActive;
+            const leftStart = left?.startsAt ? new Date(left.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
+            const rightStart = right?.startsAt ? new Date(right.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
+            if (leftStart !== rightStart) return leftStart - rightStart;
+            const leftUpdated = left?.updatedAt ? new Date(left.updatedAt).getTime() : 0;
+            const rightUpdated = right?.updatedAt ? new Date(right.updatedAt).getTime() : 0;
+            return rightUpdated - leftUpdated;
+        })
+        .slice(0, cappedLimit)
+        .map(withFixtureMarketMetadata);
 }
 
 export async function getTxlineSnapshotProof(fixtureId: string): Promise<Record<string, unknown>> {
@@ -337,7 +499,7 @@ export async function getTxlineSnapshotProof(fixtureId: string): Promise<Record<
     return {
         day: 1,
         fixtureId,
-        fixture,
+        fixture: withFixtureMarketMetadata(fixture),
         latestOdds,
         latestScores,
         replayEvents: replayEvents.map((event: any, index: number) => serializeReplayEvent(event, index)),

@@ -141,4 +141,38 @@ describe('middlemanForwarder PER bridge redaction', () => {
         expect(body.price).toBe('9');
         expect(body.collateral).toBe('4');
     });
+
+    it('uses a longer bridge timeout for SPORT accept because escrow is created immediately', async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                ticketId: 'sport-ticket-1',
+                phase: 'awaiting_deposits',
+                dealPda: 'escrow-pda-1',
+            }),
+        });
+        const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+
+        const { middlemanForwarder } = await import('../src/services/middlemanForwarder');
+
+        const result = await middlemanForwarder.forwardOfferAccepted({
+            ticketId: 'sport-ticket-1',
+            buyerWallet: 'buyer-wallet',
+            sellerWallet: 'seller-wallet',
+            asset: 'TXLINE:18179549:1X2:part1',
+            price: 0.1,
+            amount: 4,
+            collateral: 1,
+            rollupMode: 'SPORT',
+        });
+
+        expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+        expect(result).toMatchObject({
+            success: true,
+            middlemanTicketId: 'sport-ticket-1',
+            phase: 'awaiting_deposits',
+            dealPda: 'escrow-pda-1',
+        });
+        timeoutSpy.mockRestore();
+    });
 });

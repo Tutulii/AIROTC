@@ -55,11 +55,6 @@ export function validateCreateOffer(body: any): ValidationResult {
         return { valid: false, error: 'amount is required and must be a finite number > 0' };
     }
 
-    // ── Collateral ──
-    if (typeof collateral !== 'number' || !Number.isFinite(collateral) || collateral < 0) {
-        return { valid: false, error: 'collateral is required and must be a finite number >= 0' };
-    }
-
     // ── Mode ──
     if (mode !== 'buy' && mode !== 'sell') {
         return { valid: false, error: 'mode must be either "buy" or "sell"' };
@@ -71,6 +66,18 @@ export function validateCreateOffer(body: any): ValidationResult {
 
     if (privateMode !== undefined && typeof privateMode !== 'boolean') {
         return { valid: false, error: 'privateMode must be a boolean when provided' };
+    }
+
+    const isSportMode = rollupMode === 'SPORT';
+
+    // ── Collateral ──
+    if (!isSportMode && (typeof collateral !== 'number' || !Number.isFinite(collateral) || collateral < 0)) {
+        return { valid: false, error: 'collateral is required and must be a finite number >= 0' };
+    }
+    if (isSportMode && collateral !== undefined && collateral !== null) {
+        if (typeof collateral !== 'number' || !Number.isFinite(collateral) || collateral < 0) {
+            return { valid: false, error: 'collateral must be a finite number >= 0 when provided' };
+        }
     }
 
     if (rollupMode === 'SPORT') {

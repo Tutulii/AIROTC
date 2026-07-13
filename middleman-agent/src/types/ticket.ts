@@ -17,6 +17,10 @@ export interface Ticket {
   rollup_mode?: RollupMode;
   tokenMint?: string;
   decimals?: number;
+  offer_asset?: string;
+  offer_price?: number;
+  offer_amount?: number;
+  offer_collateral?: number;
   created_at: string;
   deal_phase?: string;
   agreed_terms?: AgreedTerms;

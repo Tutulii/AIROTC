@@ -25,6 +25,37 @@ function toNumber(value: unknown): number {
     return parsed;
 }
 
+function asRecord(value: unknown): Record<string, any> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function sanitizeSportDepositInstructions(instructions: unknown): Record<string, unknown> | null {
+    const raw = asRecord(instructions);
+    if (!Object.keys(raw).length) return null;
+
+    const buyer = asRecord(raw.buyer);
+    const seller = asRecord(raw.seller);
+    const protocolDustLamports = buyer.protocolDustLamports ?? raw.protocolDustLamports ?? 0;
+    const buyerStake = buyer.stake ?? buyer.payment ?? buyer.total;
+    const sellerStake = seller.stake ?? seller.total;
+
+    return {
+        escrowPda: raw.escrowPda || raw.escrow_pda || null,
+        stakeModel: 'equal_stake',
+        buyer: {
+            wallet: buyer.wallet || null,
+            stake: buyerStake ?? null,
+            total: buyer.total ?? buyerStake ?? null,
+            ...(Number(protocolDustLamports) > 0 ? { protocolDustLamports } : {}),
+        },
+        seller: {
+            wallet: seller.wallet || null,
+            stake: sellerStake ?? null,
+            total: seller.total ?? sellerStake ?? null,
+        },
+    };
+}
+
 export const acceptOffer = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
@@ -119,6 +150,7 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
 
         const ticket = await acceptOfferService(id as string, wallet, settlementWallet);
         let sportArenaMatch: Record<string, unknown> | null = null;
+        let sportEscrow: Record<string, unknown> | null = null;
 
         // Forward to Middleman before telling the agent the offer is accepted.
         // Sends BOTH buyer and seller wallets so they land in ONE ticket.
@@ -185,10 +217,18 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
             });
 
             if ((offer as any).rollupMode === 'SPORT') {
+                sportEscrow = {
+                    mathOnly: true,
+                    phase: result.phase || null,
+                    dealPda: result.dealPda || null,
+                    depositInstructions: sanitizeSportDepositInstructions(result.depositInstructions),
+                    note: 'SPORT settlement is deterministic: each agent deposits the same stake, no delivery step is used, and TxLINE outcome plus market selection decides release/refund.',
+                };
                 try {
                     const attachResult = await attachSportTicketByOffer({
                         offerId: offer.id,
                         ticketId: ticket.id,
+                        escrowPda: result.dealPda || null,
                     });
                     sportArenaMatch = (attachResult as any).match || attachResult;
                 } catch (error: any) {
@@ -211,6 +251,7 @@ export const acceptOffer = async (req: Request, res: Response): Promise<void> =>
             success: true,
             ticket,
             ...(sportArenaMatch ? { arenaMatch: sportArenaMatch } : {}),
+            ...(sportEscrow ? { sportEscrow } : {}),
         });
     } catch (error: any) {
         if (error.message === 'OFFER_NOT_FOUND') {
@@ -319,28 +360,39 @@ export const sendMessage = async (req: Request, res: Response): Promise<void> =>
         // 1. Store message in API database
         const message = await createMessageService(id as string, wallet, content);
 
-        // 2. Forward to Middleman brain — SYNCHRONOUS (await brain response)
+        const ticket = await prisma.ticket.findUnique({
+            where: { id: id as string },
+            select: { rollupMode: true },
+        });
+        const isSportTicket = ticket?.rollupMode === 'SPORT';
+
+        // 2. Forward to Middleman brain — SYNCHRONOUS (await brain response).
+        // SPORT chat is deliberately conversation-only: settlement is derived
+        // from TxLINE outcome math, never from message interpretation.
         let brain: any = null;
-        try {
-            const result = await middlemanForwarder.forwardMessage({
-                ticketId: id as string,
-                sender: wallet,
-                content,
-            });
-            if (result.success) {
-                brain = result.brain;
-            } else {
+        if (!isSportTicket) {
+            try {
+                const result = await middlemanForwarder.forwardMessage({
+                    ticketId: id as string,
+                    sender: wallet,
+                    content,
+                });
+                if (result.success) {
+                    brain = result.brain;
+                } else {
+                    logger.warn("warning");
+                }
+            } catch (fwdErr: any) {
+                // Non-fatal — message is already stored in API DB
                 logger.warn("warning");
             }
-        } catch (fwdErr: any) {
-            // Non-fatal — message is already stored in API DB
-            logger.warn("warning");
         }
 
         // 3. Return message + brain response to agent
         res.status(201).json({
             success: true,
             message,
+            sportMathOnly: isSportTicket || undefined,
             brain: brain ? {
                 action: brain.action,
                 phase: brain.phase,

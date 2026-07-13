@@ -37,7 +37,7 @@ import { settlementTargetStore } from '../state/settlementTargetStore';
 import { rewardTargetStore } from '../state/rewardTargetStore';
 import { getAgentDWallet, isConfidentialEscrowReady } from '../services/confidentialExecutionService';
 import { executeDeal, executeRelease } from '../services/executionService';
-import { executeCancelDeal, executeFractionalSplit } from '../services/onChainExecutionService';
+import { executeCancelDeal, executeCommitSportPositionFillToDeal, executeCommitSportPositionsToDeal, executeFractionalSplit, executeFundSportPositionV2, executeRefundExpiredSportPositionRemaining, executeSettleToBuyerPhase, type ExecutionResult } from '../services/onChainExecutionService';
 import { executeSportSettlement } from '../services/sportSettlementBridge';
 import { loadConfig } from '../config';
 import { registerObservatoryTicketMapping } from '../services/observatoryBridge';
@@ -45,6 +45,7 @@ import { pipelineStateStore } from '../state/pipelineStateStore';
 import { prisma } from '../lib/prisma';
 import { verifyAuditChain } from '../services/auditTrail';
 import dealTimelineRouter from './dealTimeline';
+import { resolveEscrowTermsForTicket } from '../services/escrowTermsResolver';
 
 let server: any;
 
@@ -69,6 +70,17 @@ const localDemoOffers = new Map<string, LocalDemoOffer>();
 
 function isPerStrictOpaqueModeEnabled(): boolean {
     return (process.env.PER_STRICT_OPAQUE_MODE || "true").toLowerCase() !== "false";
+}
+
+export function resolveSportStake(price: number, amount: number): number {
+    return price > 0 ? price : amount;
+}
+
+export function resolveSportEscrowAssetType(rollupMode: string | undefined, asset?: string | null, tokenMint?: string | null): string {
+    if (rollupMode === "SPORT") {
+        return "SOL";
+    }
+    return asset || tokenMint || "SOL";
 }
 
 type OnChainActionResult = {
@@ -102,6 +114,10 @@ function scheduleOnChainAction(ticketId: string, result: OnChainActionResult): v
     } else if (result.on_chain_action === "cancel_deal") {
         executeCancelDeal(ticketId).catch((err: any) => {
             logger.error("rest_cancel_unhandled_failure", { ticketId }, err);
+        });
+    } else if (result.on_chain_action === "settle_to_buyer") {
+        executeSettleToBuyerPhase(ticketId).catch((err: any) => {
+            logger.error("rest_settle_to_buyer_unhandled_failure", { ticketId }, err);
         });
     }
 }
@@ -150,6 +166,8 @@ function mapPersistedDealStatusToPublicPhase(status: string | null | undefined):
             return 'escrow_created';
         case 'collateral_locked':
             return 'awaiting_deposits';
+        case 'awaiting_result':
+            return 'awaiting_result';
         case 'payment_locked':
             return 'delivery';
         default:
@@ -211,7 +229,9 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
 
     const escrowPda = persistedDeal?.dealIdOnChain || legacyDeal?.escrow_pda || null;
     const onChainPhase = escrowPda ? await resolveOnChainPublicPhase(escrowPda) : null;
+    const sportAwaitingResultPhase = legacyDeal?.phase === 'awaiting_result' ? 'awaiting_result' : null;
     const publicPhase =
+        sportAwaitingResultPhase ||
         onChainPhase ||
         legacyDeal?.phase ||
         mapPersistedDealStatusToPublicPhase(persistedDeal?.status) ||
@@ -224,6 +244,7 @@ async function resolveUnifiedDealStatus(ticketId: string): Promise<{
         seller: legacyDeal?.seller || null,
         escrow_pda: escrowPda,
         payment_locked:
+            publicPhase === 'awaiting_result' ||
             publicPhase === 'delivery' ||
             publicPhase === 'awaiting_buyer_release_confirmation' ||
             publicPhase === 'seller_dispute_window',
@@ -602,6 +623,10 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 rollup_mode: offer.rollupMode,
                 tokenMint: offer.tokenMint || undefined,
                 decimals: offer.tokenDecimals,
+                offer_asset: offer.asset,
+                offer_price: offer.price,
+                offer_amount: offer.amount,
+                offer_collateral: offer.collateral,
                 status: "active",
                 created_at: new Date().toISOString()
             });
@@ -721,6 +746,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 sellerRewardWallet,
                 buyerFundingWallet,
                 sellerFundingWallet,
+                sportPositionVaults,
             } = req.body;
 
             if (!buyerWallet || !sellerWallet) {
@@ -800,8 +826,47 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             // same ID the middleman knows.
             const ticketId = externalTicketId || `TCK-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
             const parsedPrice = parseFloat(price) || 0;
+            const parsedAmount = parseFloat(amount) || 0;
             const parsedCol = parseFloat(collateral) || 0;
             const strictPerOpaque = rollupMode === 'PER' && isPerStrictOpaqueModeEnabled();
+            const isSportMode = rollupMode === 'SPORT';
+            const sportStake = resolveSportStake(parsedPrice, parsedAmount);
+            if (isSportMode && sportStake <= 0) {
+                res.status(400).json({ error: "SPORT stake must be greater than zero." });
+                return;
+            }
+            const sportVaults = sportPositionVaults && typeof sportPositionVaults === 'object'
+                ? sportPositionVaults as Record<string, unknown>
+                : {};
+            const sportBuyerPositionVault = isSportMode
+                ? validateSettlementWallet(
+                    sportVaults.buyerPositionVaultPda || sportVaults.buyerVaultPda || sportVaults.buyer,
+                    "sportPositionVaults.buyerPositionVaultPda"
+                )
+                : null;
+            const sportSellerPositionVault = isSportMode
+                ? validateSettlementWallet(
+                    sportVaults.sellerPositionVaultPda || sportVaults.sellerVaultPda || sportVaults.seller,
+                    "sportPositionVaults.sellerPositionVaultPda"
+                )
+                : null;
+            const sportBuyerPositionId = typeof sportVaults.buyerPositionId === 'string' ? sportVaults.buyerPositionId : null;
+            const sportSellerPositionId = typeof sportVaults.sellerPositionId === 'string' ? sportVaults.sellerPositionId : null;
+            const sportFillLamports = typeof sportVaults.fillLamports === 'string' && /^\d+$/.test(sportVaults.fillLamports)
+                ? sportVaults.fillLamports
+                : typeof sportVaults.stakeLamports === 'string' && /^\d+$/.test(sportVaults.stakeLamports)
+                    ? sportVaults.stakeLamports
+                    : null;
+            const sportVaultVersion = typeof sportVaults.vaultVersion === 'string' ? sportVaults.vaultVersion : null;
+            const isSportPartialFill = isSportMode && (sportVaultVersion === 'v2' || Boolean(sportVaults.fillId || sportVaults.fillLamports));
+            if (isSportMode && (!sportBuyerPositionVault || !sportSellerPositionVault)) {
+                res.status(400).json({ error: "SPORT matched deals require prefunded buyer/seller position vaults." });
+                return;
+            }
+            if (isSportPartialFill && !sportFillLamports) {
+                res.status(400).json({ error: "SPORT partial-fill matched deals require fillLamports." });
+                return;
+            }
 
             // 1. Register both wallets in the internal registry
             const { walletRegistry } = await import('../state/walletRegistry');
@@ -825,6 +890,10 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                                 : 'NONE',
                 tokenMint,
                 decimals: decimals ? parseInt(decimals) : undefined,
+                offer_asset: asset || 'SOL',
+                offer_price: parsedPrice || undefined,
+                offer_amount: parsedAmount || undefined,
+                offer_collateral: isSportMode ? 0 : parsedCol || undefined,
                 status: "active",
                 created_at: new Date().toISOString()
             });
@@ -875,15 +944,61 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             // 3. Initialize the deal in the phase manager with both agents
             dealPhaseManager.initDeal(ticketId, buyerWallet, sellerWallet);
 
-            // 4. Seed initial negotiation terms so the brain has context
-            if (!strictPerOpaque) {
+            // 4. Seed initial terms for normal negotiation modes only. SPORT is
+            // math-only: the immutable offer terms open escrow immediately and
+            // chat is never used to create, alter, or release the wager.
+            if (!strictPerOpaque && !isSportMode) {
                 await negotiationStore.addNegotiationStep(ticketId, {
                     price: parsedPrice,
                     collateral_buyer: parsedCol,
                     collateral_seller: parsedCol,
                     agreement_signal: false,
                     agreement_score: 10
-                }, buyerAgent.id, `External matched deal: ${amount || 1} ${asset || 'SOL'} @ ${parsedPrice}`);
+                }, buyerAgent.id, `External matched deal: ${parsedAmount || amount || 1} ${asset || 'SOL'} @ ${parsedPrice}`);
+            }
+
+            let sportPipelineResult: ExecutionResult | null = null;
+            if (isSportMode) {
+                sportPipelineResult = isSportPartialFill
+                    ? await executeCommitSportPositionFillToDeal({
+                        ticketId,
+                        buyerWallet,
+                        sellerWallet,
+                        buyerPositionVaultPda: sportBuyerPositionVault,
+                        sellerPositionVaultPda: sportSellerPositionVault,
+                        buyerPositionId: sportBuyerPositionId,
+                        sellerPositionId: sportSellerPositionId,
+                        fillLamports: sportFillLamports!,
+                    })
+                    : await executeCommitSportPositionsToDeal({
+                        ticketId,
+                        buyerWallet,
+                        sellerWallet,
+                        buyerPositionVaultPda: sportBuyerPositionVault,
+                        sellerPositionVaultPda: sportSellerPositionVault,
+                        buyerPositionId: sportBuyerPositionId,
+                        sellerPositionId: sportSellerPositionId,
+                        stakeSol: sportStake,
+                    });
+
+                if (!sportPipelineResult.success || !sportPipelineResult.dealPda) {
+                    throw new Error(sportPipelineResult.error || "sport_position_commit_failed");
+                }
+
+                dealPhaseManager.setEscrowPda(ticketId, sportPipelineResult.dealPda);
+                const sportDeal = dealPhaseManager.getDeal(ticketId);
+                if (sportDeal) {
+                    sportDeal.terms = {
+                        price: sportStake,
+                        collateral_buyer: 0,
+                        collateral_seller: sportStake,
+                        asset_type: resolveSportEscrowAssetType(rollupMode, asset, tokenMint),
+                    };
+                    sportDeal.buyer_deposited = true;
+                    sportDeal.seller_deposited = true;
+                    sportDeal.payment_locked = true;
+                    dealPhaseManager.transition(sportDeal, "awaiting_result", "system", "AUTO");
+                }
             }
 
             // 5. Publish events so the observability layer knows
@@ -891,21 +1006,32 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 offer_id: `OFF-${crypto.randomBytes(4).toString("hex").toUpperCase()}`,
                 type: "buy",
                 creator: buyerWallet,
-                content: strictPerOpaque
-                    ? `Matched PER deal opened for ${(amount || 1)} ${asset || 'SOL'}. Private negotiation continues in rollup mode.`
-                    : `Matched deal: ${amount || 1} ${asset || 'SOL'} @ ${parsedPrice} (Col: ${parsedCol})`,
+                content: isSportMode
+                    ? `SPORT wager matched. Prefunded stakes are locked in escrow ${sportPipelineResult?.dealPda}. Chat is conversation-only; TxLINE final outcome decides settlement automatically.`
+                    : strictPerOpaque
+                    ? `Matched PER deal opened for ${(parsedAmount || amount || 1)} ${asset || 'SOL'}. Private negotiation continues in rollup mode.`
+                    : `Matched deal: ${parsedAmount || amount || 1} ${asset || 'SOL'} @ ${parsedPrice} (Col: ${parsedCol})`,
                 timestamp: new Date().toISOString()
             });
 
             // 6. Notify both agents the negotiation is open
-            eventBus.publish("middleman_response", {
-                ticket_id: ticketId,
-                content: strictPerOpaque
-                    ? `🤝 PER deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nPrivate negotiation is open. Use the rollup SDK methods to submit and finalize terms. Plain chat is conversation-only in strict PER mode.`
-                    : `🤝 Deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nAsset: ${asset || 'SOL'} | Amount: ${amount || 1} | Price: ${parsedPrice}\n\nBoth parties — please confirm your terms to proceed. The Middleman is ready to create escrow once you agree.`,
-                phase: "negotiation",
-                timestamp: new Date().toISOString()
-            });
+            if (isSportMode) {
+                eventBus.publish("middleman_response", {
+                    ticket_id: ticketId,
+                    content: `SPORT wager locked from prefunded position vaults. Escrow: ${sportPipelineResult?.dealPda}. No deposit or delivery step is used; settlement runs automatically from TxLINE final result.`,
+                    phase: "awaiting_result",
+                    timestamp: new Date().toISOString()
+                });
+            } else {
+                eventBus.publish("middleman_response", {
+                    ticket_id: ticketId,
+                    content: strictPerOpaque
+                        ? `🤝 PER deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nPrivate negotiation is open. Use the rollup SDK methods to submit and finalize terms. Plain chat is conversation-only in strict PER mode.`
+                        : `🤝 Deal matched. Buyer: ${buyerWallet.substring(0, 8)}... | Seller: ${sellerWallet.substring(0, 8)}...\n\nAsset: ${asset || 'SOL'} | Amount: ${parsedAmount || amount || 1} | Price: ${parsedPrice}\n\nBoth parties — please confirm your terms to proceed. The Middleman is ready to create escrow once you agree.`,
+                    phase: "negotiation",
+                    timestamp: new Date().toISOString()
+                });
+            }
 
             if (rollupMode === 'ER' || rollupMode === 'PER') {
                 eventBus.publish("negotiation_ready", {
@@ -927,6 +1053,7 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 hasRewardWallets: !!normalizedBuyerRewardWallet && !!normalizedSellerRewardWallet,
                 asset,
                 price: strictPerOpaque ? "redacted_for_per" : parsedPrice,
+                amount: parsedAmount,
                 rollupMode: rollupMode || 'NONE',
                 externalTicketId
             });
@@ -936,7 +1063,17 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 status: "matched",
                 buyer: buyerWallet,
                 seller: sellerWallet,
-                phase: "negotiation"
+                phase: isSportMode ? "awaiting_result" : "negotiation",
+                dealPda: sportPipelineResult?.dealPda || null,
+                depositInstructions: null,
+                prefundedPositionVaults: isSportMode ? {
+                    buyer: sportBuyerPositionVault,
+                    seller: sportSellerPositionVault,
+                    stake: sportStake,
+                    fillLamports: sportFillLamports,
+                    vaultVersion: sportVaultVersion || 'v1',
+                } : null,
+                tx: sportPipelineResult?.tx || null,
             });
 
         } catch (e: any) {
@@ -1030,7 +1167,9 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
         })();
     });
 
-    // Bridge: Forward a message to the brain for processing
+    // Bridge: Forward a message to the brain for processing. SPORT tickets are
+    // explicitly excluded below because their settlement is deterministic from
+    // offer terms + TxLINE outcome, not chat interpretation.
     // CRITICAL: Must mirror the WebSocket pipeline (index.ts:440-510)
     //   1. Resolve wallet → agent UUID
     //   2. Parse negotiation signals from message text
@@ -1054,6 +1193,26 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
             const ticket = await ticketStore.getTicket(ticketId);
             const strictPerOpaque =
                 ticket?.rollup_mode === 'PER' && isPerStrictOpaqueModeEnabled();
+            const sportMathOnly = ticket?.rollup_mode === 'SPORT';
+
+            if (sportMathOnly) {
+                const deal = await dealPhaseManager.getDealWithFallback(ticketId);
+                logger.info("sport_rest_message_observed_without_brain", {
+                    ticketId,
+                    sender: agentId,
+                    senderWallet,
+                });
+                res.json({
+                    response: deal?.escrow_pda
+                        ? `SPORT message recorded. Settlement is math-only from TxLINE outcome; escrow ${deal.escrow_pda} remains the source of funds.`
+                        : "SPORT message recorded. Settlement is math-only from TxLINE outcome; escrow/deposit state is handled by the SPORT pipeline.",
+                    action: "OBSERVE",
+                    phase: deal?.phase || "awaiting_deposits",
+                    escrow_pda: deal?.escrow_pda || null,
+                    mathOnly: true,
+                });
+                return;
+            }
 
             if (strictPerOpaque) {
                 logger.info("per_strict_rest_message_observed_without_plaintext_analysis", {
@@ -1150,6 +1309,13 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                     phase: releaseResult.new_phase || deal.phase,
                 });
             } else if (decision.action !== "OBSERVE") {
+                if (decision.action === "CREATE_ESCROW" && decision.terms) {
+                    const ticket = await ticketStore.getTicket(ticketId);
+                    if (ticket) {
+                        decision.terms = resolveEscrowTermsForTicket(ticket, decision.terms);
+                    }
+                }
+
                 // Brain decided to act
                 const result = await dealPhaseManager.handleAction(
                     decision.action,
@@ -1196,6 +1362,100 @@ export function startRestApi(port: number = parseInt(process.env.API_PORT || "80
                 fixtureId: req.body?.fixtureId,
                 outcomeWinner: req.body?.outcomeWinner,
                 winnerWallet: req.body?.winnerWallet,
+            });
+
+            res.status(result.success ? 200 : 502).json(result);
+        } catch (e: any) {
+            const statusCode = Number.isInteger(e?.statusCode) ? e.statusCode : 500;
+            res.status(statusCode).json({
+                success: false,
+                error: e?.message || String(e),
+            });
+        }
+    });
+
+    app.post('/v1/sport/positions/:positionId/refund-expired', verifyBridgeHmac, bridgeRateLimiter, async (req, res) => {
+        try {
+            const positionId = String(req.params.positionId || '').trim();
+            const ownerWallet = validateSettlementWallet(req.body?.ownerWallet, "ownerWallet");
+            const vaultPda = req.body?.vaultPda
+                ? validateSettlementWallet(req.body.vaultPda, "vaultPda")
+                : null;
+
+            if (!positionId) {
+                res.status(400).json({
+                    success: false,
+                    error: "positionId_required",
+                });
+                return;
+            }
+            if (!ownerWallet) {
+                res.status(400).json({
+                    success: false,
+                    error: "ownerWallet_required",
+                });
+                return;
+            }
+
+            const result = await executeRefundExpiredSportPositionRemaining({
+                positionId,
+                ownerWallet,
+                vaultPda,
+                closeIfNoCommittedStake: req.body?.closeIfNoCommittedStake !== false,
+            });
+
+            res.status(result.success ? 200 : 502).json(result);
+        } catch (e: any) {
+            const statusCode = Number.isInteger(e?.statusCode) ? e.statusCode : 500;
+            res.status(statusCode).json({
+                success: false,
+                error: e?.message || String(e),
+            });
+        }
+    });
+
+    app.post('/v1/sport/positions/:positionId/execute-funding', verifyBridgeHmac, bridgeRateLimiter, async (req, res) => {
+        try {
+            const positionId = String(req.params.positionId || '').trim();
+            const ownerWallet = validateSettlementWallet(req.body?.ownerWallet, "ownerWallet");
+            const vaultPda = req.body?.vaultPda
+                ? validateSettlementWallet(req.body.vaultPda, "vaultPda")
+                : null;
+            const fixtureId = typeof req.body?.fixtureId === 'string' ? req.body.fixtureId.trim() : '';
+            const marketType = typeof req.body?.marketType === 'string' ? req.body.marketType.trim() : '';
+            const selection = typeof req.body?.selection === 'string' ? req.body.selection.trim() : '';
+            const side = req.body?.side === 'lay' ? 'lay' : 'back';
+            const stakeLamports = typeof req.body?.stakeLamports === 'string' ? req.body.stakeLamports.trim() : '';
+            const expiresAtUnix = Number(req.body?.expiresAtUnix);
+
+            if (!positionId) {
+                res.status(400).json({ success: false, error: "positionId_required" });
+                return;
+            }
+            if (!ownerWallet) {
+                res.status(400).json({ success: false, error: "ownerWallet_required" });
+                return;
+            }
+            if (!fixtureId || !marketType || !selection || !stakeLamports || !Number.isFinite(expiresAtUnix)) {
+                res.status(400).json({ success: false, error: "sport_position_funding_payload_invalid" });
+                return;
+            }
+            if (!req.body?.ownerKeypair) {
+                res.status(400).json({ success: false, error: "ownerKeypair_required" });
+                return;
+            }
+
+            const result = await executeFundSportPositionV2({
+                positionId,
+                ownerWallet,
+                ownerKeypair: req.body.ownerKeypair,
+                fixtureId,
+                marketType,
+                selection,
+                side,
+                stakeLamports,
+                expiresAtUnix,
+                vaultPda,
             });
 
             res.status(result.success ? 200 : 502).json(result);

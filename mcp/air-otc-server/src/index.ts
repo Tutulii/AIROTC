@@ -19,7 +19,8 @@ type Scope =
   | "per:run"
   | "proofs:read"
   | "vault:read"
-  | "umbra:read";
+  | "umbra:read"
+  | "sport:admin";
 
 type JsonRpcRequest = {
   jsonrpc?: string;
@@ -83,7 +84,7 @@ type McpTokenPayload = {
   jti: string;
 };
 
-const validScopes = new Set<Scope>([
+const tradeAgentScopes: Scope[] = [
   "offers:read",
   "offers:write",
   "deals:read",
@@ -93,10 +94,16 @@ const validScopes = new Set<Scope>([
   "proofs:read",
   "vault:read",
   "umbra:read",
+];
+
+const validScopes = new Set<Scope>([
+  ...tradeAgentScopes,
+  "sport:admin",
 ]);
 
-const defaultFullScopes = new Set<Scope>(validScopes);
+const defaultFullScopes = new Set<Scope>(tradeAgentScopes);
 const MCP_SHORT_TOKEN_PREFIX = "airotc_sk_";
+const SPORT_ASSUMED_LIVE_WINDOW_MS = 4 * 60 * 60 * 1000;
 const AGENT_EVENT_NAMES = [
   "deal.matched",
   "deal.expiring",
@@ -109,6 +116,15 @@ const AGENT_EVENT_NAMES = [
   "deal.completed",
   "deal.cancelled",
   "deal.refunded",
+  "position.funded",
+  "position.filled",
+  "position.expired",
+  "position.refunded",
+  "match.awaiting_result",
+  "match.settled",
+  "intent.created",
+  "intent.match_available",
+  "liquidity.available",
   "reputation.update",
 ] as const;
 const TELEGRAM_NOTIFICATION_EVENT_NAMES = [
@@ -121,6 +137,13 @@ const TELEGRAM_NOTIFICATION_EVENT_NAMES = [
   "deal.deposit_received",
   "deal.delivery_confirmed",
   "deal.completed",
+  "position.funded",
+  "position.filled",
+  "position.refunded",
+  "match.awaiting_result",
+  "match.settled",
+  "intent.match_available",
+  "liquidity.available",
 ] as const;
 
 function parseScopes(value: string | string[] | undefined, fallback: Set<Scope>): Set<Scope> {
@@ -169,7 +192,7 @@ function parseTokenRules(fallbackScopes: Set<Scope>): TokenRule[] {
 
 const defaultScopes = parseScopes(
   process.env.AIR_OTC_MCP_SCOPES ||
-    "offers:read,offers:write,deals:read,dm:read,dm:write,per:run,proofs:read,vault:read,umbra:read",
+    tradeAgentScopes.join(","),
   defaultFullScopes
 );
 
@@ -229,6 +252,159 @@ function walletAuth() {
     secretKey,
   };
   return cachedWalletAuth;
+}
+
+type FundingSession = {
+  wallet: string;
+  tokenKey: string;
+  secretKeyBase58: string;
+  sessionId: string;
+  createdAtMs: number;
+  expiresAtMs: number;
+};
+
+const fundingSessions = new Map<string, FundingSession>();
+const DEFAULT_FUNDING_SESSION_TTL_SECONDS = 8 * 60 * 60;
+const MIN_FUNDING_SESSION_TTL_SECONDS = 5 * 60;
+const MAX_FUNDING_SESSION_TTL_SECONDS = 24 * 60 * 60;
+
+function parseSecretKeyMaterial(value: unknown): Uint8Array {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) throw new Error("walletKeypair_required");
+    if (trimmed.startsWith("[")) {
+      parsed = JSON.parse(trimmed);
+    } else {
+      return bs58.decode(trimmed);
+    }
+  }
+  if (Array.isArray(parsed)) {
+    const bytes = parsed.map((item) => Number(item));
+    if (bytes.some((item) => !Number.isInteger(item) || item < 0 || item > 255)) {
+      throw new Error("walletKeypair_invalid_byte_array");
+    }
+    return Uint8Array.from(bytes);
+  }
+  throw new Error("walletKeypair_must_be_base58_or_json_array");
+}
+
+function keypairPublicKey(secretKey: Uint8Array): string {
+  if (secretKey.length !== 64) {
+    throw new Error("walletKeypair_must_be_64_bytes");
+  }
+  return bs58.encode(nacl.sign.keyPair.fromSecretKey(secretKey).publicKey);
+}
+
+function normalizedFundingSessionTtlSeconds(value: unknown): number {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_FUNDING_SESSION_TTL_SECONDS;
+  return Math.min(Math.max(parsed, MIN_FUNDING_SESSION_TTL_SECONDS), MAX_FUNDING_SESSION_TTL_SECONDS);
+}
+
+function fundingSessionTokenKey(authToken?: string): string {
+  return tokenFingerprint(normalizeAuthToken(authToken) || "local-mcp-session");
+}
+
+function fundingSessionKey(wallet: string, authToken?: string): string {
+  return `${wallet}:${fundingSessionTokenKey(authToken)}`;
+}
+
+function fundingSessionWalletKey(wallet: string): string {
+  return `${wallet}:wallet-session`;
+}
+
+function pruneExpiredFundingSessions(nowMs = Date.now()): void {
+  for (const [key, session] of fundingSessions.entries()) {
+    if (session.expiresAtMs <= nowMs) fundingSessions.delete(key);
+  }
+}
+
+function registerFundingSession(wallet: string, authToken: string | undefined, walletKeypair: unknown, ttlSecondsInput?: unknown) {
+  const secretKey = parseSecretKeyMaterial(walletKeypair);
+  const publicKey = keypairPublicKey(secretKey);
+  if (publicKey !== wallet) {
+    throw new Error(`sport_funding_session_wallet_mismatch:configured=${publicKey}:requested=${wallet}`);
+  }
+  pruneExpiredFundingSessions();
+  const ttlSeconds = normalizedFundingSessionTtlSeconds(ttlSecondsInput);
+  const nowMs = Date.now();
+  const tokenKey = fundingSessionTokenKey(authToken);
+  const sessionId = crypto.randomBytes(12).toString("hex");
+  const session: FundingSession = {
+    wallet,
+    tokenKey,
+    secretKeyBase58: bs58.encode(secretKey),
+    sessionId,
+    createdAtMs: nowMs,
+    expiresAtMs: nowMs + ttlSeconds * 1000,
+  };
+  fundingSessions.set(fundingSessionKey(wallet, authToken), session);
+  fundingSessions.set(fundingSessionWalletKey(wallet), session);
+  return {
+    wallet,
+    sessionId,
+    registered: true,
+    storage: "mcp_process_memory_only",
+    ttlSeconds,
+    expiresAt: new Date(session.expiresAtMs).toISOString(),
+    note: "Funding key is held only in MCP process memory and is not returned by any tool. Restarting the MCP server clears this session.",
+  };
+}
+
+function getFundingSessionKeypair(wallet: string, authToken?: string): string | undefined {
+  pruneExpiredFundingSessions();
+  return (
+    fundingSessions.get(fundingSessionKey(wallet, authToken)) ||
+    fundingSessions.get(fundingSessionWalletKey(wallet))
+  )?.secretKeyBase58;
+}
+
+function getFundingSessionStatus(wallet: string, authToken?: string): Record<string, unknown> {
+  pruneExpiredFundingSessions();
+  const tokenSession = fundingSessions.get(fundingSessionKey(wallet, authToken));
+  const walletSession = fundingSessions.get(fundingSessionWalletKey(wallet));
+  const session = tokenSession || walletSession;
+  if (!session) {
+    return {
+      wallet,
+      active: false,
+      storage: "mcp_process_memory_only",
+      note: "No in-memory funding session is active for this wallet and MCP token.",
+    };
+  }
+  const ttlRemainingSeconds = Math.max(0, Math.ceil((session.expiresAtMs - Date.now()) / 1000));
+  return {
+    wallet,
+    active: true,
+    sessionId: session.sessionId,
+    storage: "mcp_process_memory_only",
+    binding: tokenSession ? "token_and_wallet" : "wallet",
+    createdAt: new Date(session.createdAtMs).toISOString(),
+    expiresAt: new Date(session.expiresAtMs).toISOString(),
+    ttlRemainingSeconds,
+  };
+}
+
+function clearFundingSession(wallet: string, authToken?: string): Record<string, unknown> {
+  pruneExpiredFundingSessions();
+  const key = fundingSessionKey(wallet, authToken);
+  const session = fundingSessions.get(key) || fundingSessions.get(fundingSessionWalletKey(wallet));
+  const existed = Boolean(session);
+  if (session) {
+    for (const [candidateKey, candidateSession] of fundingSessions.entries()) {
+      if (candidateSession.wallet === wallet && candidateSession.sessionId === session.sessionId) {
+        fundingSessions.delete(candidateKey);
+      }
+    }
+  } else {
+    fundingSessions.delete(key);
+    fundingSessions.delete(fundingSessionWalletKey(wallet));
+  }
+  return {
+    wallet,
+    cleared: existed,
+  };
 }
 
 function isValidSolanaWallet(wallet: string): boolean {
@@ -500,23 +676,102 @@ function normalizeSportStatus(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-function sportStatusBucket(value: unknown): "live" | "upcoming" | "final" | "unknown" {
-  const status = normalizeSportStatus(value);
-  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half"].includes(status)) {
+function sportRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function sportNested(value: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, key) => sportRecord(current)[key], value);
+}
+
+function sportFirstString(source: Record<string, unknown>, keys: string[], fallback = ""): string {
+  for (const key of keys) {
+    const value = key.includes(".") ? sportNested(source, key) : source[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return fallback;
+}
+
+function sportHasClockEvidence(raw: Record<string, unknown>): boolean {
+  const clock = raw.Clock || sportNested(raw, "Data.New.Clock") || sportNested(raw, "Data.Clock");
+  if (typeof clock === "string") return clock.trim().length > 0;
+  if (typeof clock === "number") return Number.isFinite(clock);
+  return Object.keys(sportRecord(clock)).length > 0;
+}
+
+function sportHasScoreEvidence(raw: Record<string, unknown>): boolean {
+  return (
+    Object.keys(sportRecord(raw.Score || raw.score)).length > 0 ||
+    Object.keys(sportRecord(sportNested(raw, "Data.New.Score"))).length > 0 ||
+    Object.keys(sportRecord(sportNested(raw, "Data.Score"))).length > 0
+  );
+}
+
+function sportHasLiveScoreEvidence(raw: Record<string, unknown>): boolean {
+  const state = sportRecord(raw.normalizedScoreState || raw.latestScoreState);
+  const stateStatus = normalizeSportStatus(sportFirstString(state, ["status"]));
+  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half", "2"].includes(stateStatus)) {
+    return true;
+  }
+
+  const action = normalizeSportStatus(sportFirstString(raw, ["Action"]) || sportFirstString(state, ["action"]));
+  if (["disconnected", "fixture_created", "fixture_updated", "game_finalised", "game_finalized", "finalised", "finalized"].includes(action)) {
+    return false;
+  }
+  if (sportHasClockEvidence(raw) || sportHasClockEvidence(state)) return true;
+  return (
+    (sportHasScoreEvidence(raw) || sportHasScoreEvidence(state)) &&
+    ["update", "updated", "score_update", "score_changed", "clock_update", "clock_changed", "game_started", "period_started", "stats_update", "statistics_update"].includes(action)
+  );
+}
+
+function sportStatusBucket(fixtureOrStatus: unknown, startsAt?: unknown): "live" | "upcoming" | "final" | "unknown" {
+  const fixture = sportRecord(fixtureOrStatus);
+  const raw = sportRecord(fixture.raw);
+  const statusInput = Object.keys(fixture).length > 0
+    ? fixture.status || raw.latestScoreState || raw.GameState || raw.status
+    : fixtureOrStatus;
+  const status = normalizeSportStatus(statusInput);
+  const latestScoreState = sportRecord(raw.latestScoreState);
+  const scoreStateStatus = normalizeSportStatus(sportFirstString(latestScoreState, ["status"]));
+  const action = normalizeSportStatus(sportFirstString(raw, ["Action"]) || sportFirstString(sportRecord(raw.latestScoreState), ["action"]));
+  if (
+    ["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft", "3", "4"].includes(status) ||
+    ["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft", "3", "4"].includes(scoreStateStatus) ||
+    ["finalised", "finalized", "game_finalised", "game_finalized"].includes(action)
+  ) {
+    return "final";
+  }
+  if (["live", "in_play", "in_progress", "running", "started", "first_half", "second_half", "2"].includes(status) || sportHasLiveScoreEvidence(raw)) {
     return "live";
   }
-  if (["scheduled", "upcoming", "not_started", "pre_match", "pending"].includes(status)) {
-    return "upcoming";
-  }
-  if (["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft"].includes(status)) {
+  if (["final", "finished", "complete", "completed", "closed", "settled", "full_time", "fulltime", "ft", "3", "4"].includes(status)) {
     return "final";
+  }
+  if (startsAt) {
+    const startMs = typeof startsAt === "number" ? startsAt : new Date(String(startsAt)).getTime();
+    if (Number.isFinite(startMs)) {
+      const now = Date.now();
+      if (["scheduled", "upcoming", "not_started", "pre_match", "prematch", "pending", "1"].includes(status)) {
+        if (startMs <= now && now - startMs <= SPORT_ASSUMED_LIVE_WINDOW_MS) return "live";
+        if (startMs <= now - SPORT_ASSUMED_LIVE_WINDOW_MS) return "unknown";
+        return "upcoming";
+      }
+      if (startMs > now - 15 * 60 * 1000) {
+        return "upcoming";
+      }
+    }
+  }
+  if (["scheduled", "upcoming", "not_started", "pre_match", "prematch", "pending", "1"].includes(status)) {
+    return "upcoming";
   }
   return "unknown";
 }
 
 function filterSportFixtures(fixtures: any[], status?: string): any[] {
   if (!status || status === "all") return fixtures;
-  return fixtures.filter((fixture) => sportStatusBucket(fixture?.status || fixture?.raw?.status) === status);
+  return fixtures.filter((fixture) => sportStatusBucket(fixture, fixture?.startsAt || fixture?.raw?.StartTime) === status);
 }
 
 function sportAsset(args: { fixtureId: string; marketType: string; selection: string; asset?: string }): string {
@@ -880,6 +1135,95 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_get_reputation",
+    title: "Get Reputation",
+    description:
+      "Get a wallet's AIR OTC reputation, including deal reliability, SPORT prediction accuracy, confidence-adjusted score, and risk flags. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        includeHistory: { type: "boolean", default: true },
+        recentLimit: { type: "number", minimum: 1, maximum: 50, default: 10 },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.includeHistory !== undefined) query.set("includeHistory", String(args.includeHistory));
+      if (args.recentLimit !== undefined) query.set("recentLimit", String(args.recentLimit));
+      return toolOutput(
+        await httpJson(
+          `/v1/reputation/${encodeURIComponent(args.wallet)}${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_compare_reputations",
+    title: "Compare Reputations",
+    description:
+      "Compare multiple AIR OTC wallets before accepting offers. Returns V2 SPORT reputation profiles and rejects invalid wallets cleanly. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallets: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 25 },
+        includeHistory: { type: "boolean", default: false },
+        recentLimit: { type: "number", minimum: 1, maximum: 50, default: 5 },
+      },
+      ["wallets"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      return toolOutput(
+        await httpJson(
+          "/v1/reputation/batch",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              wallets: args.wallets,
+              includeHistory: args.includeHistory,
+              recentLimit: args.recentLimit,
+            }),
+          },
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_get_reputation_leaderboard",
+    title: "Get Reputation Leaderboard",
+    description:
+      "List top AIR OTC counterparties ranked by deal reliability and confidence-adjusted SPORT prediction reputation. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      limit: { type: "number", minimum: 1, maximum: 25, default: 10 },
+      minSettledPredictions: { type: "number", minimum: 0, maximum: 100, default: 0 },
+      recentLimit: { type: "number", minimum: 1, maximum: 50, default: 5 },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      if (args.minSettledPredictions !== undefined) query.set("minSettledPredictions", String(args.minSettledPredictions));
+      if (args.recentLimit !== undefined) query.set("recentLimit", String(args.recentLimit));
+      return toolOutput(
+        await httpJson(
+          `/v1/reputation/leaderboard${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
     name: "airotc_sport_list_matches",
     title: "Sport List Matches",
     description:
@@ -896,12 +1240,9 @@ const tools: ToolDefinition[] = [
       const response = await httpJson(`/v1/txline/fixtures?limit=${limit}`, {}, config.apiUrl);
       const fixtures = Array.isArray(response?.data) ? response.data : [];
       const filtered = filterSportFixtures(fixtures, args.status);
-      const source = filtered.some((fixture) => fixture?.raw?.source === "espn_scoreboard_fallback")
-        ? "espn_scoreboard_fallback"
-        : "txline";
       return toolOutput({
         success: true,
-        source,
+        source: "txline",
         filter: args.status || "all",
         count: filtered.length,
         data: filtered,
@@ -942,10 +1283,60 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_get_fixture_summary",
+    title: "Sport Get Fixture Summary",
+    description:
+      "Fetch a compact SPORT fixture summary for agents: teams, status, latest score, latest odds, and open liquidity. Does not include raw TxLINE replay data. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        fixtureId: { type: "string" },
+      },
+      ["fixtureId"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/fixtures/${encodeURIComponent(args.fixtureId)}/summary`,
+          {},
+          config.apiUrl,
+          { authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_get_result",
+    title: "Sport Get Result",
+    description:
+      "Fetch a compact TxLINE result for a SPORT fixture: winner, score, settled flag, and source. Returns pending instead of dumping raw replay when no final result exists. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        fixtureId: { type: "string" },
+      },
+      ["fixtureId"]
+    ),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/results/${encodeURIComponent(args.fixtureId)}`,
+          {},
+          config.apiUrl,
+          { authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
     name: "airotc_sport_create_offer",
     title: "Sport Create Offer",
     description:
-      "Create an AIR OTC SPORT offer bound to a TxLINE fixture, market, and selection. Requires offers:write scope.",
+      "Compatibility wrapper for prefunded SPORT positions. Creates a funding-required SPORT position draft and returns vault funding instructions. Requires offers:write scope.",
     scope: "offers:write",
     inputSchema: objectSchema(
       {
@@ -958,35 +1349,26 @@ const tools: ToolDefinition[] = [
         mode: { type: "string", enum: ["buy", "sell"] },
         amount: { type: "number", exclusiveMinimum: 0 },
         price: { type: "number", exclusiveMinimum: 0 },
-        collateral: { type: "number", minimum: 0 },
+        collateral: { type: "number", minimum: 0, description: "Deprecated for SPORT; accepted for old clients but ignored." },
         settlementWallet: { type: "string" },
         rewardWallet: { type: "string" },
         fundingWallet: { type: "string" },
       },
-      ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price", "collateral"]
+      ["wallet", "fixtureId", "marketType", "selection", "mode", "amount", "price"]
     ),
     handler: async (args) => {
       const auth = await requireScope(args, "offers:write");
       const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(
-          "/v1/offers",
+          "/v1/sport/positions",
           {
             method: "POST",
             body: JSON.stringify({
-              publicKey: wallet,
-              asset: sportAsset(args),
-              mode: args.mode,
-              amount: args.amount,
-              price: args.price,
-              collateral: args.collateral,
-              rollupMode: "SPORT",
               fixtureId: args.fixtureId,
-              marketType: args.marketType,
               selection: args.selection,
-              settlementWallet: args.settlementWallet,
-              rewardWallet: args.rewardWallet,
-              fundingWallet: args.fundingWallet,
+              side: args.mode === "sell" ? "lay" : "back",
+              stakeSol: args.price,
             }),
           },
           config.apiUrl,
@@ -1013,20 +1395,711 @@ const tools: ToolDefinition[] = [
       ["offerId", "wallet"]
     ),
     handler: async (args) => {
+      await requireScope(args, "offers:write");
+      return toolOutput({
+        success: false,
+        error: "sport_unfunded_offer_accept_deprecated",
+        message:
+          "SPORT no longer accepts unfunded offers. Use airotc_sport_accept_position, fund the returned vault, then call airotc_sport_confirm_position_funding.",
+        offerId: args.offerId,
+      });
+    },
+  },
+  {
+    name: "airotc_sport_create_position",
+    title: "Sport Create Position",
+    description:
+      "Create a prefunded SPORT position draft. The position is not public or matchable until the returned vault is funded and confirmed. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        fixtureId: { type: "string" },
+        selection: { type: "string", enum: ["part1", "draw", "part2"] },
+        side: { type: "string", enum: ["back", "lay"], default: "back" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+      },
+      ["wallet", "fixtureId", "selection", "stakeSol"]
+    ),
+    handler: async (args) => {
       const auth = await requireScope(args, "offers:write");
       const wallet = await delegatedWalletFromArgs(args, auth);
       return toolOutput(
         await httpJson(
-          `/v1/offers/${encodeURIComponent(args.offerId)}/accept`,
+          "/v1/sport/positions",
           {
             method: "POST",
             body: JSON.stringify({
-              wallet,
-              settlementWallet: args.settlementWallet,
-              rewardWallet: args.rewardWallet,
-              fundingWallet: args.fundingWallet,
+              fixtureId: args.fixtureId,
+              selection: args.selection,
+              side: args.side || "back",
+              stakeSol: args.stakeSol,
+              clientOrderId: args.clientOrderId,
             }),
           },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_create_and_fund_position",
+    title: "Sport Create And Fund Position",
+    description:
+      "One-click SPORT automation: create a position, execute on-chain vault funding, and confirm it. Uses walletKeypair if supplied, otherwise the API-backed encrypted funding session. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        fixtureId: { type: "string" },
+        selection: { type: "string", enum: ["part1", "draw", "part2"] },
+        side: { type: "string", enum: ["back", "lay"], default: "back" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+        walletKeypair: {
+          type: "string",
+          description:
+            "Optional base58-encoded 64-byte Solana secret key or JSON array string. If omitted, the API uses the registered encrypted funding session for this wallet.",
+        },
+      },
+      ["wallet", "fixtureId", "selection", "stakeSol"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const explicitKeypair = typeof args.walletKeypair === "string" && args.walletKeypair.trim()
+        ? args.walletKeypair.trim()
+        : "";
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/positions/create-and-fund",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              selection: args.selection,
+              side: args.side || "back",
+              stakeSol: args.stakeSol,
+              clientOrderId: args.clientOrderId,
+              ...(explicitKeypair ? { walletKeypair: explicitKeypair } : {}),
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_post_position",
+    title: "Sport Post Position",
+    description:
+      "Compatibility alias for airotc_sport_create_position. Creates a funding-required SPORT position draft. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        fixtureId: { type: "string" },
+        selection: { type: "string", enum: ["part1", "draw", "part2"] },
+        side: { type: "string", enum: ["back", "lay"], default: "back" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+      },
+      ["wallet", "fixtureId", "selection", "stakeSol"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/positions",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              selection: args.selection,
+              side: args.side || "back",
+              stakeSol: args.stakeSol,
+              clientOrderId: args.clientOrderId,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_accept_position",
+    title: "Sport Accept Position",
+    description:
+      "Directly accept funded SPORT liquidity by creating the opposite funding-required draft. Optional stakeSol can partially fill or exceed maker remaining liquidity. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/accept`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              stakeSol: args.stakeSol,
+              clientOrderId: args.clientOrderId,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_counter_position",
+    title: "Sport Counter Position",
+    description:
+      "Prebuilt SPORT counter-offer helper. Creates the opposite funding-required draft with an optional adjusted stakeSol, then the agent funds it through airotc_sport_execute_funding. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/accept`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              stakeSol: args.stakeSol,
+              clientOrderId: args.clientOrderId,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_counter_offer",
+    title: "Sport Counter Offer",
+    description:
+      "Create an opposite SPORT counter-position and DM the maker in one flow. The returned position still must be funded before matching. Requires offers:write scope and dm:write scope unless sendDm=false.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        stakeSol: { type: "number", exclusiveMinimum: 0 },
+        clientOrderId: { type: "string" },
+        message: { type: "string" },
+        sendDm: { type: "boolean", default: true },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      if (args.sendDm !== false) {
+        await requireScope(args, "dm:write");
+      }
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const original = await httpJson(
+        `/v1/sport/positions/by-id/${encodeURIComponent(args.positionId)}`,
+        {},
+        config.apiUrl,
+        { delegatedWallet: wallet, authToken: args.authToken }
+      );
+      const makerPosition = original?.data?.position || original?.position || {};
+      const makerWallet = typeof makerPosition.agentWallet === "string" ? makerPosition.agentWallet : "";
+      const counter = await httpJson(
+        `/v1/sport/positions/${encodeURIComponent(args.positionId)}/accept`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            stakeSol: args.stakeSol,
+            clientOrderId: args.clientOrderId,
+          }),
+        },
+        config.apiUrl,
+        { delegatedWallet: wallet, authToken: args.authToken }
+      );
+      const counterPosition = counter?.data?.position || counter?.position || {};
+      let dm: Record<string, unknown> = { attempted: false };
+      if (args.sendDm !== false && makerWallet && makerWallet !== wallet) {
+        const stakeLabel = counterPosition.stakeSol ?? counterPosition.remainingSol ?? args.stakeSol ?? makerPosition.remainingSol ?? makerPosition.stakeSol ?? "matching";
+        const content = typeof args.message === "string" && args.message.trim()
+          ? args.message.trim()
+          : `SPORT counter offer opened for position ${args.positionId}. Counter position ${counterPosition.id || "created"} uses ${stakeLabel} SOL. Fund the returned vault to make it live and matchable.`;
+        dm = await bestEffort("counter_offer_dm", () =>
+          httpJson(
+            "/v1/dm/send",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                toWallet: makerWallet,
+                content,
+                contentType: "text",
+                metadata: {
+                  type: "sport_counter_offer",
+                  makerPositionId: args.positionId,
+                  counterPositionId: counterPosition.id || null,
+                  fixtureId: counterPosition.fixtureId || makerPosition.fixtureId || null,
+                  selection: counterPosition.selection || makerPosition.selection || null,
+                  stakeSol: stakeLabel,
+                },
+              }),
+            },
+            config.apiUrl,
+            { delegatedWallet: wallet, authToken: args.authToken }
+          )
+        );
+      }
+      return toolOutput({
+        counter,
+        dm,
+        note: "Counter-offer creates a funding-required draft. Run airotc_sport_execute_funding or use a registered funding session to lock the stake.",
+      });
+    },
+  },
+  {
+    name: "airotc_sport_confirm_position_funding",
+    title: "Sport Confirm Position Funding",
+    description:
+      "Confirm that a SPORT position vault has been funded. This is the only path that makes a position public and matchable. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        fundingTx: { type: "string" },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/confirm-funding`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fundingTx: args.fundingTx,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_register_funding_session",
+    title: "Sport Register Funding Session",
+    description:
+      "Register a wallet for SPORT funding. Stores the keypair encrypted in AIR OTC API storage with TTL, so execute_funding can run without sending walletKeypair every call. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        walletKeypair: {
+          type: "string",
+          description: "Base58-encoded 64-byte Solana secret key or JSON array string. Stored encrypted in AIR OTC API storage until TTL/replacement/delete.",
+        },
+        ttlSeconds: {
+          type: "integer",
+          minimum: MIN_FUNDING_SESSION_TTL_SECONDS,
+          maximum: MAX_FUNDING_SESSION_TTL_SECONDS,
+          default: DEFAULT_FUNDING_SESSION_TTL_SECONDS,
+        },
+      },
+      ["wallet", "walletKeypair"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      registerFundingSession(wallet, args.authToken, args.walletKeypair, args.ttlSeconds);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/funding-session",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              walletKeypair: args.walletKeypair,
+              ttlSeconds: args.ttlSeconds,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_funding_session_status",
+    title: "Sport Funding Session Status",
+    description:
+      "Check whether this wallet currently has an active API-backed encrypted SPORT funding session. Does not return secret key material. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/funding-session",
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_clear_funding_session",
+    title: "Sport Clear Funding Session",
+    description:
+      "Clear the encrypted SPORT funding key for this wallet. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      clearFundingSession(wallet, args.authToken);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/funding-session",
+          { method: "DELETE" },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_execute_funding",
+    title: "Sport Execute Funding",
+    description:
+      "Initialize and fund a SPORT position vault on-chain, then confirm funding through AIR OTC. Devnet agent automation path; uses walletKeypair if supplied, otherwise the API-backed registered funding session. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        walletKeypair: {
+          type: "string",
+          description:
+            "Optional base58-encoded 64-byte Solana secret key or JSON array string. If omitted, the API uses the registered encrypted funding session for this wallet.",
+        },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const explicitKeypair = typeof args.walletKeypair === "string" && args.walletKeypair.trim()
+        ? args.walletKeypair.trim()
+        : "";
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/execute-funding`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              ...(explicitKeypair ? { walletKeypair: explicitKeypair } : {}),
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_cancel_position",
+    title: "Sport Cancel Position",
+    description:
+      "Cancel an unmatched SPORT position. Funded positions require a vault refund path; matched positions cannot be cancelled. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        cancelTx: { type: "string" },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/cancel`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              cancelTx: args.cancelTx,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_get_position",
+    title: "Sport Get Position",
+    description:
+      "Get one SPORT position by id for wallet recovery, including funding status and vault instructions when relevant. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/by-id/${encodeURIComponent(args.positionId)}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_get_position_fills",
+    title: "Sport Get Position Fills",
+    description:
+      "List fills for one SPORT position, including ticket ids, escrow PDAs, fill sizes, and settlement state. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        positionId: { type: "string" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 100 },
+      },
+      ["wallet", "positionId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions/${encodeURIComponent(args.positionId)}/fills${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_list_positions",
+    title: "Sport List Positions",
+    description:
+      "List public funded SPORT positions. Defaults to funded_open; old status=open is treated as funded_open. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      fixtureId: { type: "string" },
+      status: {
+        type: "string",
+        enum: ["funded_open", "partially_filled", "matching", "matched", "filled", "expired", "cancelled", "all", "open"],
+        default: "funded_open",
+      },
+      limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.fixtureId) query.set("fixtureId", args.fixtureId);
+      if (args.status) query.set("status", args.status);
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_view_positions",
+    title: "Sport View Positions",
+    description:
+      "View open or historical SPORT positions, usually filtered by TxLINE fixtureId. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      fixtureId: { type: "string" },
+      status: {
+        type: "string",
+        enum: ["funded_open", "partially_filled", "matching", "matched", "filled", "expired", "cancelled", "all", "open"],
+        default: "funded_open",
+      },
+      limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.fixtureId) query.set("fixtureId", args.fixtureId);
+      if (args.status) query.set("status", args.status);
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/positions${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_my_positions",
+    title: "Sport My Positions",
+    description:
+      "List SPORT positions posted by the calling wallet, including open and matched rows for recovery. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["funding_required", "funded_open", "partially_filled", "matching", "matched", "filled", "expired", "cancelled", "funding_failed", "all", "open"],
+          default: "all",
+        },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 100 },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.status) query.set("status", args.status);
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/me/positions${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_my_fills",
+    title: "Sport My Fills",
+    description:
+      "List SPORT partial fills for the calling wallet across positions. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["committing", "awaiting_result", "settled", "refunded", "failed", "all"],
+          default: "all",
+        },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 100 },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.status) query.set("status", args.status);
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/me/fills${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_my_tickets",
+    title: "Sport My Tickets",
+    description:
+      "Recover matched SPORT arena tickets for the calling wallet after an agent restart. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 100 },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/me/tickets${query.size ? `?${query}` : ""}`,
+          {},
           config.apiUrl,
           { delegatedWallet: wallet, authToken: args.authToken }
         )
@@ -1067,6 +2140,460 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "airotc_sport_get_my_history",
+    title: "Sport My Trades History",
+    description:
+      "Get the calling wallet's SPORT trade history, win/loss record, market performance, and estimated SOL PnL. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 100 },
+        includeLegacy: { type: "boolean", default: false },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "deals:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      if (args.includeLegacy !== undefined) query.set("includeLegacy", String(args.includeLegacy));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/me/history${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_discover_agents",
+    title: "Sport Discover Agents",
+    description:
+      "Discover active SPORT counterparties by active offers, reputation, markets, and fixture filters. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      limit: { type: "number", minimum: 1, maximum: 50, default: 25 },
+      fixtureId: { type: "string" },
+      marketType: { type: "string" },
+      minSettledPredictions: { type: "number", minimum: 0, maximum: 100, default: 0 },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      if (args.fixtureId) query.set("fixtureId", args.fixtureId);
+      if (args.marketType) query.set("marketType", args.marketType);
+      if (args.minSettledPredictions !== undefined) {
+        query.set("minSettledPredictions", String(args.minSettledPredictions));
+      }
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/agents/discovery${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_create_intent",
+    title: "Sport Create Discovery Intent",
+    description:
+      "Broadcast a SPORT intent like 'I want to back part1 on this fixture' and receive push events when compatible funded liquidity appears. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        fixtureId: { type: "string" },
+        selection: { type: "string", enum: ["part1", "draw", "part2"] },
+        side: { type: "string", enum: ["back", "lay"], default: "back" },
+        stakeSol: { type: "number", minimum: 0 },
+        minStakeSol: { type: "number", minimum: 0 },
+        maxStakeSol: { type: "number", minimum: 0 },
+        expiresAt: { type: "string", description: "Optional ISO timestamp. Defaults to fixture kickoff when known." },
+        note: { type: "string", maxLength: 280 },
+        clientIntentId: { type: "string", description: "Optional idempotency key for this wallet." },
+      },
+      ["wallet", "fixtureId", "selection"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/intents",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              selection: args.selection,
+              side: args.side || "back",
+              stakeSol: args.stakeSol,
+              minStakeSol: args.minStakeSol,
+              maxStakeSol: args.maxStakeSol,
+              expiresAt: args.expiresAt,
+              note: args.note,
+              clientIntentId: args.clientIntentId,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_list_intents",
+    title: "Sport List Public Intents",
+    description:
+      "List active public SPORT discovery intents broadcast by agents. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema({
+      ...authSchema,
+      fixtureId: { type: "string" },
+      selection: { type: "string", enum: ["part1", "draw", "part2"] },
+      side: { type: "string", enum: ["back", "lay"] },
+      status: { type: "string", enum: ["active", "cancelled", "expired", "matched", "all"], default: "active" },
+      limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+    }),
+    handler: async (args) => {
+      await requireScope(args, "offers:read");
+      const query = new URLSearchParams();
+      if (args.fixtureId) query.set("fixtureId", args.fixtureId);
+      if (args.selection) query.set("selection", args.selection);
+      if (args.side) query.set("side", args.side);
+      if (args.status) query.set("status", args.status);
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/intents${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_list_my_intents",
+    title: "Sport List My Intents",
+    description:
+      "List SPORT discovery intents owned by the calling wallet, including cancelled or expired rows for recovery. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        status: { type: "string", enum: ["active", "cancelled", "expired", "matched", "all"], default: "all" },
+        limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      if (args.status) query.set("status", args.status);
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/me/intents${query.size ? `?${query}` : ""}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_cancel_intent",
+    title: "Sport Cancel Intent",
+    description:
+      "Cancel one SPORT discovery intent owned by the calling wallet. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        intentId: { type: "string" },
+      },
+      ["wallet", "intentId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/intents/${encodeURIComponent(args.intentId)}/cancel`,
+          { method: "POST", body: "{}" },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_find_matching_liquidity",
+    title: "Sport Find Matching Liquidity",
+    description:
+      "Find funded SPORT positions that can match a desired side/selection, including complement back-vs-back matches. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        fixtureId: { type: "string" },
+        selection: { type: "string", enum: ["part1", "draw", "part2"] },
+        side: { type: "string", enum: ["back", "lay"], default: "back" },
+        stakeSol: { type: "number", minimum: 0 },
+        limit: { type: "number", minimum: 1, maximum: 100, default: 25 },
+      },
+      ["wallet", "fixtureId", "selection"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      const query = new URLSearchParams();
+      query.set("fixtureId", args.fixtureId);
+      query.set("selection", args.selection);
+      if (args.side) query.set("side", args.side);
+      if (args.stakeSol !== undefined) query.set("stakeSol", String(args.stakeSol));
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/liquidity/matching?${query}`,
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_get_event_guide",
+    title: "Sport Event Guide",
+    description:
+      "Return the compact SPORT event, WebSocket, MCP polling, and discovery tool guide. No auth required.",
+    inputSchema: objectSchema({ ...authSchema }),
+    handler: async () => toolOutput(await httpJson("/v1/sport/events/guide", {}, config.apiUrl)),
+  },
+  {
+    name: "airotc_sport_list_strategy_templates",
+    title: "Sport List Strategy Templates",
+    description:
+      "List reusable SPORT offer templates for the calling wallet. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/strategy-templates",
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_list_strategy_presets",
+    title: "Sport List Strategy Presets",
+    description:
+      "List built-in SPORT strategy presets such as favorite_back, underdog_layer, and draw_hedge. Requires offers:read scope.",
+    scope: "offers:read",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+      },
+      ["wallet"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:read");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          "/v1/sport/strategy-presets",
+          {},
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_save_strategy_template",
+    title: "Sport Save Strategy Template",
+    description:
+      "Create or replace a reusable SPORT offer template such as standard_sell. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        name: { type: "string" },
+        description: { type: "string" },
+        enabled: { type: "boolean", default: true },
+        defaults: {
+          type: "object",
+          additionalProperties: true,
+          description:
+            "Template defaults: mode, amount, price, marketType, selection, optional deprecated collateral, asset/settlementWallet/rewardWallet/fundingWallet.",
+        },
+      },
+      ["wallet", "name", "defaults"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/strategy-templates/${encodeURIComponent(args.name)}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              description: args.description,
+              enabled: args.enabled !== false,
+              defaults: args.defaults,
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_delete_strategy_template",
+    title: "Sport Delete Strategy Template",
+    description: "Delete one reusable SPORT offer template. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        name: { type: "string" },
+      },
+      ["wallet", "name"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/strategy-templates/${encodeURIComponent(args.name)}`,
+          { method: "DELETE" },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_create_offer_from_template",
+    title: "Sport Create Offer From Template",
+    description:
+      "Create a SPORT offer from a saved strategy template, overriding fixtureId/market/selection/price when needed. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        name: { type: "string" },
+        fixtureId: { type: "string" },
+        overrides: {
+          type: "object",
+          additionalProperties: true,
+          description: "Optional overrides for marketType, selection, mode, amount, price, deprecated collateral, asset, and wallets.",
+        },
+      },
+      ["wallet", "name", "fixtureId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/strategy-templates/${encodeURIComponent(args.name)}/offers`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              overrides: args.overrides || {},
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_create_position_from_preset",
+    title: "Sport Create Position From Preset",
+    description:
+      "Create a prefunded SPORT position draft from a built-in preset. Returns vault funding instructions; fund it before matching. Requires offers:write scope.",
+    scope: "offers:write",
+    inputSchema: objectSchema(
+      {
+        ...authSchema,
+        wallet: { type: "string" },
+        name: { type: "string", enum: ["favorite_back", "underdog_layer", "draw_hedge"] },
+        fixtureId: { type: "string" },
+        overrides: {
+          type: "object",
+          additionalProperties: true,
+          description: "Optional overrides for selection, stakeSol, side, marketType, and clientOrderId.",
+        },
+      },
+      ["wallet", "name", "fixtureId"]
+    ),
+    handler: async (args) => {
+      const auth = await requireScope(args, "offers:write");
+      const wallet = await delegatedWalletFromArgs(args, auth);
+      return toolOutput(
+        await httpJson(
+          `/v1/sport/strategy-presets/${encodeURIComponent(args.name)}/positions`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fixtureId: args.fixtureId,
+              overrides: args.overrides || {},
+            }),
+          },
+          config.apiUrl,
+          { delegatedWallet: wallet, authToken: args.authToken }
+        )
+      );
+    },
+  },
+  {
+    name: "airotc_sport_settlement_automation_status",
+    title: "Sport Settlement Automation Status",
+    description:
+      "Check whether SPORT settlement is running automatically and see the last sweep result. Requires deals:read scope.",
+    scope: "deals:read",
+    inputSchema: objectSchema({ ...authSchema }),
+    handler: async (args) => {
+      await requireScope(args, "deals:read");
+      return toolOutput(await httpJson("/v1/arena/settlement/automation", {}, config.apiUrl));
+    },
+  },
+  {
     name: "airotc_sport_ingestion_status",
     title: "Sport Ingestion Status",
     description:
@@ -1082,14 +2609,14 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_start_ingestion",
     title: "Sport Start Ingestion",
     description:
-      "Start TxLINE live odds/scores ingestion for SPORT mode. Requires offers:write scope and API admin authorization in production.",
-    scope: "offers:write",
+      "Start TxLINE live odds/scores ingestion for SPORT mode. Requires sport:admin scope and API admin authorization in production.",
+    scope: "sport:admin",
     inputSchema: objectSchema({
       ...authSchema,
       adminToken: { type: "string" },
     }),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
+      await requireScope(args, "sport:admin");
       return toolOutput(
         await httpJson(
           "/v1/txline/ingestion/start",
@@ -1103,14 +2630,14 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_stop_ingestion",
     title: "Sport Stop Ingestion",
     description:
-      "Stop TxLINE live odds/scores ingestion for SPORT mode. Requires offers:write scope and API admin authorization in production.",
-    scope: "offers:write",
+      "Stop TxLINE live odds/scores ingestion for SPORT mode. Requires sport:admin scope and API admin authorization in production.",
+    scope: "sport:admin",
     inputSchema: objectSchema({
       ...authSchema,
       adminToken: { type: "string" },
     }),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
+      await requireScope(args, "sport:admin");
       return toolOutput(
         await httpJson(
           "/v1/txline/ingestion/stop",
@@ -1124,8 +2651,8 @@ const tools: ToolDefinition[] = [
     name: "airotc_sport_run_settlement_once",
     title: "Sport Run Settlement Once",
     description:
-      "Run one SPORT settlement sweep now, refreshing TxLINE outcomes before escrow execution. Requires offers:write scope and API admin authorization in production.",
-    scope: "offers:write",
+      "Run one SPORT settlement sweep now, refreshing TxLINE outcomes before escrow execution. Requires sport:admin scope and API admin authorization in production.",
+    scope: "sport:admin",
     inputSchema: objectSchema({
       ...authSchema,
       adminToken: { type: "string" },
@@ -1136,7 +2663,7 @@ const tools: ToolDefinition[] = [
       liveSync: { type: "boolean", default: true },
     }),
     handler: async (args) => {
-      await requireScope(args, "offers:write");
+      await requireScope(args, "sport:admin");
       const body: Record<string, unknown> = {
         refreshOutcomes: args.refreshOutcomes !== false,
         liveSync: args.liveSync !== false,
@@ -1172,7 +2699,7 @@ const tools: ToolDefinition[] = [
         mode: { type: "string", enum: ["buy", "sell"] },
         amount: { type: "number", exclusiveMinimum: 0 },
         price: { type: "number", exclusiveMinimum: 0 },
-        collateral: { type: "number", minimum: 0 },
+        collateral: { type: "number", minimum: 0, description: "Required outside SPORT; SPORT ignores separate collateral and uses equal stake." },
         rollupMode: { type: "string", enum: ["ER", "PER", "NONE", "SPORT"], default: "NONE" },
         fixtureId: { type: "string" },
         marketType: { type: "string" },
@@ -1181,7 +2708,7 @@ const tools: ToolDefinition[] = [
         rewardWallet: { type: "string" },
         fundingWallet: { type: "string" },
       },
-      ["wallet", "asset", "mode", "amount", "price", "collateral"]
+      ["wallet", "asset", "mode", "amount", "price"]
     ),
     handler: async (args) => {
       const auth = await requireScope(args, "offers:write");
@@ -1195,7 +2722,7 @@ const tools: ToolDefinition[] = [
             mode: args.mode,
             amount: args.amount,
             price: args.price,
-            collateral: args.collateral,
+            collateral: args.collateral ?? (args.rollupMode === "SPORT" ? 0 : undefined),
             rollupMode: args.rollupMode || "NONE",
             fixtureId: args.fixtureId,
             marketType: args.marketType,
@@ -2061,7 +3588,7 @@ async function startHttp(): Promise<void> {
   });
   const port = Number(process.env.AIR_OTC_MCP_PORT || process.env.PORT || 8787);
   app.listen(port, () => {
-    console.error(`AIR OTC MCP HTTP listening on http://localhost:${port}/mcp`);
+    console.log(`AIR OTC MCP HTTP listening on http://localhost:${port}/mcp`);
   });
 }
 
@@ -2073,6 +3600,11 @@ export const __test = {
   mergeRequestAuth,
   parseScopes,
   delegatedWalletFromArgs,
+  sportStatusBucket,
+  registerFundingSession,
+  getFundingSessionKeypair,
+  getFundingSessionStatus,
+  clearFundingSession,
 };
 
 if (process.env.AIR_OTC_MCP_NO_AUTOSTART !== "1") {

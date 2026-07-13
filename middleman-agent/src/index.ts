@@ -10,7 +10,7 @@ import { initAgentMessageListener } from "./listeners/agentMessageListener";
 import { parseMessage } from "./services/parserService";
 import { negotiationStore } from "./state/negotiationStore";
 import { executeDeal, executeRelease } from "./services/executionService";
-import { executeCancelDeal } from "./services/onChainExecutionService";
+import { executeCancelDeal, executeSettleToBuyerPhase } from "./services/onChainExecutionService";
 import { initEscrowListener } from "./listeners/escrowListener";
 import { initRollupListener } from "./listeners/rollupListener";
 import { ticketStore } from "./state/ticketStore";
@@ -67,6 +67,7 @@ import { demoRuntimeListenersAllowed } from "./utils/demoMode";
 import { classifyDependencyError } from "./services/dependencyHealthService";
 import { isRetryableError } from "./utils/retry";
 import type { DepositReceivedEvent } from "./types/events";
+import { resolveEscrowTermsForTicket } from "./services/escrowTermsResolver";
 
 // ── Graceful shutdown ────────────────────────────────────────────────
 
@@ -496,6 +497,13 @@ async function main(): Promise<void> {
         }
       }
 
+      if (decision.action === "CREATE_ESCROW" && decision.terms) {
+        const ticket = await ticketStore.getTicket(message.ticket_id);
+        if (ticket) {
+          decision.terms = resolveEscrowTermsForTicket(ticket, decision.terms);
+        }
+      }
+
       // STEP 5: Execute the action via dealPhaseManager
       // ═══════════════════════════════════════════════════
       const result = await dealPhaseManager.handleAction(
@@ -553,6 +561,10 @@ async function main(): Promise<void> {
       } else if (result.on_chain_action === "cancel_deal") {
         executeCancelDeal(message.ticket_id).catch((err: any) => {
           logger.error("cancel_unhandled_failure", { ticket_id: message.ticket_id }, err);
+        });
+      } else if (result.on_chain_action === "settle_to_buyer") {
+        executeSettleToBuyerPhase(message.ticket_id).catch((err: any) => {
+          logger.error("settle_to_buyer_unhandled_failure", { ticket_id: message.ticket_id }, err);
         });
       }
     } catch (handlerError: any) {
@@ -674,26 +686,15 @@ async function main(): Promise<void> {
         await dealPhaseManager.recordDeposit(payload.ticket_id, party);
       }
 
-      // If payment confirmed, deal is fully funded — ready for delivery phase
+      // If payment confirmed, deal is fully funded. Normal mode goes to delivery;
+      // SPORT is math-only and waits for the final TxLINE result.
       if (payload.deposit_type === "buyer_payment") {
-        // CRITICAL: Set payment_locked flag so soulGuard evidenceVerified passes
-        const deal = dealPhaseManager.getDeal(payload.ticket_id);
-        if (deal) {
-          deal.payment_locked = true;
-          // Persist the flag immediately
-          dealPhaseManager.persistDealPublic(deal);
-        }
-
-        logger.info("deal_fully_funded", {
+        const phaseResult = await dealPhaseManager.recordPaymentLocked(payload.ticket_id);
+        logger.info("payment_lock_recorded", {
           ticket_id: payload.ticket_id,
-          status: "Payment locked. Waiting for seller delivery and buyer confirmation.",
+          new_phase: phaseResult?.new_phase || null,
           payment_locked: true,
         });
-
-        // Natively force state progression
-        if (deal && deal.phase === "awaiting_deposits") {
-          dealPhaseManager.transition(deal, "delivery", "system", "AUTO");
-        }
       }
     } else {
       logger.error("deposit_confirm_failed", { ticket_id: payload.ticket_id }, new Error(result.error || "Unknown"));

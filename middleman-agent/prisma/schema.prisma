@@ -32,6 +32,10 @@ model Ticket {
   rollupMode            String   @default("NONE") // NONE | ER | PER | SPORT
   tokenMint             String?
   decimals              Int?
+  offerAsset            String?
+  offerPrice            Float?
+  offerAmount           Float?
+  offerCollateral       Float?
   lastProposedPrice     Float?
   lastCollateralBuyer   Float?
   lastCollateralSeller  Float?

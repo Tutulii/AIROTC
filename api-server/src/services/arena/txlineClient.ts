@@ -3,17 +3,11 @@ import { TxlineFixture, TxlineOddsUpdate, TxlineScoreUpdate } from './types';
 const DEFAULT_TXLINE_BASE_URL = 'https://txline.txodds.com';
 const REQUEST_TIMEOUT_MS = 12_000;
 const GUEST_JWT_CACHE_MS = 10 * 60 * 1000;
+const ASSUMED_LIVE_WINDOW_MS = 4 * 60 * 60 * 1000;
 const ODDS_SNAPSHOT_ENDPOINT = '/api/odds/snapshot';
 const SCORES_SNAPSHOT_ENDPOINT = '/api/scores/snapshot';
 export const ODDS_STREAM_ENDPOINT = '/api/odds/stream';
 export const SCORES_STREAM_ENDPOINT = '/api/scores/stream';
-const ESPN_SCOREBOARD_BASE_URL = 'https://site.api.espn.com/apis/site/v2/sports';
-const ESPN_FALLBACK_LEAGUES = [
-    { key: 'mlb', sport: 'baseball', path: 'baseball/mlb' },
-    { key: 'wnba', sport: 'basketball', path: 'basketball/wnba' },
-    { key: 'mls', sport: 'soccer', path: 'soccer/usa.1' },
-    { key: 'epl', sport: 'soccer', path: 'soccer/eng.1' },
-];
 
 let guestJwtCache: { token: string; expiresAt: number } | null = null;
 
@@ -37,18 +31,8 @@ export function txlineAuthConfigured(): boolean {
     return Boolean(process.env.TXLINE_API_KEY || process.env.TXLINE_API_TOKEN);
 }
 
-function envFlag(value: string | undefined, fallback: boolean): boolean {
-    if (value === undefined) return fallback;
-    return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
-}
-
-export function txlineFallbackEnabled(): boolean {
-    return envFlag(process.env.TXLINE_SCOREBOARD_FALLBACK_ENABLED, true);
-}
-
-export function txlineActiveFixtureSource(): 'txline' | 'espn_scoreboard_fallback' | 'unconfigured' {
+export function txlineActiveFixtureSource(): 'txline' | 'unconfigured' {
     if (txlineAuthConfigured()) return 'txline';
-    if (txlineFallbackEnabled()) return 'espn_scoreboard_fallback';
     return 'unconfigured';
 }
 
@@ -150,6 +134,22 @@ function firstNumber(source: Record<string, unknown>, keys: string[]): number | 
     return undefined;
 }
 
+function goalNumber(source: Record<string, unknown>, participant: 'Participant1' | 'Participant2'): number | undefined {
+    const direct = firstNumber(source, [
+        `Score.${participant}.Total.Goals`,
+        `Data.New.Score.${participant}.Total.Goals`,
+        `Data.Score.${participant}.Total.Goals`,
+    ]);
+    if (direct !== undefined) return direct;
+
+    const totalCandidates = [
+        nested(source, `Score.${participant}.Total`),
+        nested(source, `Data.New.Score.${participant}.Total`),
+        nested(source, `Data.Score.${participant}.Total`),
+    ];
+    return totalCandidates.some((candidate) => Object.keys(asRecord(candidate)).length > 0) ? 0 : undefined;
+}
+
 function firstDate(source: Record<string, unknown>, keys: string[], fallback?: Date): Date | undefined {
     for (const key of keys) {
         const value = key.includes('.') ? nested(source, key) : source[key];
@@ -172,179 +172,27 @@ function firstArray(payload: unknown, keys: string[]): unknown[] {
     for (const key of keys) {
         const value = key.includes('.') ? nested(root, key) : root[key];
         if (Array.isArray(value)) return value;
+        if (looksLikeTxlineRow(value)) return [value];
     }
+    if (looksLikeTxlineRow(root)) return [root];
     return [];
 }
 
-function espnScoreboardUrl(path: string): string {
-    return `${ESPN_SCOREBOARD_BASE_URL}/${path}/scoreboard?limit=100`;
-}
-
-function espnStatusName(event: Record<string, unknown>): string {
-    const type = asRecord(nested(event, 'status.type'));
-    const state = firstString(type, ['state']).toLowerCase();
-    const name = firstString(type, ['name', 'description', 'detail']).toLowerCase();
-    const completed = type.completed === true;
-
-    if (completed || name.includes('final') || name.includes('full time') || state === 'post') return 'final';
-    if (state === 'in' || name.includes('in_progress') || name.includes('live')) return 'live';
-    if (state === 'pre' || name.includes('scheduled') || name.includes('pre')) return 'scheduled';
-    return firstString(type, ['name', 'description'], 'unknown').toLowerCase() || 'unknown';
-}
-
-function espnTeamName(competitor: Record<string, unknown>): string | undefined {
-    const team = asRecord(competitor.team);
-    return firstString(team, ['displayName', 'shortDisplayName', 'name', 'abbreviation']) ||
-        firstString(competitor, ['displayName', 'name', 'abbreviation']) ||
-        undefined;
-}
-
-function espnCompetitors(event: Record<string, unknown>): Record<string, unknown>[] {
-    const competitions = maybeArray(event.competitions).map(asRecord);
-    const competition = competitions[0] || {};
-    return maybeArray(competition.competitors).map(asRecord);
-}
-
-function espnFixtureId(leagueKey: string, eventId: string): string {
-    return `espn:${leagueKey}:${eventId}`;
-}
-
-function parseEspnFixtureId(fixtureId: string): { leagueKey: string; eventId: string } | null {
-    const parts = fixtureId.split(':');
-    if (parts.length !== 3 || parts[0] !== 'espn' || !parts[1] || !parts[2]) return null;
-    return { leagueKey: parts[1], eventId: parts[2] };
-}
-
-function espnEventToFixture(event: unknown, league: typeof ESPN_FALLBACK_LEAGUES[number]): TxlineFixture | null {
-    const raw = asRecord(event);
-    const eventId = firstString(raw, ['id', 'uid']);
-    if (!eventId) return null;
-
-    const competitors = espnCompetitors(raw);
-    const home = competitors.find((competitor) => firstString(competitor, ['homeAway']).toLowerCase() === 'home') || competitors[0] || {};
-    const away = competitors.find((competitor) => firstString(competitor, ['homeAway']).toLowerCase() === 'away') || competitors[1] || {};
-    const startsAt = firstDate(raw, ['date']);
-
-    return {
-        fixtureId: espnFixtureId(league.key, eventId),
-        sport: league.sport,
-        homeTeam: espnTeamName(home),
-        awayTeam: espnTeamName(away),
-        startsAt,
-        status: espnStatusName(raw),
-        raw: {
-            source: 'espn_scoreboard_fallback',
-            fallbackFor: 'txline',
-            league: league.key,
-            sourceEndpoint: espnScoreboardUrl(league.path),
-            espnEventId: eventId,
-            marketSelections: ['part1', 'draw', 'part2'],
-            raw,
-        },
-    };
-}
-
-async function fetchEspnJson(path: string): Promise<unknown> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-        const response = await fetch(espnScoreboardUrl(path), {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-            signal: controller.signal,
-        });
-        if (!response.ok) {
-            throw new Error(`ESPN fallback request failed ${response.status} ${response.statusText}`);
-        }
-        return await response.json();
-    } finally {
-        clearTimeout(timeout);
-    }
-}
-
-export async function fetchEspnFallbackFixturesSnapshot(): Promise<TxlineFixture[]> {
-    const results = await Promise.allSettled(
-        ESPN_FALLBACK_LEAGUES.map(async (league) => {
-            const payload = await fetchEspnJson(league.path);
-            return firstArray(payload, ['events'])
-                .map((event) => espnEventToFixture(event, league))
-                .filter((fixture): fixture is TxlineFixture => Boolean(fixture));
-        })
-    );
-
-    const fixtures = results
-        .flatMap((result) => result.status === 'fulfilled' ? result.value : [])
-        .sort((a, b) => {
-            const left = a.startsAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-            const right = b.startsAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-            return left - right;
-        });
-
-    if (fixtures.length === 0) {
-        const firstError = results.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
-        throw new Error(firstError?.reason?.message || 'espn_scoreboard_fallback_returned_no_fixtures');
-    }
-
-    return fixtures;
-}
-
-function espnScore(competitor: Record<string, unknown>): number | undefined {
-    const value = competitor.score;
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.trim()) {
-        const parsed = Number(value);
-        if (Number.isFinite(parsed)) return parsed;
-    }
-    return undefined;
-}
-
-async function fetchEspnFallbackScoresSnapshot(fixtureId: string): Promise<TxlineScoreUpdate[]> {
-    const parsed = parseEspnFixtureId(fixtureId);
-    if (!parsed) {
-        throw new Error('TXLINE_API_TOKEN is required before calling TxLINE score snapshots for non-fallback fixtures');
-    }
-    const league = ESPN_FALLBACK_LEAGUES.find((candidate) => candidate.key === parsed.leagueKey);
-    if (!league) throw new Error(`unsupported_espn_fallback_league:${parsed.leagueKey}`);
-
-    const payload = await fetchEspnJson(league.path);
-    const event = firstArray(payload, ['events'])
-        .map(asRecord)
-        .find((candidate) => firstString(candidate, ['id', 'uid']) === parsed.eventId);
-    if (!event) throw new Error(`espn_fallback_fixture_not_found:${fixtureId}`);
-
-    const competitors = espnCompetitors(event);
-    const home = competitors.find((competitor) => firstString(competitor, ['homeAway']).toLowerCase() === 'home') || competitors[0] || {};
-    const away = competitors.find((competitor) => firstString(competitor, ['homeAway']).toLowerCase() === 'away') || competitors[1] || {};
-    const homeScore = espnScore(home);
-    const awayScore = espnScore(away);
-    const sourceTimestamp = new Date();
-    const status = espnStatusName(event);
-
-    return [{
-        fixtureId,
-        homeScore,
-        awayScore,
-        status,
-        source: 'espn_scoreboard_fallback',
-        sourceEndpoint: espnScoreboardUrl(league.path),
-        sourceUpdateId: `${fixtureId}:${status}:${homeScore ?? 'na'}:${awayScore ?? 'na'}`,
-        sourceTimestamp,
-        raw: {
-            source: 'espn_scoreboard_fallback',
-            fallbackFor: 'txline',
-            league: league.key,
-            espnEventId: parsed.eventId,
-            normalizedScoreState: {
-                status,
-                action: status,
-                homeScore: homeScore ?? null,
-                awayScore: awayScore ?? null,
-                homeTeam: espnTeamName(home),
-                awayTeam: espnTeamName(away),
-            },
-            raw: event,
-        },
-    }];
+function looksLikeTxlineRow(value: unknown): boolean {
+    const row = asRecord(value);
+    if (Object.keys(row).length === 0) return false;
+    return [
+        'FixtureId',
+        'fixtureId',
+        'fixture_id',
+        'MatchId',
+        'matchId',
+        'MessageId',
+        'GameState',
+        'Prices',
+        'PriceNames',
+        'Score',
+    ].some((key) => row[key] !== undefined);
 }
 
 function impliedProbability(odds: number): number | undefined {
@@ -402,16 +250,93 @@ function scoreState(raw: Record<string, unknown>): Record<string, unknown> {
         'Data.awayScore',
     ]);
     return {
-        status: firstString(raw, ['GameState', 'status', 'state', 'matchStatus'], 'unknown'),
+        status: normalizeFixtureStatus(raw),
         action: firstString(raw, ['Action']),
         clock: raw.Clock || nested(raw, 'Data.New.Clock') || null,
-        homeScore: homeScore ?? null,
-        awayScore: awayScore ?? null,
+        homeScore: homeScore ?? goalNumber(raw, 'Participant1') ?? null,
+        awayScore: awayScore ?? goalNumber(raw, 'Participant2') ?? null,
         score,
         stats: raw.Stats || null,
         possession: raw.Possession || null,
         possessionType: raw.PossessionType || null,
     };
+}
+
+function normalizeStatusToken(value: unknown): string {
+    return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function hasClockEvidence(raw: Record<string, unknown>): boolean {
+    const clock = raw.Clock || nested(raw, 'Data.New.Clock') || nested(raw, 'Data.Clock');
+    if (typeof clock === 'string') return clock.trim().length > 0;
+    if (typeof clock === 'number') return Number.isFinite(clock);
+    return Object.keys(asRecord(clock)).length > 0;
+}
+
+function hasScoreEvidence(raw: Record<string, unknown>): boolean {
+    return (
+        goalNumber(raw, 'Participant1') !== undefined ||
+        goalNumber(raw, 'Participant2') !== undefined ||
+        Object.keys(asRecord(raw.Score || raw.score)).length > 0 ||
+        Object.keys(asRecord(nested(raw, 'Data.New.Score'))).length > 0 ||
+        Object.keys(asRecord(nested(raw, 'Data.Score'))).length > 0
+    );
+}
+
+function hasLiveScoreEvidence(raw: Record<string, unknown>): boolean {
+    const state = asRecord(raw.normalizedScoreState);
+    const stateStatus = normalizeStatusToken(firstString(state, ['status']));
+    if (['live', 'in_play', 'in_progress', 'running', 'started', 'first_half', 'second_half', '2'].includes(stateStatus)) {
+        return true;
+    }
+
+    const action = normalizeStatusToken(firstString(raw, ['Action']) || firstString(state, ['action']));
+    if (['disconnected', 'fixture_created', 'fixture_updated', 'game_finalised', 'game_finalized', 'finalised', 'finalized'].includes(action)) {
+        return false;
+    }
+
+    if (hasClockEvidence(raw)) return true;
+
+    return (
+        hasScoreEvidence(raw) &&
+        ['update', 'updated', 'score_update', 'score_changed', 'clock_update', 'clock_changed', 'game_started', 'period_started', 'stats_update', 'statistics_update'].includes(action)
+    );
+}
+
+export function normalizeFixtureStatus(raw: Record<string, unknown>, startsAt?: Date): string {
+    const rawStatus = firstString(raw, ['GameState', 'status', 'state', 'fixtureStatus'], 'unknown');
+    const status = normalizeStatusToken(rawStatus);
+    const action = normalizeStatusToken(firstString(raw, ['Action']));
+
+    if (
+        ['final', 'finished', 'complete', 'completed', 'closed', 'settled', 'full_time', 'fulltime', 'ft', 'finalised', 'finalized', 'game_finalised', 'game_finalized', '3', '4'].includes(status) ||
+        ['finalised', 'finalized', 'game_finalised', 'game_finalized'].includes(action)
+    ) {
+        return 'final';
+    }
+    if (['live', 'in_play', 'in_progress', 'running', 'started', 'first_half', 'second_half', '2'].includes(status)) {
+        return 'live';
+    }
+    if (hasLiveScoreEvidence(raw)) {
+        return 'live';
+    }
+    if (startsAt) {
+        const startMs = startsAt.getTime();
+        const now = Date.now();
+        if (['scheduled', 'upcoming', 'not_started', 'pre_match', 'prematch', 'pending', '1'].includes(status)) {
+            if (startMs <= now && now - startMs <= ASSUMED_LIVE_WINDOW_MS) return 'live';
+            if (startMs <= now - ASSUMED_LIVE_WINDOW_MS) return 'unknown';
+            return 'upcoming';
+        }
+        if (startMs > now - 15 * 60 * 1000) return 'upcoming';
+        if (startMs <= now && now - startMs <= ASSUMED_LIVE_WINDOW_MS) return 'live';
+    }
+
+    if (['scheduled', 'upcoming', 'not_started', 'pre_match', 'prematch', 'pending', '1'].includes(status)) {
+        return 'upcoming';
+    }
+
+    return 'unknown';
 }
 
 export function normalizeFixturesPayload(payload: unknown): TxlineFixture[] {
@@ -421,14 +346,25 @@ export function normalizeFixturesPayload(payload: unknown): TxlineFixture[] {
             const raw = asRecord(row);
             const fixtureId = firstString(raw, ['FixtureId', 'fixtureId', 'fixture_id', 'id', 'matchId', 'MatchId', 'eventId', 'EventId']);
             if (!fixtureId) return null;
+            const startsAt = firstDate(raw, ['StartTime', 'startsAt', 'startTime', 'start_time', 'scheduledAt']);
             return {
                 fixtureId,
                 sport: firstString(raw, ['sport', 'sportName', 'Sport', 'SportId'], 'football'),
                 homeTeam: firstString(raw, ['Participant1', 'homeTeam', 'home_team', 'home.name', 'teams.home.name']) || undefined,
                 awayTeam: firstString(raw, ['Participant2', 'awayTeam', 'away_team', 'away.name', 'teams.away.name']) || undefined,
-                startsAt: firstDate(raw, ['StartTime', 'startsAt', 'startTime', 'start_time', 'scheduledAt']),
-                status: firstString(raw, ['GameState', 'status', 'state', 'fixtureStatus'], 'unknown'),
-                raw,
+                startsAt,
+                status: normalizeFixtureStatus(raw, startsAt),
+                raw: {
+                    ...raw,
+                    marketSelections: maybeArray(raw.marketSelections).length > 0
+                        ? raw.marketSelections
+                        : ['part1', 'draw', 'part2'],
+                    marketTypes: maybeArray(raw.marketTypes).length > 0
+                        ? raw.marketTypes
+                        : ['1X2_PARTICIPANT_RESULT'],
+                    source: firstString(raw, ['source', 'Source'], 'txline'),
+                    sourceEndpoint: firstString(raw, ['sourceEndpoint', 'SourceEndpoint'], '/api/fixtures/snapshot'),
+                },
             } satisfies TxlineFixture;
         })
         .filter((item): item is TxlineFixture => Boolean(item));
@@ -515,7 +451,7 @@ export function normalizeScoresPayload(payload: unknown, fallbackFixtureId?: str
                     'Data.Score.Participant1.Total.Goals',
                     'Data.New.homeScore',
                     'Data.homeScore',
-                ]),
+                ]) ?? goalNumber(raw, 'Participant1'),
                 awayScore: firstNumber(raw, [
                     'awayScore',
                     'away_score',
@@ -528,7 +464,7 @@ export function normalizeScoresPayload(payload: unknown, fallbackFixtureId?: str
                     'Data.Score.Participant2.Total.Goals',
                     'Data.New.awayScore',
                     'Data.awayScore',
-                ]),
+                ]) ?? goalNumber(raw, 'Participant2'),
                 status: firstString(state, ['status'], 'unknown'),
                 source: 'txline',
                 sourceEndpoint: fallbackFixtureId ? `${SCORES_SNAPSHOT_ENDPOINT}/${fallbackFixtureId}` : SCORES_STREAM_ENDPOINT,
@@ -544,9 +480,6 @@ export function normalizeScoresPayload(payload: unknown, fallbackFixtureId?: str
 }
 
 export async function fetchFixturesSnapshot(): Promise<TxlineFixture[]> {
-    if (!txlineAuthConfigured() && txlineFallbackEnabled()) {
-        return fetchEspnFallbackFixturesSnapshot();
-    }
     return normalizeFixturesPayload(await fetchJson('/api/fixtures/snapshot'));
 }
 
@@ -555,9 +488,6 @@ export async function fetchOddsSnapshot(fixtureId: string): Promise<TxlineOddsUp
 }
 
 export async function fetchScoresSnapshot(fixtureId: string): Promise<TxlineScoreUpdate[]> {
-    if (!txlineAuthConfigured() && txlineFallbackEnabled()) {
-        return fetchEspnFallbackScoresSnapshot(fixtureId);
-    }
     return normalizeScoresPayload(await fetchJson(`${SCORES_SNAPSHOT_ENDPOINT}/${encodeURIComponent(fixtureId)}`), fixtureId);
 }
 
