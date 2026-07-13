@@ -1,0 +1,1065 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════
+   AIR SPORT — On The Line palette
+   ═══════════════════════════════════════════════════ */
+
+:root {
+  /* Core brand — On The Line */
+  --bg: #0d1010;
+  --bg-2: #0a0c0c;
+  --surface: #111717;
+  --surface-2: #141a1a;
+  --surface-3: #1a2121;
+  --muted: #585a5b;
+  --text: #e7e4dd;
+  --text-2: #a8a69f;
+  --text-3: #585a5b;
+  --orange: #d97a1e;
+  --gold: #d8b24c;
+  --blue: #2e6fbe;
+  --green: #55b26a;
+
+  /* Semantic aliases */
+  --line: rgba(88, 90, 91, 0.45);
+  --line-2: rgba(88, 90, 91, 0.7);
+  --accent: var(--gold);
+  --accent-soft: rgba(216, 178, 76, 0.12);
+  --accent-strong: var(--gold);
+  --live: var(--orange);
+  --live-soft: rgba(217, 122, 30, 0.14);
+  --ok: var(--green);
+  --warn: var(--gold);
+  --danger: var(--orange);
+  --home: var(--orange);
+  --away: var(--blue);
+  --draw: var(--muted);
+  --r: 2px;
+  --font-display: var(--font-instrument), "Iowan Old Style", Georgia, serif;
+  --font-body: var(--font-plex), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 70% 40% at 50% -5%, rgba(216, 178, 76, 0.04), transparent 55%),
+    linear-gradient(180deg, #0d1010 0%, #0a0c0c 100%);
+}
+
+::selection {
+  background: rgba(216, 178, 76, 0.3);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+.font-mono,
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.shell {
+  position: relative;
+  z-index: 10;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.surface {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.surface-flat {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(88, 90, 91, 0.5) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(88, 90, 91, 0.5);
+  border-radius: 99px;
+}
+
+.meta {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8a8780;
+  font-weight: 500;
+}
+
+.meta-live {
+  color: var(--orange);
+}
+.meta-accent {
+  color: var(--gold);
+}
+.meta-ok {
+  color: var(--green);
+}
+.meta-blue {
+  color: var(--blue);
+}
+
+/* Agents desk — clearer type & color hierarchy */
+.agent-desk-title {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.agent-desk-wallet {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: #9c9890;
+  word-break: break-all;
+}
+
+.agent-desk-summary {
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #b8b4ab;
+}
+
+.agent-desk-score {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: clamp(2.25rem, 4vw, 2.75rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--text);
+}
+
+.agent-desk-score-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8a8780;
+  font-weight: 500;
+}
+
+.agent-stat-card {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 0.85rem 1rem;
+  border-radius: var(--r);
+}
+
+.agent-stat-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8a8780;
+}
+
+.agent-stat-value {
+  margin-top: 0.4rem;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 1.2rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.agent-stat-value.is-gold {
+  color: var(--gold);
+}
+.agent-stat-value.is-muted {
+  color: #7a766e;
+}
+.agent-stat-value.is-ok {
+  color: var(--green);
+}
+
+.agent-list-wallet {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.agent-list-meta {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.62rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: #8a8780;
+  text-transform: none;
+}
+
+.agent-list-score {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-list-score-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6e6b64;
+}
+
+.fx-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 0.75rem;
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+  min-height: 44px;
+}
+.fx-row:hover {
+  background: rgba(231, 228, 221, 0.03);
+}
+.fx-row.is-active {
+  background: var(--accent-soft);
+  border-left-color: var(--gold);
+}
+.fx-row:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: -1px;
+}
+
+.score-xl {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(2.75rem, 6vw, 3.75rem);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.skel {
+  background: linear-gradient(
+    90deg,
+    rgba(231, 228, 221, 0.04) 0%,
+    rgba(231, 228, 221, 0.08) 50%,
+    rgba(231, 228, 221, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: skel 1.4s ease-in-out infinite;
+  border-radius: 2px;
+}
+
+@keyframes skel {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel {
+    animation: none;
+    background: rgba(231, 228, 221, 0.06);
+  }
+  .live-pulse {
+    animation: none;
+  }
+}
+
+.live-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--orange);
+  box-shadow: 0 0 0 0 rgba(217, 122, 30, 0.4);
+  animation: pulse 1.8s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(217, 122, 30, 0.35);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.chart-shell {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+@keyframes adi-odds-flow {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 1000;
+  }
+  12%,
+  76% {
+    opacity: 0.28;
+  }
+  100% {
+    opacity: 0;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes adi-odds-endpoint-pulse {
+  0%,
+  100% {
+    opacity: 0.08;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.18;
+    transform: scale(1.1);
+  }
+}
+
+.adi-odds-flow-line {
+  animation: adi-odds-flow 2.7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+.adi-odds-endpoint-pulse {
+  animation: adi-odds-endpoint-pulse 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adi-odds-flow-line,
+  .adi-odds-endpoint-pulse {
+    animation: none;
+  }
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 36px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.btn-ghost:hover {
+  color: var(--text);
+  border-color: var(--line-2);
+  background: rgba(231, 228, 221, 0.03);
+}
+.btn-ghost:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.tab {
+  min-height: 32px;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.tab:hover {
+  color: var(--text-2);
+}
+.tab.is-on {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+.tab:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Primary header nav — centered in header */
+.site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+.site-nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  min-width: 4.5rem;
+  padding: 0.4rem 1rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.site-nav-link:hover {
+  color: var(--text);
+}
+.site-nav-link.is-on {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+.site-nav-link:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (min-width: 640px) {
+  .site-nav {
+    gap: 0.5rem;
+  }
+  .site-nav-link {
+    min-width: 5.25rem;
+    padding: 0.45rem 1.25rem;
+    letter-spacing: 0.14em;
+  }
+}
+
+/* ─── Goal flash: bicycle kick + square goal + foot-on-ball contact ─── */
+.goal-flash-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.goal-flash-dim {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 70% 60% at 50% 48%,
+    rgba(13, 16, 16, 0.1),
+    rgba(13, 16, 16, 0.8)
+  );
+  animation: goal-dim-in 0.25s ease-out both;
+}
+
+.goal-flash-turf {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 38%;
+  background:
+    linear-gradient(180deg, transparent, rgba(20, 70, 38, 0.45)),
+    repeating-linear-gradient(
+      90deg,
+      rgba(34, 100, 52, 0.35) 0 32px,
+      rgba(22, 72, 38, 0.3) 32px 64px
+    );
+}
+
+.goal-flash-stage {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+
+/* Square rectangular goal (front view — like real goal frame) */
+.goal-box {
+  position: absolute;
+  right: 8%;
+  top: 16%;
+  width: min(28%, 200px);
+  height: 58%;
+  z-index: 2;
+  animation: goal-net-hit 0.32s 0.78s ease-out both;
+}
+
+.goal-box-net {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  bottom: 4px;
+  background:
+    linear-gradient(rgba(200, 200, 200, 0.22) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200, 200, 200, 0.22) 1px, transparent 1px),
+    rgba(30, 36, 36, 0.5);
+  background-size: 12px 12px, 12px 12px, auto;
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.35);
+}
+
+.goal-box-post {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  background: linear-gradient(90deg, #9a9a9a, #e8e8e8 35%, #b0b0b0 70%, #888);
+  border-radius: 2px;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+  z-index: 3;
+}
+.goal-box-post-l {
+  left: 0;
+}
+.goal-box-post-r {
+  right: 0;
+}
+
+.goal-box-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 7px;
+  background: linear-gradient(180deg, #eee, #a8a8a8 60%, #777);
+  border-radius: 2px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  z-index: 4;
+}
+
+.goal-box-base {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: 0;
+  height: 4px;
+  background: rgba(180, 180, 180, 0.45);
+  border-radius: 1px;
+}
+
+/*
+  Contact geometry (synced):
+  At t≈0.55s body is inverted with striking boot near stage (42%, 40%).
+  Ball sits there until that frame, then leaves for the goal.
+*/
+.goal-flash-player {
+  position: absolute;
+  left: 18%;
+  bottom: 16%;
+  width: 56px;
+  height: 100px;
+  transform-origin: 50% 50%;
+  z-index: 5;
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.45));
+  animation: bicycle-body 0.72s cubic-bezier(0.33, 0.55, 0.25, 1) both;
+}
+
+.gfp-head {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 50%;
+  background: #e8c4a8;
+  z-index: 2;
+}
+
+.gfp-hair {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  width: 20px;
+  height: 11px;
+  margin-left: -10px;
+  border-radius: 10px 10px 3px 3px;
+  background: #2a2218;
+  z-index: 3;
+}
+
+.gfp-body {
+  position: absolute;
+  left: 50%;
+  top: 17px;
+  width: 24px;
+  height: 30px;
+  margin-left: -12px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #fff, #ececec);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.gfp-num {
+  display: block;
+  margin-top: 8px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono), monospace;
+  color: #222;
+}
+
+.gfp-shorts {
+  position: absolute;
+  left: 50%;
+  top: 45px;
+  width: 22px;
+  height: 14px;
+  margin-left: -11px;
+  background: #fff;
+  border-radius: 0 0 3px 3px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.gfp-leg {
+  position: absolute;
+  width: 10px;
+  height: 32px;
+  bottom: 2px;
+  background: linear-gradient(180deg, #f5f5f5 0 48%, #e8c4a8 48%);
+  border-radius: 3px;
+  transform-origin: 50% 0%;
+}
+
+.gfp-leg-l {
+  left: 11px;
+  animation: bicycle-leg-support 0.72s cubic-bezier(0.33, 0.55, 0.25, 1) both;
+}
+
+.gfp-leg-r {
+  right: 9px;
+  z-index: 3;
+  animation: bicycle-leg-strike 0.72s cubic-bezier(0.33, 0.55, 0.25, 1) both;
+}
+
+.gfp-boot {
+  position: absolute;
+  bottom: -4px;
+  left: -4px;
+  width: 15px;
+  height: 8px;
+  border-radius: 2px 8px 2px 2px;
+  background: #0a0a0a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+/* Flash boot at contact so impact is readable */
+.gfp-boot-strike {
+  animation: boot-impact 0.72s both;
+}
+
+.gfp-arm {
+  position: absolute;
+  top: 19px;
+  width: 7px;
+  height: 24px;
+  background: #fff;
+  border-radius: 3px;
+  transform-origin: top center;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+.gfp-arm-l {
+  left: 2px;
+  animation: bicycle-arm-l 0.72s ease-out both;
+}
+.gfp-arm-r {
+  right: 2px;
+  animation: bicycle-arm-r 0.72s ease-out both;
+}
+
+/* Ball: stay at contact point until foot arrives, THEN leave */
+.goal-flash-ball {
+  position: absolute;
+  /* contact zone — under inverted player boot at ~0.55s */
+  left: 36%;
+  bottom: 36%;
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 28%, #fff 0 18%, transparent 19%),
+    conic-gradient(from 30deg, #111 0 18%, #f2f2f2 18% 36%, #111 36% 55%, #f2f2f2 55% 72%, #111 72%);
+  box-shadow:
+    0 3px 12px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.25);
+  z-index: 6;
+  animation: ball-with-contact 0.9s cubic-bezier(0.18, 0.7, 0.2, 1) both;
+}
+
+.goal-flash-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  opacity: 0;
+  animation: goal-banner-pop 0.65s 0.88s cubic-bezier(0.2, 1.15, 0.3, 1) both;
+}
+
+.goal-flash-word {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(1.85rem, 5.5vw, 2.9rem);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: #fff;
+  text-shadow:
+    0 0 36px rgba(216, 178, 76, 0.8),
+    0 3px 0 rgba(0, 0, 0, 0.4);
+}
+
+.goal-flash-detail {
+  margin-top: 0.35rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+@keyframes goal-dim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/*
+  Bicycle body — peak inverted at 52–58% (contact window).
+  Position lands so hips/boot zone ≈ 36% left, 36% bottom of stage.
+*/
+@keyframes bicycle-body {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  14% {
+    transform: translate(20px, 0) rotate(-8deg);
+  }
+  24% {
+    transform: translate(32px, 8px) rotate(-18deg) scale(0.95, 0.9);
+  }
+  36% {
+    transform: translate(48px, -40px) rotate(-70deg);
+  }
+  52% {
+    /* CONTACT — fully inverted, boot at ball */
+    transform: translate(72px, -72px) rotate(-155deg) scale(1.05);
+  }
+  58% {
+    transform: translate(76px, -68px) rotate(-148deg) scale(1.05);
+  }
+  72% {
+    transform: translate(88px, -32px) rotate(-60deg);
+  }
+  88% {
+    transform: translate(100px, 0) rotate(-12deg);
+  }
+  100% {
+    transform: translate(108px, 6px) rotate(6deg);
+  }
+}
+
+/* Strike leg fully extended at contact (52%) */
+@keyframes bicycle-leg-strike {
+  0%,
+  22% {
+    transform: rotate(8deg);
+  }
+  34% {
+    transform: rotate(-40deg);
+  }
+  46% {
+    transform: rotate(40deg);
+  }
+  52% {
+    /* boot extended into ball */
+    transform: rotate(105deg);
+  }
+  60% {
+    transform: rotate(118deg);
+  }
+  80% {
+    transform: rotate(55deg);
+  }
+  100% {
+    transform: rotate(20deg);
+  }
+}
+
+@keyframes bicycle-leg-support {
+  0%,
+  24% {
+    transform: rotate(-6deg);
+  }
+  40% {
+    transform: rotate(45deg);
+  }
+  52% {
+    transform: rotate(-65deg);
+  }
+  70% {
+    transform: rotate(-25deg);
+  }
+  100% {
+    transform: rotate(8deg);
+  }
+}
+
+@keyframes bicycle-arm-l {
+  0% {
+    transform: rotate(12deg);
+  }
+  40% {
+    transform: rotate(-70deg);
+  }
+  55% {
+    transform: rotate(-100deg);
+  }
+  100% {
+    transform: rotate(-25deg);
+  }
+}
+
+@keyframes bicycle-arm-r {
+  0% {
+    transform: rotate(-10deg);
+  }
+  40% {
+    transform: rotate(65deg);
+  }
+  55% {
+    transform: rotate(95deg);
+  }
+  100% {
+    transform: rotate(18deg);
+  }
+}
+
+@keyframes boot-impact {
+  0%,
+  48% {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+  }
+  52%,
+  58% {
+    box-shadow:
+      0 0 0 3px rgba(216, 178, 76, 0.65),
+      0 0 16px rgba(255, 255, 255, 0.5);
+  }
+  100% {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+  }
+}
+
+/*
+  Ball timeline (same 1.25s + travel):
+  0–52%: wait at contact point (foot arrives)
+  52%: impact pulse
+  52–100%: travel into square goal mouth
+*/
+@keyframes ball-with-contact {
+  0% {
+    left: 22%;
+    bottom: 18%;
+    transform: scale(1) rotate(0deg);
+  }
+  20% {
+    /* float up for bicycle meet */
+    left: 34%;
+    bottom: 34%;
+    transform: scale(1.05) rotate(40deg);
+  }
+  48% {
+    /* HOLD at contact — foot meets here */
+    left: 36%;
+    bottom: 36%;
+    transform: scale(1.08) rotate(70deg);
+  }
+  52% {
+    /* impact — squash */
+    left: 36%;
+    bottom: 36%;
+    transform: scale(1.25, 0.85) rotate(90deg);
+  }
+  56% {
+    /* launch off boot */
+    left: 42%;
+    bottom: 42%;
+    transform: scale(1.1) rotate(120deg);
+  }
+  72% {
+    left: 62%;
+    bottom: 40%;
+    transform: scale(0.95) rotate(280deg);
+  }
+  88% {
+    left: 78%;
+    bottom: 34%;
+    transform: scale(0.8) rotate(460deg);
+  }
+  100% {
+    /* center of square goal net */
+    left: 82%;
+    bottom: 32%;
+    transform: scale(0.7) rotate(580deg);
+  }
+}
+
+@keyframes goal-net-hit {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.03) translateX(-2px);
+  }
+  60% {
+    transform: scale(0.99) translateX(1px);
+  }
+}
+
+@keyframes goal-banner-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.7) translateY(10px);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.06) translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .goal-flash-player,
+  .gfp-leg-r,
+  .gfp-leg-l,
+  .gfp-arm-l,
+  .gfp-arm-r,
+  .gfp-boot-strike,
+  .goal-flash-ball,
+  .goal-box,
+  .goal-flash-banner,
+  .goal-flash-dim {
+    animation-duration: 0.01ms !important;
+  }
+  .goal-flash-banner {
+    opacity: 1;
+  }
+}
+
+/* 3-column header: logo | centered nav | actions */
+.site-header-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 1680px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0.55rem 1rem;
+}
+@media (min-width: 768px) {
+  .site-header-bar {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+.site-header-start {
+  justify-self: start;
+  min-width: 0;
+}
+.site-header-center {
+  justify-self: center;
+}
+.site-header-end {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
